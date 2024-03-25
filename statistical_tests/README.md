@@ -17,7 +17,7 @@ generally anticipated that the GD will be smaller for regions with greater simil
 the embedding training phase, the model is not provided with genomic location information. Hence, any observed correlation between genomic 
 distance and embedding distance reflects the biological insights acquired through the training process.
 
-##Neighborhood Preserving Test (NPT) and Reconstruction Test (RT)
+## Neighborhood Preserving Test (NPT) and Reconstruction Test (RT)
 These assessments necessitate employing binary representations of genome data alongside embedding data. In the RT evaluation, the comparison 
 between the output and observed data gauges the alignment of embeddings with the binary dataset. Conversely, the NPT examines the extent to 
 which regions that are proximate in genome space maintain their adjacency in the embedding space. However, prior studies have demonstrated that 
