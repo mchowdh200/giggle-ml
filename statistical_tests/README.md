@@ -52,5 +52,6 @@ Install numpy, scipy, and scikit-learn.
 
 ​python calculate_SNPR.py -k 3 -b genome_data.txt -q embedding_data.txt
 
-**-f**: Optionally, you can provide the number of folds for K-fold cross-validation for RT \\
+**-f**: Optionally, you can provide the number of folds for K-fold cross-validation for RT 
+
 python RT.py -b binary_embeddings.txt -q query_embeddings.txt -f 5
