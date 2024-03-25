@@ -19,7 +19,7 @@ binary embeddings are ineffective in capturing intricate biological nuances. Con
 evaluating embedding efficiency appears counterproductive.
 
 
-# Libraries needed
+# Libraries
 Install numpy, scipy, and scikit-learn.
 
 # Usage
