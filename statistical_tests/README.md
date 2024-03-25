@@ -31,17 +31,23 @@ Install numpy, scipy, and scikit-learn.
 # Usage
 ## CTT
 **--num_iterations**: Number of times to run each comparison.
+
 ​python path/to/cluster_tendency_test.py path/to/data_embeddings.txt --num_iterations 10
 
 ## GDST
 **--num_regions**: to control the number of regions to use from the dataset. 
+
 **--embedding_files**: genome embeddings. 
+
 **--regions_file**: Interval file with chrom, start and end coordinates.
+
 ​python path/to/region_distance_analysis.py --num_regions 100 --embeddings_file path/to/embeddings.txt --regions_file path/to/regions.txt
 
 ## NPT and RT
 **-k**: number of nearest neighbors. 
+
 **-b**: binary representation. 
+
 **-q**: genome embeddings.
 
 ​python calculate_SNPR.py -k 3 -b genome_data.txt -q embedding_data.txt
