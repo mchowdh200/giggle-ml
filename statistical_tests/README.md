@@ -3,19 +3,13 @@
 ## Cluster Tendency Test (CTT)
 This test investigates the spatial distribution within a dataset comprising embeddings, treating these embeddings as discrete points. 
 The CTT aims to ascertain the distances between pairs of points sampled from the dataset. If DT, the summation of all the distances,
-is lesser than DR, the summation of all the distances between a point and its nearest neighbor, the CTT will be large and indicate clustering 
+is lesser than DR, the summation of all the distances between a point and its nearest neighbor, the CTT will be large indicating clustering 
 tendencies. However, it remains ambiguous whether this test offers insights specifically relevant to the dataset under consideration. Even in 
 the case of a randomly generated dataset, discernible clustering tendencies may emerge. The utility of the CTT may be enhanced by incorporating 
 a priori knowledge regarding the expected clustering patterns within the genome, providing a meaningful point of comparison for analysis.
 
 ## Genome Distance Scaling Test (GDST)
-The Genomic Distance Similarity Test (GDST) computes and contrasts the genomic distance and embedding distance between two specific regions. 
-Given that genomic proximity often corresponds to similarity in biological function, the genomic distance (GD) can serve as a somewhat imprecise
-indicator of shared biological functionalities, on average. It is acknowledged that functional similarities may exist between regions despite 
-genomic separation, and such regions may also exhibit proximity in embedding space due to their biological affinity. Nevertheless, it is 
-generally anticipated that the GD will be smaller for regions with greater similarity compared to randomly selected regions. Notably, during
-the embedding training phase, the model is not provided with genomic location information. Hence, any observed correlation between genomic 
-distance and embedding distance reflects the biological insights acquired through the training process.
+The GDST computes and contrasts the genomic distance and embedding distance between two specific regions. Given that genomic proximity often corresponds to similarity in biological function, the genomic distance (GD) can serve as a somewhat imprecise indicator of shared biological functionalities, on average. It is acknowledged that functional similarities may exist between regions despite genomic separation, and such regions may also exhibit proximity in embedding space due to their biological affinity. Nevertheless, it is generally anticipated that the GD will be smaller for regions with greater similarity compared to randomly selected regions. Notably, during the embedding training phase, the model is not provided with genomic location information. Hence, any observed correlation between genomic distance and embedding distance reflects the biological insights acquired through the training process.
 
 ## Neighborhood Preserving Test (NPT) and Reconstruction Test (RT)
 These assessments necessitate employing binary representations of genome data alongside embedding data. In the RT evaluation, the comparison 
