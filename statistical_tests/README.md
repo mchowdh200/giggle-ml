@@ -1,4 +1,4 @@
-**Tests Explanation**
+#Tests Explanation
 
 ##Cluster Tendency Test (CTT)
 This test investigates the spatial distribution within a dataset comprising embeddings, treating these embeddings as discrete points. 
@@ -34,17 +34,17 @@ Install numpy, scipy, and scikit-learn.
 ​python path/to/cluster_tendency_test.py path/to/data_embeddings.txt --num_iterations 10
 
 ##GDST
-**--num_regions**: to control the number of regions to use from the dataset.
-**--embedding_files**: genome embeddings. 
-**--regions_file**: Interval file with chrom, start and end coordinates.
+**--num_regions**: to control the number of regions to use from the dataset. \\
+**--embedding_files**: genome embeddings. \\
+**--regions_file**: Interval file with chrom, start and end coordinates.\\
 ​python path/to/region_distance_analysis.py --num_regions 100 --embeddings_file path/to/embeddings.txt --regions_file path/to/regions.txt
 
 ##NPT and RT
-**-k**: number of nearest neighbors
-**-b**: binary representation
-**-q**: genome embeddings
+**-k**: number of nearest neighbors. \\
+**-b**: binary representation. \\
+**-q**: genome embeddings. \\
 
 ​python calculate_SNPR.py -k 3 -b genome_data.txt -q embedding_data.txt
 
-**-f**: Optionally, you can provide the number of folds for K-fold cross-validation for RT
+**-f**: Optionally, you can provide the number of folds for K-fold cross-validation for RT \\
 python RT.py -b binary_embeddings.txt -q query_embeddings.txt -f 5
