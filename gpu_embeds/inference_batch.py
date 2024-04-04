@@ -6,6 +6,7 @@ you can just loop thru a dataloader like this.
 """
 
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 import json
 import os
@@ -194,8 +195,7 @@ def prepareDataset():
     rc_aug = False  # reverse complement augmentation
     add_eos = False  # add end of sentence token
 
-    # TODO: This custom dataset class should be rearchitected as to not
-    # depend on parameters specific to hyena-dna.
+    # TODO: The tokenizer should be seperated from this dataset object
     return GenomicBenchmarkDataset(
         max_length = max_length,
         use_padding = use_padding,
@@ -211,6 +211,7 @@ def infer_loop(model, device, data_loader):
     """inference loop."""
     embeddings = [None]*len(data_loader)
 
+    # TODO: This inference loop hasn't been tested on multi gpus
     with torch.inference_mode():
         for i, (data, target) in enumerate(data_loader):
             data, target = data.to(device), target.to(device)
@@ -221,9 +222,10 @@ def infer_loop(model, device, data_loader):
 
 def infer():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print("Using device:", device)
+    print("We're using", torch.cuda.device_count(), "GPUs!")
 
     model = prepareModel(device)
+    model = nn.DataParallel(model)
     dataset = prepareDataset()
 
     batch_size = 4
