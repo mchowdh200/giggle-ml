@@ -13,63 +13,70 @@ fastaContent = list()
 nameMap = dict()
 
 for entry in SeqIO.parse(open(fastaPath), 'fasta'):
-    name = entry.name
-    seq = None
+    name = entry.id
+    seq = entry.seq
 
     try:
         # The old way, removed in Biopython 1.73
-        seq = entry.tostring()
+        seq = seq.tostring()
     except AttributeError:
         # The new way, needs Biopython 1.45 or later.
         # Don't use this on Biopython 1.44 or older as truncates
-        seq = str(entry)
+        seq = str(seq)
 
     nameMap[name] = len(fastaContent)
+    seq = seq.upper() # aCgT -> ACGT
     fastaContent.append(seq)
-
-chrmLen = len(max(fastaContent))
-fastaTokenized = [None]*len(fastaContent)
-tokenizer = CharacterTokenizer(
-    characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
-    model_max_length=chrmLen + 2,  # to account for special tokens, like EOS
-    add_special_tokens=False,  # we handle special tokens elsewhere
-    padding_side='left', # since HyenaDNA is causal, we pad on the left
-)
-
-for i, seq in enumerate(fastaContent):
-    # defaults from hyenadna
-    seq = tokenizer(seq,
-        add_special_tokens=False,
-        padding="max_length",
-        max_length=chrmLen,
-        truncation=True,
-    )
-
-    seq = seq["input_ids"]  # get input_ids
-    seq = torch.LongTensor(seq)
-    fastaTokenized[i] = seq
-
-fastaTensor = torch.stack(fastaTokenized)
-fastaTensor.to(device)
 
 bedContent = []
 with open(bedPath) as f:
     for line in f:
-        entry = line.split()[:3]
-        name = entry[0]
+        name, start, stop = line.split()[:3]
+        start = int(start)
+        stop = int(stop)
 
         if name not in nameMap:
-            raise f"Chromosome name, \"{name}\", not recognized."
+            raise ValueError(f"Chromosome name, \"{name}\", not recognized.")
 
-        tensor = torch.tensor(entry, dtype=torch.int)
-        bedContent.append(entry)
+        chrm = nameMap[name]
+        seq = fastaContent[chrm][start-1 : stop]
+        bedContent.append(seq)
 
-bedTensor = torch.tensor(bedContent)
+max_length = len(max(bedContent))
+max_length = 500
+bedTokenized = []
+tokenizer = CharacterTokenizer(
+    characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
+    model_max_length=max_length + 2,  # to account for special tokens, like EOS
+    add_special_tokens=False,  # we handle special tokens elsewhere
+    padding_side='left', # since HyenaDNA is causal, we pad on the left
+)
+
+bedContentFiltered = list(filter(lambda x: x, bedContent))
+if len(bedContentFiltered) != len(bedContent):
+    print(str(len(bedContent) - len(bedContentFiltered)) +
+        " intervals in BED file did not map to a sequence." +
+        " Discarding bad entries.\n" + 
+        str(len(bedContentFiltered)) +
+        " entries mapped successfully. ")
+
+for seq in bedContentFiltered:
+    tok = tokenizer(seq,
+                    add_special_tokens=False,
+                    padding="max_length",
+                    max_length=max_length,
+                    truncation=True
+    )
+
+    tok = tok['input_ids']
+    tok = torch.LongTensor(tok).unsqueeze(0)  # unsqueeze for batch dim
+    bedTokenized.append(tok)
 
 class BedDataset(torch.utils.data.Dataset):
     def __len__(self):
-        return len(bedTensor)
+        return len(bedTokenized)
 
     def __getitem__(self, idx):
-        return sbedTensor[idx]
+        return bedTokenized[idx]
 
+infer(BedDataset())

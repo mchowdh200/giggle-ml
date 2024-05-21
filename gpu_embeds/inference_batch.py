@@ -180,8 +180,9 @@ def infer_loop(model, device, data_loader):
 
     # TODO: This inference loop hasn't been tested on multi gpus
     with torch.inference_mode():
-        for i, (data, target) in enumerate(data_loader):
-            data, target = data.to(device), target.to(device)
+        for i, entry in enumerate(data_loader):
+            data, *_ = entry
+            data = data.to(device)
             output = model(data)
             embeddings[i] = output
             print(f"Embeddings {i}, shape: {output.shape}")

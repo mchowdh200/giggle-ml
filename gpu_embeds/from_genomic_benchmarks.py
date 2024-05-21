@@ -1,4 +1,6 @@
 from inference_batch import infer
+from standalone_hyenadna import CharacterTokenizer
+from genomic_benchmark_dataset import GenomicBenchmarkDataset
 
 
 def prepareDataset():
