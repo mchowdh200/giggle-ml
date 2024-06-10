@@ -68,6 +68,7 @@ for seq in bedContentFiltered:
                     truncation=True
     )
 
+    # TODO: print dict keys, is there a mask? --> embedding aggregation
     tok = tok['input_ids']
     tok = torch.LongTensor(tok).unsqueeze(0)  # unsqueeze for batch dim
     bedTokenized.append(tok)

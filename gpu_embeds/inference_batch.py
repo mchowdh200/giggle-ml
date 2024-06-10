@@ -13,6 +13,7 @@ import os
 import subprocess
 import transformers
 from transformers import PreTrainedModel, AutoModelForCausalLM, PretrainedConfig
+import numpy as np
 
 from standalone_hyenadna import HyenaDNAModel
 from standalone_hyenadna import CharacterTokenizer
@@ -183,7 +184,8 @@ def infer_loop(model, device, data_loader):
         for i, entry in enumerate(data_loader):
             data, *_ = entry
             data = data.to(device)
-            output = model(data)
+            output = model(data).numpy()
+            output = np.mean(output, axis=1)
             embeddings[i] = output
             print(f"Embeddings {i}, shape: {output.shape}")
 
