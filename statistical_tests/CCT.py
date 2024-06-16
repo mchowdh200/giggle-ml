@@ -40,16 +40,23 @@ def check_intersection(interval_set1, interval_set2, num_points=8, num_trials=1)
     return probability
 
 # Function to check cosine similarity of embeddings using Monte Carlo simulation
-def check_similarity(embeddings1, embeddings2, threshold=0.1, num_trials=10):
+def check_similarity(interval_set1, embeddings1, interval_set2, embeddings2, threshold=0.1, num_trials=10):
     intersections = 0
     for _ in range(num_trials):
-        random_embedding = embeddings1[np.random.randint(len(embeddings1))]
-        for embedding in embeddings2:
-            similarity = cosine_similarity([random_embedding], [embedding])[0][0]
-            if similarity > threshold:
-                intersections += 1
-                break
-    probability = intersections / num_trials
+        for i in range(len(interval_set1)):
+            interval1 = interval_set1[i]
+            embedding1 = embeddings1[i]
+            points_interval1 = np.random.uniform(interval1[1], interval1[2], 1)  # Adjusted to sample only 1 point
+            for j in range(len(interval_set2)):
+                interval2 = interval_set2[j]
+                embedding2 = embeddings2[j]
+                point = points_interval1[0]
+                if interval2[1] <= point <= interval2[2] and interval1[0] == interval2[0]:
+                    similarity = cosine_similarity([embedding1], [embedding2])[0][0]
+                    if similarity > threshold:
+                        intersections += 1
+                        break  # Move to the next interval1
+    probability = intersections / (num_trials * len(interval_set1) * len(interval_set2))
     return probability
 
 def main():
@@ -75,7 +82,7 @@ def main():
 
     # Run the Monte Carlo simulations
     probability_intervals = check_intersection(interval_set1, interval_set2, num_points=args.num_points, num_trials=args.num_trials)
-    probability_embeddings = check_similarity(embeddings1, embeddings2, threshold=args.threshold, num_trials=args.num_trials_embeddings)
+    probability_embeddings = check_similarity(interval_set1, embeddings1, interval_set2, embeddings2, threshold=args.threshold, num_trials=args.num_trials_embeddings)
 
     # Print the probabilities
     print("Probability of intersection (intervals):", probability_intervals)
