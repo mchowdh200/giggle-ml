@@ -18,6 +18,9 @@ which regions that are proximate in genome space maintain their adjacency in the
 binary embeddings are ineffective in capturing intricate biological nuances. Consequently, utilizing binary representations as a metric for 
 evaluating embedding efficiency appears counterproductive.
 
+## Continuous Comparison Test (CCT)
+This test uses Monte Carlo simulations to calculate the probability of intersections between genomic intervals and the similarity of embeddings (vectors) using cosine similarity. It reads interval data and embedding vectors from specified files, generates random points within the intervals to check for overlaps, and compares embeddings to see if their similarity exceeds a given threshold. The goal is to probabilistically assess two types of biological data interactions: genomic intervals and embedding vectors. Specifically, it aims to determine the likelihood of intervals from different genomic datasets overlapping on the same chromosome and assess the similarity between high-dimensional embeddings using cosine similarity. By employing Monte Carlo simulations, the code provides estimates of these probabilities based on random sampling, allowing for statistical inference about the relationships and similarities within biological datasets.
+
 
 # Libraries
 Install numpy, scipy, and scikit-learn.
@@ -49,3 +52,6 @@ Install numpy, scipy, and scikit-learn.
 **-f**: Optionally, you can provide the number of folds for K-fold cross-validation for RT 
 
 python RT.py -b path/to/binary_embeddings.txt -q path/to/query_embeddings.txt -f 5
+
+## CCT
+python script.py --interval_file1 path/to/interval_file1.bed --interval_file2 path/to/interval_file2.bed --embedding_file1 path/to/embedding_file1.txt --embedding_file2 path/to/embedding_file2.txt
