@@ -13,6 +13,7 @@ import os
 import subprocess
 import transformers
 from transformers import PreTrainedModel, AutoModelForCausalLM, PretrainedConfig
+import numpy as np
 
 from standalone_hyenadna import HyenaDNAModel
 from standalone_hyenadna import CharacterTokenizer
@@ -174,59 +175,27 @@ def prepareModel(device):
     return HyenaDNAModel(**backbone_cfg, use_head=use_head, n_classes=n_classes)
 
 
-def prepareDataset():
-    # let's fix the max_length (to reduce the padding amount, conserves memory)
-    max_length = 500
-
-    # create tokenizer
-    tokenizer = CharacterTokenizer(
-        characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
-        model_max_length=max_length + 2,  # to account for special tokens, like EOS
-        add_special_tokens=False,  # we handle special tokens elsewhere
-        padding_side='left', # since HyenaDNA is causal, we pad on the left
-    )
-
-    # Sample small dataloader w/ GenomicBenchmarks
-
-    # data settings:
-    # we need to choose the dataset and batch size to loop thru
-    dataset_name = 'human_enhancers_cohn'
-    use_padding = True
-    rc_aug = False  # reverse complement augmentation
-    add_eos = False  # add end of sentence token
-
-    # TODO: The tokenizer should be seperated from this dataset object
-    return GenomicBenchmarkDataset(
-        max_length = max_length,
-        use_padding = use_padding,
-        split = 'test',
-        tokenizer=tokenizer,
-        dataset_name=dataset_name,
-        rc_aug=rc_aug,
-        add_eos=add_eos,
-    )
-
-
 def infer_loop(model, device, data_loader):
     """inference loop."""
     embeddings = [None]*len(data_loader)
 
     # TODO: This inference loop hasn't been tested on multi gpus
     with torch.inference_mode():
-        for i, (data, target) in enumerate(data_loader):
-            data, target = data.to(device), target.to(device)
-            output = model(data)
+        for i, entry in enumerate(data_loader):
+            data, *_ = entry
+            data = data.to(device)
+            output = model(data).numpy()
+            output = np.mean(output, axis=1)
             embeddings[i] = output
             print(f"Embeddings {i}, shape: {output.shape}")
 
 
-def infer():
+def infer(dataset):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print("We're using", torch.cuda.device_count(), "GPUs!")
 
     model = prepareModel(device)
     model = nn.DataParallel(model)
-    dataset = prepareDataset()
 
     batch_size = 4
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
@@ -235,7 +204,3 @@ def infer():
     model.eval()
 
     infer_loop(model, device, data_loader)
-
-
-infer()
-
