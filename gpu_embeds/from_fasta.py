@@ -25,7 +25,7 @@ for entry in SeqIO.parse(open(fastaPath), 'fasta'):
         seq = str(seq)
 
     nameMap[name] = len(fastaContent)
-    seq = seq.upper() # aCgT -> ACGT
+    seq = seq.upper()  # aCgT -> ACGT
     fastaContent.append(seq)
 
 bedContent = []
@@ -39,7 +39,7 @@ with open(bedPath) as f:
             raise ValueError(f"Chromosome name, \"{name}\", not recognized.")
 
         chrm = nameMap[name]
-        seq = fastaContent[chrm][start-1 : stop]
+        seq = fastaContent[chrm][start-1: stop]
         bedContent.append(seq)
 
 max_length = len(max(bedContent))
@@ -49,29 +49,31 @@ tokenizer = CharacterTokenizer(
     characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
     model_max_length=max_length + 2,  # to account for special tokens, like EOS
     add_special_tokens=False,  # we handle special tokens elsewhere
-    padding_side='left', # since HyenaDNA is causal, we pad on the left
+    padding_side='left',  # since HyenaDNA is causal, we pad on the left
 )
 
 bedContentFiltered = list(filter(lambda x: x, bedContent))
 if len(bedContentFiltered) != len(bedContent):
     print(str(len(bedContent) - len(bedContentFiltered)) +
-        " intervals in BED file did not map to a sequence." +
-        " Discarding bad entries.\n" + 
-        str(len(bedContentFiltered)) +
-        " entries mapped successfully. ")
+          " intervals in BED file did not map to a sequence." +
+          " Discarding bad entries.\n" +
+          str(len(bedContentFiltered)) +
+          " entries mapped successfully. ")
 
+print('Tokenizing...')
 for seq in bedContentFiltered:
     tok = tokenizer(seq,
                     add_special_tokens=False,
                     padding="max_length",
                     max_length=max_length,
                     truncation=True
-    )
+                    )
 
     # TODO: print dict keys, is there a mask? --> embedding aggregation
     tok = tok['input_ids']
     tok = torch.LongTensor(tok).unsqueeze(0)  # unsqueeze for batch dim
     bedTokenized.append(tok)
+
 
 class BedDataset(torch.utils.data.Dataset):
     def __len__(self):
@@ -79,5 +81,6 @@ class BedDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return bedTokenized[idx]
+
 
 infer(BedDataset())
