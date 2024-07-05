@@ -5,12 +5,18 @@ import torch
 from standalone_hyenadna import CharacterTokenizer
 
 
-fastaPath = "./hg38.fa"
-bedPath = "./hg38.bed"
+fastaPath = "./data/hg38.fa"
+bedPath = "./data/hg38_trf.bed"
+outPath = "./data/embeddings.npy"
+limit = 14000  # or None
 
 #  chrm id --> SeqIO.SeqRecord object
 fastaContent = list()
 nameMap = dict()
+
+print("Parsing inputs...")
+if limit is not None:
+    print(f"Limiting to {limit} sequences.")
 
 for entry in SeqIO.parse(open(fastaPath), 'fasta'):
     name = entry.id
@@ -31,6 +37,10 @@ for entry in SeqIO.parse(open(fastaPath), 'fasta'):
 bedContent = []
 with open(bedPath) as f:
     for line in f:
+        if limit is not None and limit == 0:
+            break
+        limit -= 1
+
         name, start, stop = line.split()[:3]
         start = int(start)
         stop = int(stop)
@@ -76,6 +86,10 @@ for seq in bedContentFiltered:
 
 
 class BedDataset(torch.utils.data.Dataset):
+    # def __init__(self)
+    #     self.length = limit if limit else len(bedTokenized)
+    #     self.length = min(self.length, len(bedTokenized))
+
     def __len__(self):
         return len(bedTokenized)
 
@@ -83,4 +97,5 @@ class BedDataset(torch.utils.data.Dataset):
         return bedTokenized[idx]
 
 
-infer(BedDataset())
+dataset = BedDataset()
+infer(dataset, outPath)

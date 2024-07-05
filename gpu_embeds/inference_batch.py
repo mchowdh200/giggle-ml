@@ -186,35 +186,36 @@ def prepareModel(device):
     return HyenaDNAModel(**backbone_cfg, use_head=use_head, n_classes=n_classes)
 
 
-def infer_loop(model, device, data_loader):
+# TODO: This inference loop hasn't been tested on multi gpus
+def infer_loop(model, device, dataLoader, outFile):
     """inference loop."""
-    embeddings = [None]*len(data_loader)
+    embeddings = [None]*len(dataLoader)
 
-    # TODO: This inference loop hasn't been tested on multi gpus
     with torch.inference_mode():
-        for i, entry in enumerate(data_loader):
+        for i, entry in enumerate(dataLoader):
             data, *_ = entry
             data = data.to(device)
             output = model(data).numpy()
             output = np.mean(output, axis=1)
             output = output.squeeze()
             embeddings[i] = output
-            print(f"Embeddings {i}, shape: {output.shape}")
+            print(f"Embedding Batch {i}, shape: {output.shape}")
 
-    np.save("embeddings.npy", np.array(embeddings))
+    np.save(outFile, np.array(embeddings))
 
 
-def infer(dataset):
+def infer(dataset, outFile):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print("We're using", torch.cuda.device_count(), "GPUs!")
 
     model = prepareModel(device)
     model = nn.DataParallel(model)
 
-    batch_size = 4
+    # TODO: The size of the embeddings is 500x256 regardless of batch size??
+    batch_size = 1
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     model.to(device)
     model.eval()
 
-    infer_loop(model, device, data_loader)
+    infer_loop(model, device, data_loader, outFile)
