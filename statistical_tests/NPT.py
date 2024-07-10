@@ -1,9 +1,8 @@
-#Neighborhood Preserving Test
-
 import numpy as np
 from sklearn.metrics.pairwise import cosine_distances
 from sklearn.neighbors import NearestNeighbors
 import argparse
+from joblib import Parallel, delayed
 
 def genome_distance(r, r_tilde, high_number=1e9):
     c, s, e = r
@@ -19,14 +18,14 @@ def genome_distance(r, r_tilde, high_number=1e9):
 def prepare_bed_data(regions):
     return np.array([[chromosome, int(start), int(end)] for chromosome, start, end in regions])
 
-def calculate_qNPR(B, Q, K, high_number=1e9):
+def calculate_qNPR(B, Q, K, high_number=1e9, n_jobs=1):
     Q = np.array(Q)
     overlaps = []
 
     # Create a NearestNeighbors object for embedding space using cosine distance
-    nbrs_embedding = NearestNeighbors(n_neighbors=K, metric='cosine').fit(Q)
+    nbrs_embedding = NearestNeighbors(n_neighbors=K, metric='cosine', n_jobs=n_jobs).fit(Q)
 
-    for i in range(len(Q)):
+    def calculate_overlap(i):
         # Find K-nearest neighbors in genome space
         distances_genome = []
         for j in range(len(B)):
@@ -35,12 +34,14 @@ def calculate_qNPR(B, Q, K, high_number=1e9):
         distances_genome.sort(key=lambda x: x[0])
         indices_genome = [idx for _, idx in distances_genome[:K]]
 
-        # Find K-nearest neighbors in embedding space
+        # Find K-nearest neighbors in embedding space using cosine distance
         distances_embedding, indices_embedding = nbrs_embedding.kneighbors([Q[i]])
 
         # Calculate overlap ratio
         overlap = len(set(indices_genome).intersection(set(indices_embedding[0]))) / K
-        overlaps.append(overlap)
+        return overlap
+
+    overlaps = Parallel(n_jobs=n_jobs)(delayed(calculate_overlap)(i) for i in range(len(Q)))
 
     qNPR = np.mean(overlaps)
     return qNPR
@@ -60,12 +61,14 @@ def main():
     parser.add_argument('-k', type=int, required=True, help='Number of nearest neighbors')
     parser.add_argument('-b', type=str, required=True, help='Path to BED file')
     parser.add_argument('-q', type=str, required=True, help='Path to embedding file')
+    parser.add_argument('-n', type=int, default=1, help='Number of parallel jobs')
 
     args = parser.parse_args()
 
     K = args.k
     bed_file = args.b
     query_file = args.q
+    n_jobs = args.n
 
     regions = []
     with open(bed_file) as f:
@@ -80,9 +83,8 @@ def main():
     # Ensure the number of regions and embeddings match
     region_pairs, embedding_pairs = create_pairs(regions, Q)
 
-    qNPR = calculate_qNPR(B, Q, K)
+    qNPR = calculate_qNPR(B, Q, K, n_jobs=n_jobs)
     print(f"qNPR: {qNPR}")
 
 if __name__ == "__main__":
     main()
-
