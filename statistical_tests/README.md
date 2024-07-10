@@ -23,7 +23,7 @@ This test uses Monte Carlo simulations to calculate the probability of intersect
 
 
 # Libraries
-Install numpy, scipy, and scikit-learn.
+Install numpy, scipy, joblib, and scikit-learn.
 
 # Usage
 ## CTT
@@ -47,7 +47,9 @@ Install numpy, scipy, and scikit-learn.
 
 **-q**: genome embeddings.
 
-​python calculate_SNPR.py -k 3 -b path/to/genome_data.txt -q path/to/embedding_data.txt
+**-n**: Number of parallel jobs.
+
+​python NPT.py -k 3 -b path/to/genome_data.txt -q path/to/embedding_data.txt -n 2
 
 **-f**: Optionally, you can provide the number of folds for K-fold cross-validation for RT 
 
