@@ -56,4 +56,4 @@ Install numpy, scipy, joblib, and scikit-learn.
 python RT.py -b path/to/binary_embeddings.txt -q path/to/query_embeddings.txt -f 5
 
 ## CCT
-python script.py --interval_file path/to/interval_file.bed --embedding_file1 path/to/embedding_file.txt 
+python script.py --interval_file path/to/interval_file.bed --embedding_file path/to/embedding_file.txt 
