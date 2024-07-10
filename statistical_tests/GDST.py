@@ -157,7 +157,7 @@ def main(embeddings_file, regions_file, num_regions=100):
     gdst_score = calculate_gdst_score(ed_values, gd_values)
     print("GDST score:", gdst_score)
 
-# Example usage:
+# usage:
 if __name__ == "__main__":
     embeddings_file = 'path_to_embeddings.npy'
     regions_file = 'path_to_regions.txt'
