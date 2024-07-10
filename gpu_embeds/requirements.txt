@@ -1,6 +1,8 @@
-einops
-torchvision
-transformers==4.26.1
-genomic-benchmarks
 OmegaConf
-torch
+
+einops==0.8.0
+torch==2.3.0
+torchvision==0.18.0
+transformers==4.26.1
+genomic_benchmarks==0.0.9
+arl==1.9.4
