@@ -1,7 +1,6 @@
 import numpy as np
 from sklearn.metrics.pairwise import cosine_distances
 from sklearn.neighbors import NearestNeighbors
-import argparse
 from joblib import Parallel, delayed
 
 def genome_distance(r, r_tilde, high_number=1e9):
@@ -56,20 +55,7 @@ def create_pairs(regions, embeddings):
 
     return region_pairs, embedding_pairs
 
-def main():
-    parser = argparse.ArgumentParser(description='Neighborhood Preserving Test')
-    parser.add_argument('-k', type=int, required=True, help='Number of nearest neighbors')
-    parser.add_argument('-b', type=str, required=True, help='Path to BED file')
-    parser.add_argument('-q', type=str, required=True, help='Path to embedding file')
-    parser.add_argument('-n', type=int, default=1, help='Number of parallel jobs')
-
-    args = parser.parse_args()
-
-    K = args.k
-    bed_file = args.b
-    query_file = args.q
-    n_jobs = args.n
-
+def main(k, bed_file, query_file, n_jobs=1):
     regions = []
     with open(bed_file) as f:
         for line in f:
@@ -83,8 +69,13 @@ def main():
     # Ensure the number of regions and embeddings match
     region_pairs, embedding_pairs = create_pairs(regions, Q)
 
-    qNPR = calculate_qNPR(B, Q, K, n_jobs=n_jobs)
+    qNPR = calculate_qNPR(B, Q, k, n_jobs=n_jobs)
     print(f"qNPR: {qNPR}")
 
+# Example usage:
 if __name__ == "__main__":
-    main()
+    k = 10  # Number of nearest neighbors
+    bed_file = 'path_to_bed_file.txt'
+    query_file = 'path_to_embeddings.npy'
+    n_jobs = 2  # Number of parallel jobs
+    main(k, bed_file, query_file, n_jobs)
