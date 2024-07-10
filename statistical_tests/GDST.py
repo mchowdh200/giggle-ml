@@ -14,7 +14,7 @@ def load_embeddings(file_path):
     numpy.ndarray: Array of region embeddings.
     """
     try:
-        embeddings = np.loadtxt(file_path)
+        embeddings = np.load(file_path)
         return embeddings
     except FileNotFoundError:
         print("Error: Embeddings file not found.")
@@ -34,7 +34,8 @@ def load_regions(file_path):
     try:
         with open(file_path) as f:
             for line in f:
-                chromosome, start, end = line.strip().split()
+                columns = line.strip().split()
+                chromosome, start, end = columns[0], int(columns[1]), int(columns[2])
                 regions.append((chromosome, int(start), int(end)))
     except FileNotFoundError:
         print("Error: Regions file not found.")
@@ -47,16 +48,21 @@ def generate_region_pairs(num_regions, regions):
     Generate pairs of random regions.
 
     Args:
+
     num_regions (int): Number of region pairs to generate.
     regions (list): List of tuples containing chromosome name, start position, and end position.
 
     Returns:
     list: List of tuples, each containing two distinct region tuples.
     """
-    np.random.shuffle(regions)
-    region_pairs = [(regions[i], regions[i+1]) for i in range(0, len(regions), 2)]
 
-    return region_pairs
+    if num_regions > len(regions) // 2:
+        num_regions = len(regions) //2
+    region_pairs = [(regions[i], regions[i+1]) for i in range(0, 2*num_regions, 2)]
+    embedding_pairs = [(i, i+1) for i in range(0, 2*num_regions, 2)]
+
+
+    return region_pairs, embedding_pairs
 
 def calculate_gd(region_pairs, high_number=1e9):
     """
@@ -82,7 +88,7 @@ def calculate_gd(region_pairs, high_number=1e9):
 
     return np.array(gd_values)
 
-def calculate_ed(region_pairs, embeddings):
+def calculate_ed(embedding_pairs, embeddings):
     """
     Calculate Euclidean Distance (ED) between pairs of region embeddings.
 
@@ -94,8 +100,9 @@ def calculate_ed(region_pairs, embeddings):
     numpy.ndarray: Array of ED values.
     """
     ed_values = []
-    for pair in region_pairs:
-        r_embedding, r_tilde_embedding = embeddings[np.random.choice(embeddings.shape[0], 2, replace=False)]
+    for pair in embedding_pairs:
+        idx1, idx2 = pair
+        r_embedding, r_tilde_embedding = embeddings[idx1], embeddings[idx2]
         ed = cosine_distances([r_embedding], [r_tilde_embedding])[0][0]
         if np.isnan(ed) or np.isinf(ed):  # Check if ED is NaN or infinity
             ed = 0  # Set invalid ED values to 0
@@ -145,23 +152,23 @@ if __name__ == "__main__":
     if args.embeddings_file:
         embeddings = load_embeddings(args.embeddings_file)
     else:
-        print("Error: Please provide the path to the embeddings file.")
+	print("Error: Please provide the path to the embeddings file.")
         exit(1)
 
     if args.regions_file:
         regions = load_regions(args.regions_file)
     else:
-        print("Error: Please provide the path to the regions file.")
+	print("Error: Please provide the path to the regions file.")
         exit(1)
 
-    region_pairs = generate_region_pairs(args.num_regions, regions)
-    print("Region pairs:", region_pairs)
+    region_pairs, embedding_pairs = generate_region_pairs(args.num_regions, regions)
+    #print("Region pairs:", region_pairs, embedding_pairs)
 
     gd_values = calculate_gd(region_pairs)
-    print("GD values:", gd_values)
+    #print("GD values:", gd_values)
 
-    ed_values = calculate_ed(region_pairs, embeddings)
-    print("ED values:", ed_values)
+    ed_values = calculate_ed(embedding_pairs, embeddings)
+    #print("ED values:", ed_values)
 
     gdst_score = calculate_gdst_score(ed_values, gd_values)
     print("GDST score:", gdst_score)
