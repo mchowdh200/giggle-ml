@@ -46,7 +46,7 @@ def main(file_path, num_iterations=10):
     except FileNotFoundError:
         print("File not found. Please provide a valid file path.")
 
-# Example usage:
+#usage:
 if __name__ == "__main__":
     file_path = 'path_to_embeddings.npy'
     num_iterations = 10
