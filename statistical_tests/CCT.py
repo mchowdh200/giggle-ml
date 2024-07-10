@@ -70,7 +70,7 @@ def main(interval_file, embedding_file, num_points=8, num_trials_intervals=1, th
     print("Probability of intersection (intervals):", probability_intervals)
     print("Probability of intersection (embeddings):", probability_embeddings)
 
-# Example usage:
+#usage:
 if __name__ == '__main__':
     interval_file = 'test.bed'
     embedding_file = 'test.npy'
