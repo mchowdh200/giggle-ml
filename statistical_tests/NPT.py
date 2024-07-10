@@ -72,7 +72,7 @@ def main(k, bed_file, query_file, n_jobs=1):
     qNPR = calculate_qNPR(B, Q, k, n_jobs=n_jobs)
     print(f"qNPR: {qNPR}")
 
-# Example usage:
+#usage:
 if __name__ == "__main__":
     k = 10  # Number of nearest neighbors
     bed_file = 'path_to_bed_file.txt'
