@@ -1,4 +1,3 @@
-import argparse
 import numpy as np
 from scipy.optimize import curve_fit
 from sklearn.metrics.pairwise import cosine_distances
@@ -142,33 +141,25 @@ def calculate_gdst_score(ed_values, gd_values):
     gdst_score = popt[0]
     return gdst_score
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Region Distance Analysis")
-    parser.add_argument("--num_regions", type=int, default=100, help="Number of region pairs to generate")
-    parser.add_argument("--embeddings_file", type=str, help="Path to the file containing region embeddings")
-    parser.add_argument("--regions_file", type=str, help="Path to the file containing region information")
-    args = parser.parse_args()
+def main(embeddings_file, regions_file, num_regions=100):
+    # Load embeddings and regions
+    embeddings = load_embeddings(embeddings_file)
+    regions = load_regions(regions_file)
 
-    if args.embeddings_file:
-        embeddings = load_embeddings(args.embeddings_file)
-    else:
-	print("Error: Please provide the path to the embeddings file.")
-        exit(1)
+    # Generate region pairs and embedding pairs
+    region_pairs, embedding_pairs = generate_region_pairs(num_regions, regions)
 
-    if args.regions_file:
-        regions = load_regions(args.regions_file)
-    else:
-	print("Error: Please provide the path to the regions file.")
-        exit(1)
-
-    region_pairs, embedding_pairs = generate_region_pairs(args.num_regions, regions)
-    #print("Region pairs:", region_pairs, embedding_pairs)
-
+    # Calculate GD and ED values
     gd_values = calculate_gd(region_pairs)
-    #print("GD values:", gd_values)
-
     ed_values = calculate_ed(embedding_pairs, embeddings)
-    #print("ED values:", ed_values)
 
+    # Calculate GDST score
     gdst_score = calculate_gdst_score(ed_values, gd_values)
     print("GDST score:", gdst_score)
+
+# Example usage:
+if __name__ == "__main__":
+    embeddings_file = 'path_to_embeddings.npy'
+    regions_file = 'path_to_regions.txt'
+    num_regions = 100
+    main(embeddings_file, regions_file, num_regions)
