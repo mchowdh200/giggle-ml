@@ -47,7 +47,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        N = np.loadtxt(args.file)  # Load data embeddings from file
+        N = np.load(args.file)  # Load data embeddings from file
         DT_sum, DR_sum = main(N, args.num_iterations)
         print("Sum of squared Euclidean distances between test points and their nearest neighbors (DT):", DT_sum)
         print("Sum of squared Euclidean distances between random points and their nearest neighbors in Q (DR):", DR_sum)
