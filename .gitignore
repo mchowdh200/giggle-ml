@@ -1,4 +1,9 @@
 */__pycache__
+venv/
+
 gpu_embeds/checkpoints
 gpu_embeds/content
-venv/
+gpu_embeds/data
+
+.direnv
+.envrc
