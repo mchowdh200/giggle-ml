@@ -28,7 +28,7 @@ class BlockDistributedSampler(Sampler):
 
     def __len__(self):
         if self.rank == self.numReplicas - 1:
-            return self.totalSize - self.rankSize * self
+            return self.totalSize - self.rankSize * self.rank
         return self.rankSize
 
 
