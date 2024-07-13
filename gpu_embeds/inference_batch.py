@@ -212,29 +212,35 @@ def infer_loop(rank, worldSize, model, device, dataLoader):
             output = torch.mean(output, dim=1)
 
             totalEmbeds = torch.cat((totalEmbeds, output), dim=0)
-            rprint(f"Embedding {i}. Shape: {totalEmbeds.shape}")
+            rprint(f"Batch {i},\tAggregate: {totalEmbeds.shape}")
 
     return totalEmbeds
 
 
 def worker(rank, worldSize, batchSize, dataset, resultTensor):
-    # INFO: Setup
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
     dist.init_process_group(backendType, rank=rank, world_size=worldSize)
 
-    # TODO: The size of the embeddings is 500x256 regardless of batch size??
+    # TODO: (from_fasta.py) Size of the batch embeds is 500x256 regardless of batch size?
     sampler = BlockDistributedSampler(
         dataset, num_replicas=worldSize, rank=rank)
     dataLoader = DataLoader(dataset, batch_size=batchSize,
                             sampler=sampler, shuffle=False)
 
-    device = torch.device(
-        f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    # TODO: does not work on mig partitions
+    device = None
+    devIds = None
+    if torch.cuda.is_available():
+        device = torch.device(f'cuda:{rank}')
+        devIds = [rank]
+    else:
+        device = torch.device('cpu')
+
     model = prepareModel(rank, device)
     model.to(device)
-    model = DDP(model, device_ids=[rank])
+    model = DDP(model, device_ids=devIds)
     model.eval()
 
     # Overview:
@@ -256,7 +262,8 @@ def worker(rank, worldSize, batchSize, dataset, resultTensor):
     if rank == 0:
         totalResults = [None] * worldSize
 
-    torch.cuda.set_device(rank)  # wow
+    if torch.cuda.is_available():
+        torch.cuda.set_device(rank)  # wow
     dist.gather_object(localResults, totalResults, dst=0)
 
     dist.destroy_process_group()
@@ -271,6 +278,7 @@ def worker(rank, worldSize, batchSize, dataset, resultTensor):
     resultTensor.copy_(masterList)
 
 
+# TODO: stop hardcoding embedding dimensionality
 def batchInfer(dataset, outFile, batchSize=5, worldSize=None):
     device = None
     worldSize = None
@@ -287,19 +295,16 @@ def batchInfer(dataset, outFile, batchSize=5, worldSize=None):
 
     embedSize = 256
     resultTensor = torch.zeros(len(dataset), embedSize).share_memory_()
-    print('shape', resultTensor.shape)
+    print('Expecting Results:', resultTensor.shape)
 
     args = (worldSize, batchSize, dataset, resultTensor)
     torch.multiprocessing.spawn(
         worker, args=args, nprocs=worldSize, join=True)
 
-    # Only transfer to CPU if necessary
+    # Try transfer to CPU just in case
     if resultTensor.is_cuda:
         resultTensor = resultTensor.cpu()
 
-    for x in resultTensor:
-        m = x.mean().item()
-        print(m)
-
     # Note: this tensor is on shared memory
+    print("Success:", resultTensor.shape)
     return resultTensor
