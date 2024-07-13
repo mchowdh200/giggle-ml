@@ -8,6 +8,9 @@ you can just loop thru a dataloader like this.
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 import json
 import os
 import subprocess
@@ -18,6 +21,7 @@ import numpy as np
 from standalone_hyenadna import HyenaDNAModel
 from standalone_hyenadna import CharacterTokenizer
 from genomic_benchmark_dataset import GenomicBenchmarkDataset
+from block_distributed_sampler import BlockDistributedSampler
 
 # helper 1
 
@@ -133,7 +137,7 @@ class HyenaDNAPreTrainedModel(PreTrainedModel):
 #########################################################################
 
 
-def prepareModel(device):
+def prepareModel(rank, device):
     '''
     this selects which backbone to use, and grabs weights/ config from HF
     4 options:
@@ -165,57 +169,141 @@ def prepareModel(device):
     backbone_cfg = None
 
     # instantiate the model (pretrained here)
-    if pretrained_model_name in ['hyenadna-tiny-1k-seqlen',
-                                 'hyenadna-small-32k-seqlen',
-                                 'hyenadna-medium-160k-seqlen',
-                                 'hyenadna-medium-450k-seqlen',
-                                 'hyenadna-large-1m-seqlen']:
-        # use the pretrained Huggingface wrapper instead
-        return HyenaDNAPreTrainedModel.from_pretrained(
-            './checkpoints',
-            pretrained_model_name,
-            download=True,
-            config=backbone_cfg,
-            device=device,
-            use_head=use_head,
-            n_classes=n_classes,
-        )
+    if pretrained_model_name not in ['hyenadna-tiny-1k-seqlen',
+                                     'hyenadna-small-32k-seqlen',
+                                     'hyenadna-medium-160k-seqlen',
+                                     'hyenadna-medium-450k-seqlen',
+                                     'hyenadna-large-1m-seqlen']:
+        raise ValueError(
+            f"Invalid pretrained model name: {pretrained_model_name}")
 
-    # from scratch
-    # elif pretrained_model_name is None:
-    return HyenaDNAModel(**backbone_cfg, use_head=use_head, n_classes=n_classes)
+    if rank != 0:
+        dist.barrier()
+
+    model = HyenaDNAPreTrainedModel.from_pretrained(
+        './checkpoints',
+        pretrained_model_name,
+        download=(rank == 0),
+        config=backbone_cfg,
+        device=device,
+        use_head=use_head,
+        n_classes=n_classes)
+
+    # ensure only rank 0 can download the model
+    if rank == 0:
+        dist.barrier()
+
+    return model
 
 
-# TODO: This inference loop hasn't been tested on multi gpus
-def infer_loop(model, device, dataLoader, outFile):
+def infer_loop(rank, worldSize, model, device, dataLoader):
     """inference loop."""
-    embeddings = [None]*len(dataLoader)
+    rprint = lambda *args: print(f"[{rank}]:", *args)
+
+    totalEmbeds = torch.tensor([]).to(device)
 
     with torch.inference_mode():
         for i, entry in enumerate(dataLoader):
-            data, *_ = entry
-            data = data.to(device)
-            output = model(data).numpy()
-            output = np.mean(output, axis=1)
-            output = output.squeeze()
-            embeddings[i] = output
-            print(f"Embedding Batch {i}, shape: {output.shape}")
+            input, *_ = entry
+            input = input.to(device)
+            # execute model, retrieve embeddings
+            output = model(input)
 
-    np.save(outFile, np.array(embeddings))
+            rprint('shape 1', output.shape)
+            # mean aggregation, flatten batch dimension
+            output = torch.mean(output, dim=1)
+            rprint('shape 2', output.shape)
+
+            totalEmbeds = torch.cat((totalEmbeds, output), dim=0)
+            rprint(f"Embedding {i}. Shape: {totalEmbeds.shape}")
+
+    return totalEmbeds
 
 
-def infer(dataset, outFile):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print("We're using", torch.cuda.device_count(), "GPUs!")
-
-    model = prepareModel(device)
-    model = nn.DataParallel(model)
+def infer(rank, worldSize, dataset, resultTensor):
+    # INFO: Setup
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    # TODO: which backend?
+    dist.init_process_group("nccl", rank=rank, world_size=worldSize)
 
     # TODO: The size of the embeddings is 500x256 regardless of batch size??
-    batch_size = 1
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    # TODO: potential issue if the length of the dataset is smaller than the worldSize
+    batchSize = 5
+    sampler = BlockDistributedSampler(
+        dataset, num_replicas=worldSize, rank=rank)
+    dataLoader = DataLoader(dataset, batch_size=batchSize,
+                            sampler=sampler, shuffle=False)
 
+    device = torch.device(
+        f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    model = prepareModel(rank, device)
     model.to(device)
+    model = DDP(model, device_ids=[rank])
     model.eval()
 
-    infer_loop(model, device, data_loader, outFile)
+    # Overview:
+    #    1. [all devices] infer in loop
+    #    2. [all devices] -> [rank 0] send size of results list
+    #    3. [rank 0] initialize receiving master list for incoming results
+    #    4. [all devices] -> [rank 0] send results
+    #    5. [rank 0] concatenate and copy back to cpu
+
+    localResults = infer_loop(rank, worldSize, model, device, dataLoader)
+    localResults = {
+        "rank": rank,
+        "results": localResults
+    }
+
+    # INFO: Consolidation
+
+    totalResults = None
+    if rank == 0:
+        totalResults = [None] * worldSize
+
+    torch.cuda.set_device(rank)  # wow
+    dist.gather_object(localResults, totalResults, dst=0)
+
+    # INFO: Teardown
+    dist.destroy_process_group()
+
+    if rank != 0:
+        return
+
+    totalResults.sort(key=lambda x: x['rank'])
+    masterList = [x['results'].to(device) for x in totalResults]
+    masterList = torch.cat(masterList, dim=0)
+    print('shape 3', masterList.shape)
+    resultTensor.copy_(masterList)
+
+
+def batchInfer(dataset, outFile, worldSize=torch.cuda.device_count()):
+    device = None
+    if torch.cuda.is_available():
+        print("We're using", torch.cuda.device_count(), "GPUs!")
+        device = 'cuda'
+    else:
+        device = 'cpu'
+        print("We're using CPU.")
+
+    embedSize = 256
+    # TODO: +1 correction lazy
+    resultTensor = torch.zeros(len(dataset), embedSize).share_memory_()
+    print('shape', resultTensor.shape)
+
+    worldSize = torch.cuda.device_count()
+    args = (worldSize, dataset, resultTensor)
+    torch.multiprocessing.spawn(
+        infer, args=args, nprocs=worldSize, join=True)
+
+    # Only transfer to CPU if necessary
+    if resultTensor.is_cuda:
+        resultTensor = resultTensor.cpu()
+
+    for t in resultTensor:
+        t2 = t[::85]
+        print(t2)
+
+    # print("Got embeddings:", len(embeds))
+    # mason's kinda shit honestly
+    # return embeds
