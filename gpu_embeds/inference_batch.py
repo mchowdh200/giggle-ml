@@ -200,19 +200,16 @@ def infer_loop(rank, worldSize, model, device, dataLoader):
     """inference loop."""
     rprint = lambda *args: print(f"[{rank}]:", *args)
 
-    totalEmbeds = torch.tensor([]).to(device)
+    totalEmbeds = torch.tensor([])
 
     with torch.inference_mode():
         for i, entry in enumerate(dataLoader):
             input, *_ = entry
             input = input.to(device)
             # execute model, retrieve embeddings
-            output = model(input)
-
-            rprint('shape 1', output.shape)
+            output = model(input).cpu()
             # mean aggregation, flatten batch dimension
             output = torch.mean(output, dim=1)
-            rprint('shape 2', output.shape)
 
             totalEmbeds = torch.cat((totalEmbeds, output), dim=0)
             rprint(f"Embedding {i}. Shape: {totalEmbeds.shape}")
@@ -220,16 +217,14 @@ def infer_loop(rank, worldSize, model, device, dataLoader):
     return totalEmbeds
 
 
-def infer(rank, worldSize, dataset, resultTensor):
+def worker(rank, worldSize, batchSize, dataset, resultTensor):
     # INFO: Setup
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
-    # TODO: which backend?
-    dist.init_process_group("nccl", rank=rank, world_size=worldSize)
+    backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
+    dist.init_process_group(backendType, rank=rank, world_size=worldSize)
 
     # TODO: The size of the embeddings is 500x256 regardless of batch size??
-    # TODO: potential issue if the length of the dataset is smaller than the worldSize
-    batchSize = 5
     sampler = BlockDistributedSampler(
         dataset, num_replicas=worldSize, rank=rank)
     dataLoader = DataLoader(dataset, batch_size=batchSize,
@@ -255,7 +250,7 @@ def infer(rank, worldSize, dataset, resultTensor):
         "results": localResults
     }
 
-    # INFO: Consolidation
+    # INFO: Consolidation & Teardown
 
     totalResults = None
     if rank == 0:
@@ -264,46 +259,47 @@ def infer(rank, worldSize, dataset, resultTensor):
     torch.cuda.set_device(rank)  # wow
     dist.gather_object(localResults, totalResults, dst=0)
 
-    # INFO: Teardown
     dist.destroy_process_group()
 
     if rank != 0:
         return
 
+    # operating on CPU, process rank 0
     totalResults.sort(key=lambda x: x['rank'])
-    masterList = [x['results'].to(device) for x in totalResults]
+    masterList = [x['results'] for x in totalResults]
     masterList = torch.cat(masterList, dim=0)
-    print('shape 3', masterList.shape)
     resultTensor.copy_(masterList)
 
 
-def batchInfer(dataset, outFile, worldSize=torch.cuda.device_count()):
+def batchInfer(dataset, outFile, batchSize=5, worldSize=None):
     device = None
+    worldSize = None
     if torch.cuda.is_available():
         print("We're using", torch.cuda.device_count(), "GPUs!")
         device = 'cuda'
+        if worldSize is None:
+            worldSize = torch.cuda.device_count()
     else:
-        device = 'cpu'
         print("We're using CPU.")
+        device = 'cpu'
+        if worldSize is None:
+            worldSize = 1
 
     embedSize = 256
-    # TODO: +1 correction lazy
     resultTensor = torch.zeros(len(dataset), embedSize).share_memory_()
     print('shape', resultTensor.shape)
 
-    worldSize = torch.cuda.device_count()
-    args = (worldSize, dataset, resultTensor)
+    args = (worldSize, batchSize, dataset, resultTensor)
     torch.multiprocessing.spawn(
-        infer, args=args, nprocs=worldSize, join=True)
+        worker, args=args, nprocs=worldSize, join=True)
 
     # Only transfer to CPU if necessary
     if resultTensor.is_cuda:
         resultTensor = resultTensor.cpu()
 
-    for t in resultTensor:
-        t2 = t[::85]
-        print(t2)
+    for x in resultTensor:
+        m = x.mean().item()
+        print(m)
 
-    # print("Got embeddings:", len(embeds))
-    # mason's kinda shit honestly
-    # return embeds
+    # Note: this tensor is on shared memory
+    return resultTensor
