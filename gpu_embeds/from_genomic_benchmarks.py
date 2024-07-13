@@ -1,22 +1,11 @@
 import torch
 from inference_batch import batchInfer
+from truncated_dataset import TruncatedDataset
 from standalone_hyenadna import CharacterTokenizer
 from genomic_benchmark_dataset import GenomicBenchmarkDataset
 
 
 outFile = "./data/embeddings.npy"
-
-
-class TruncatedDataset(torch.utils.data.Dataset):
-    def __init__(self, contents, length):
-        self.contents = contents
-        self.length = length
-
-    def __len__(self):
-        return self.length
-
-    def __getitem__(self, idx):
-        return self.contents[idx]
 
 
 def prepareDataset():
@@ -51,7 +40,7 @@ def prepareDataset():
         rc_aug=rc_aug,
         add_eos=add_eos)
 
-    return TruncatedDataset(dataset, 3)
+    return TruncatedDataset(dataset, 100)
 
 
 # This allows multiprocess to run this script off-main
