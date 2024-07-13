@@ -1,6 +1,22 @@
-from inference_batch import infer
+import torch
+from inference_batch import batchInfer
 from standalone_hyenadna import CharacterTokenizer
 from genomic_benchmark_dataset import GenomicBenchmarkDataset
+
+
+outFile = "./data/embeddings.npy"
+
+
+class TruncatedDataset(torch.utils.data.Dataset):
+    def __init__(self, contents, length):
+        self.contents = contents
+        self.length = length
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        return self.contents[idx]
 
 
 def prepareDataset():
@@ -9,10 +25,11 @@ def prepareDataset():
 
     # create tokenizer
     tokenizer = CharacterTokenizer(
-        characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
+        # add DNA characters, N is uncertain
+        characters=['A', 'C', 'G', 'T', 'N'],
         model_max_length=max_length + 2,  # to account for special tokens, like EOS
         add_special_tokens=False,  # we handle special tokens elsewhere
-        padding_side='left', # since HyenaDNA is causal, we pad on the left
+        padding_side='left',  # since HyenaDNA is causal, we pad on the left
     )
 
     # Sample small dataloader w/ GenomicBenchmarks
@@ -25,14 +42,18 @@ def prepareDataset():
     add_eos = False  # add end of sentence token
 
     # TODO: The tokenizer should be seperated from this dataset object
-    return GenomicBenchmarkDataset(
-        max_length = max_length,
-        use_padding = use_padding,
-        split = 'test',
+    dataset = GenomicBenchmarkDataset(
+        max_length=max_length,
+        use_padding=use_padding,
+        split='test',
         tokenizer=tokenizer,
         dataset_name=dataset_name,
         rc_aug=rc_aug,
-        add_eos=add_eos,
-    )
+        add_eos=add_eos)
 
-infer(prepareDataset())
+    return TruncatedDataset(dataset, 3)
+
+
+# This allows multiprocess to run this script off-main
+if __name__ == "__main__":
+    batchInfer(prepareDataset(), outFile)
