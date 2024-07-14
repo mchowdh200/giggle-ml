@@ -1,8 +1,8 @@
-*/__pycache__
+__pycache__
 venv/
 
-gpu_embeds/checkpoints
-gpu_embeds/content
-gpu_embeds/data
+src/gpu_embeds/checkpoints
+src/gpu_embeds/content
+src/data
 
 .direnv

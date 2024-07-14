@@ -265,6 +265,7 @@ def worker(rank, worldSize, batchSize, dataset, resultTensor):
     if torch.cuda.is_available():
         torch.cuda.set_device(rank)  # wow
     dist.gather_object(localResults, totalResults, dst=0)
+    dist.barrier()  # just in case gather_object is operating async
 
     dist.destroy_process_group()
 
