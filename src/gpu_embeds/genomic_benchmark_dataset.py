@@ -1,4 +1,4 @@
-#@title GenomicBenchmark dataset
+# @title GenomicBenchmark dataset
 
 """
 The GenomicBenchmarks dataset will automatically download to /contents on colab.
@@ -21,12 +21,16 @@ from genomic_benchmarks.data_check import is_downloaded
 def exists(val):
     return val is not None
 
+
 def coin_flip():
     return random() > 0.5
 
 
-string_complement_map = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'a': 't', 'c': 'g', 'g': 'c', 't': 'a'}
+string_complement_map = {'A': 'T', 'C': 'G', 'G': 'C',
+                         'T': 'A', 'a': 't', 'c': 'g', 'g': 'c', 't': 'a'}
 # augmentation
+
+
 def string_reverse_complement(seq):
     rev_comp = ''
     for base in seq[::-1]:
@@ -55,8 +59,8 @@ class GenomicBenchmarkDataset(torch.utils.data.Dataset):
         split,
         max_length,
         dataset_name='human_enhancers_cohn',
-        d_output=2, # default binary classification
-        dest_path="./content", # default for colab
+        d_output=2,  # default binary classification
+        dest_path="./content",  # default for colab
         tokenizer=None,
         tokenizer_name=None,
         use_padding=None,
@@ -110,11 +114,11 @@ class GenomicBenchmarkDataset(torch.utils.data.Dataset):
             x = string_reverse_complement(x)
 
         seq = self.tokenizer(x,
-            add_special_tokens=False,
-            padding="max_length" if self.use_padding else None,
-            max_length=self.max_length,
-            truncation=True,
-        )  # add cls and eos token (+2)
+                             add_special_tokens=False,
+                             padding="max_length" if self.use_padding else None,
+                             max_length=self.max_length,
+                             truncation=True,
+                             )  # add cls and eos token (+2)
         seq = seq["input_ids"]  # get input_ids
 
         # need to handle eos here
@@ -126,6 +130,7 @@ class GenomicBenchmarkDataset(torch.utils.data.Dataset):
         seq = torch.LongTensor(seq)
 
         # need to wrap in list
-        target = torch.LongTensor([y])
+        # target = torch.LongTensor([y])
+        # we no longer need the target
 
-        return seq, target
+        return seq
