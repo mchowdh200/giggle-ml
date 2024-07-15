@@ -6,6 +6,7 @@ from gpu_embeds.standalone_hyenadna import CharacterTokenizer
 from gpu_embeds.genomic_benchmark_dataset import GenomicBenchmarkDataset
 
 
+# TODO: extract (from_[fasta, genomicbench]) similarity
 def prepareDataset(limit):
     # let's fix the max_length (to reduce the padding amount, conserves memory)
     max_length = 500

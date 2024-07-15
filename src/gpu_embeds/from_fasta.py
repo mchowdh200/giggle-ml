@@ -19,7 +19,7 @@ class ListDataset(torch.utils.data.Dataset):
         return self.contents[idx]
 
 
-def generate_embeddings(fastaPath, bedPath, outPath, batchSize=16, limit=None):
+def generate_embeddings(fastaPath, bedPath, batchSize=16, outPath=None, limit=None):
     #  chrm id --> SeqIO.SeqRecord object
     fastaContent = list()
     nameMap = dict()

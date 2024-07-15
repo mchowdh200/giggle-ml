@@ -297,6 +297,7 @@ def batchInfer(dataset, batchSize=16, worldSize=None):
     # Try transfer to CPU just in case
     if resultTensor.is_cuda:
         resultTensor = resultTensor.cpu()
+    resultTensor = resultTensor.numpy()
 
     # Note: this tensor is on shared memory
     print("Success:", resultTensor.shape)

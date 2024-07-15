@@ -2,6 +2,7 @@ import numpy as np
 from scipy.optimize import curve_fit
 from sklearn.metrics.pairwise import cosine_distances
 
+
 def load_embeddings(file_path):
     """
     Load region embeddings from a file.
@@ -19,6 +20,7 @@ def load_embeddings(file_path):
         print("Error: Embeddings file not found.")
         exit(1)
 
+
 def load_regions(file_path):
     """
     Load region information from a file.
@@ -34,13 +36,15 @@ def load_regions(file_path):
         with open(file_path) as f:
             for line in f:
                 columns = line.strip().split()
-                chromosome, start, end = columns[0], int(columns[1]), int(columns[2])
+                chromosome, start, end = columns[0], int(
+                    columns[1]), int(columns[2])
                 regions.append((chromosome, int(start), int(end)))
     except FileNotFoundError:
         print("Error: Regions file not found.")
         exit(1)
 
     return regions
+
 
 def generate_region_pairs(num_regions, regions):
     """
@@ -56,12 +60,13 @@ def generate_region_pairs(num_regions, regions):
     """
 
     if num_regions > len(regions) // 2:
-        num_regions = len(regions) //2
-    region_pairs = [(regions[i], regions[i+1]) for i in range(0, 2*num_regions, 2)]
+        num_regions = len(regions) // 2
+    region_pairs = [(regions[i], regions[i+1])
+                    for i in range(0, 2*num_regions, 2)]
     embedding_pairs = [(i, i+1) for i in range(0, 2*num_regions, 2)]
 
-
     return region_pairs, embedding_pairs
+
 
 def calculate_gd(region_pairs, high_number=1e9):
     """
@@ -87,6 +92,7 @@ def calculate_gd(region_pairs, high_number=1e9):
 
     return np.array(gd_values)
 
+
 def calculate_ed(embedding_pairs, embeddings):
     """
     Calculate Euclidean Distance (ED) between pairs of region embeddings.
@@ -109,6 +115,7 @@ def calculate_ed(embedding_pairs, embeddings):
 
     return np.array(ed_values)
 
+
 def linear_curve_fit(x, m, b):
     """
     Linear curve fitting function.
@@ -122,6 +129,7 @@ def linear_curve_fit(x, m, b):
     numpy.ndarray: Array of y-values.
     """
     return m * x + b
+
 
 def calculate_gdst_score(ed_values, gd_values):
     """
@@ -141,11 +149,8 @@ def calculate_gdst_score(ed_values, gd_values):
     gdst_score = popt[0]
     return gdst_score
 
-def main(embeddings_file, regions_file, num_regions=100):
-    # Load embeddings and regions
-    embeddings = load_embeddings(embeddings_file)
-    regions = load_regions(regions_file)
 
+def main(regions, embeddings, num_regions=100):
     # Generate region pairs and embedding pairs
     region_pairs, embedding_pairs = generate_region_pairs(num_regions, regions)
 
@@ -156,10 +161,3 @@ def main(embeddings_file, regions_file, num_regions=100):
     # Calculate GDST score
     gdst_score = calculate_gdst_score(ed_values, gd_values)
     print("GDST score:", gdst_score)
-
-# usage:
-if __name__ == "__main__":
-    embeddings_file = 'path_to_embeddings.npy'
-    regions_file = 'path_to_regions.txt'
-    num_regions = 100
-    main(embeddings_file, regions_file, num_regions)

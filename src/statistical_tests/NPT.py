@@ -65,29 +65,12 @@ def create_pairs(regions, embeddings):
     return region_pairs, embedding_pairs
 
 
-def main(k, bed_file, query_file, n_jobs=1):
-    regions = []
-    with open(bed_file) as f:
-        for line in f:
-            columns = line.strip().split()
-            chromosome, start, end = columns[0], int(
-                columns[1]), int(columns[2])
-            regions.append((chromosome, start, end))
-
+def main(regions, embeds, n_jobs=2, k=10):
     B = prepare_bed_data(regions)
-    Q = np.load(query_file)
+    Q = embeds  # :(
 
     # Ensure the number of regions and embeddings match
     region_pairs, embedding_pairs = create_pairs(regions, Q)
 
     qNPR = calculate_qNPR(B, Q, k, n_jobs=n_jobs)
     print(f"qNPR: {qNPR}")
-
-
-# usage:
-if __name__ == "__main__":
-    k = 10  # Number of nearest neighbors
-    bed_file = 'path_to_bed_file.txt'
-    query_file = 'path_to_embeddings.npy'
-    n_jobs = 2  # Number of parallel jobs
-    main(k, bed_file, query_file, n_jobs)
