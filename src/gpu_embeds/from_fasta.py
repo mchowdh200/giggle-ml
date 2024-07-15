@@ -1,11 +1,13 @@
-from inference_batch import batchInfer
+from gpu_embeds.inference_batch import batchInfer
+from gpu_embeds.standalone_hyenadna import CharacterTokenizer
 from torch.utils.data import DataLoader
 from Bio import SeqIO
 import torch
-from standalone_hyenadna import CharacterTokenizer
 import sys
+import numpy as np
 
 
+# TODO: extract
 class ListDataset(torch.utils.data.Dataset):
     def __init__(self, contents):
         self.contents = contents
@@ -17,13 +19,8 @@ class ListDataset(torch.utils.data.Dataset):
         return self.contents[idx]
 
 
-def main():
-    fastaPath = "./data/hg38.fa"
-    bedPath = "./data/hg38_trf.bed"
-    outPath = "./data/embeddings.npy"
-    limit = 14  # or None
-
-#  chrm id --> SeqIO.SeqRecord object
+def generate_embeddings(fastaPath, bedPath, outPath, batchSize=16, limit=None):
+    #  chrm id --> SeqIO.SeqRecord object
     fastaContent = list()
     nameMap = dict()
 
@@ -96,13 +93,16 @@ def main():
 
         # TODO: print dict keys, is there a mask? --> embedding aggregation
         tok = tok['input_ids']
-        tok = torch.LongTensor(tok).unsqueeze(0)  # unsqueeze for batch dim
+        tok = torch.LongTensor(tok)
+        # tok = torch.LongTensor(tok).unsqueeze(0)  # unsqueeze for batch dim
         bedTokenized.append(tok)
 
     dataset = ListDataset(bedTokenized)
-    batchInfer(dataset, outPath)
+    results = batchInfer(dataset, batchSize)
 
+    if not outPath:
+        return results
 
-# This allows multiprocess to run this script off-main
-if __name__ == "__main__":
-    main()
+    print("Serializing embeddings...")
+    np.save(outPath, results)
+    return results

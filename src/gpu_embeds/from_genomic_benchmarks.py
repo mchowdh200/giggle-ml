@@ -1,14 +1,12 @@
 import torch
-from inference_batch import batchInfer
-from truncated_dataset import TruncatedDataset
-from standalone_hyenadna import CharacterTokenizer
-from genomic_benchmark_dataset import GenomicBenchmarkDataset
+import numpy as np
+from gpu_embeds.inference_batch import batchInfer
+from gpu_embeds.truncated_dataset import TruncatedDataset
+from gpu_embeds.standalone_hyenadna import CharacterTokenizer
+from gpu_embeds.genomic_benchmark_dataset import GenomicBenchmarkDataset
 
 
-outFile = "./data/embeddings.npy"
-
-
-def prepareDataset():
+def prepareDataset(limit):
     # let's fix the max_length (to reduce the padding amount, conserves memory)
     max_length = 500
 
@@ -40,9 +38,18 @@ def prepareDataset():
         rc_aug=rc_aug,
         add_eos=add_eos)
 
-    return TruncatedDataset(dataset, 100)
+    return TruncatedDataset(dataset, limit)
 
 
-# This allows multiprocess to run this script off-main
-if __name__ == "__main__":
-    batchInfer(prepareDataset(), outFile)
+def main():
+    # INFO: Config
+    # outFile = "./data/embeddings.npy"
+    outFile = None
+    batchSize = 10
+    limit = 100
+
+    results = batchInfer(prepareDataset(limit), batchSize)
+
+    if outFile:
+        print("Serializing embeddings...")
+        np.save(results, outFile)

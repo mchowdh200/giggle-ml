@@ -18,10 +18,11 @@ import transformers
 from transformers import PreTrainedModel, AutoModelForCausalLM, PretrainedConfig
 import numpy as np
 
-from standalone_hyenadna import HyenaDNAModel
-from standalone_hyenadna import CharacterTokenizer
-from genomic_benchmark_dataset import GenomicBenchmarkDataset
-from block_distributed_sampler import BlockDistributedSampler
+from gpu_embeds.standalone_hyenadna import HyenaDNAModel
+from gpu_embeds.standalone_hyenadna import CharacterTokenizer
+from gpu_embeds.genomic_benchmark_dataset import GenomicBenchmarkDataset
+from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
+from gpu_embeds.standalone_hyenadna import CharacterTokenizer
 
 # helper 1
 
@@ -199,12 +200,10 @@ def prepareModel(rank, device):
 def infer_loop(rank, worldSize, model, device, dataLoader):
     """inference loop."""
     rprint = lambda *args: print(f"[{rank}]:", *args)
-
     totalEmbeds = torch.tensor([])
 
     with torch.inference_mode():
-        for i, entry in enumerate(dataLoader):
-            input, *_ = entry
+        for i, input in enumerate(dataLoader):
             input = input.to(device)
             # execute model, retrieve embeddings
             output = model(input).cpu()
@@ -243,13 +242,6 @@ def worker(rank, worldSize, batchSize, dataset, resultTensor):
     model = DDP(model, device_ids=devIds)
     model.eval()
 
-    # Overview:
-    #    1. [all devices] infer in loop
-    #    2. [all devices] -> [rank 0] send size of results list
-    #    3. [rank 0] initialize receiving master list for incoming results
-    #    4. [all devices] -> [rank 0] send results
-    #    5. [rank 0] concatenate and copy back to cpu
-
     localResults = infer_loop(rank, worldSize, model, device, dataLoader)
     localResults = {
         "rank": rank,
@@ -280,7 +272,7 @@ def worker(rank, worldSize, batchSize, dataset, resultTensor):
 
 
 # TODO: stop hardcoding embedding dimensionality
-def batchInfer(dataset, outFile, batchSize=5, worldSize=None):
+def batchInfer(dataset, batchSize=16, worldSize=None):
     device = None
     worldSize = None
     if torch.cuda.is_available():
