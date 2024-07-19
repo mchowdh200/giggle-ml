@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.multiprocessing as mp
 
 import json
 import os
@@ -200,7 +201,7 @@ def prepareModel(rank, device):
 def infer_loop(rank, worldSize, model, device, dataLoader):
     """inference loop."""
     rprint = lambda *args: print(f"[{rank}]:", *args)
-    totalEmbeds = torch.tensor([])
+    totalEmbeds = []
 
     with torch.inference_mode():
         for i, input in enumerate(dataLoader):
@@ -210,13 +211,14 @@ def infer_loop(rank, worldSize, model, device, dataLoader):
             # mean aggregation, flatten batch dimension
             output = torch.mean(output, dim=1)
 
-            totalEmbeds = torch.cat((totalEmbeds, output), dim=0)
-            rprint(f"Batch {i},\tAggregate: {totalEmbeds.shape}")
+            # TODO: avoid .cat -- reconstructing tensor?
+            totalEmbeds.extend(output)
+            rprint(f"Batch {i},\tAggregate: {len(totalEmbeds)}")
 
     return totalEmbeds
 
 
-def worker(rank, worldSize, batchSize, dataset, resultTensor):
+def worker(rank, worldSize, batchSize, dataset):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
@@ -242,33 +244,7 @@ def worker(rank, worldSize, batchSize, dataset, resultTensor):
     model = DDP(model, device_ids=devIds)
     model.eval()
 
-    localResults = infer_loop(rank, worldSize, model, device, dataLoader)
-    localResults = {
-        "rank": rank,
-        "results": localResults
-    }
-
-    # INFO: Consolidation & Teardown
-
-    totalResults = None
-    if rank == 0:
-        totalResults = [None] * worldSize
-
-    if torch.cuda.is_available():
-        torch.cuda.set_device(rank)  # wow
-    dist.gather_object(localResults, totalResults, dst=0)
-    dist.barrier()  # just in case gather_object is operating async
-
-    dist.destroy_process_group()
-
-    if rank != 0:
-        return
-
-    # operating on CPU, process rank 0
-    totalResults.sort(key=lambda x: x['rank'])
-    masterList = [x['results'] for x in totalResults]
-    masterList = torch.cat(masterList, dim=0)
-    resultTensor.copy_(masterList)
+    return infer_loop(rank, worldSize, model, device, dataLoader)
 
 
 # TODO: stop hardcoding embedding dimensionality
@@ -280,25 +256,18 @@ def batchInfer(dataset, batchSize=16, worldSize=None):
         device = 'cuda'
         if worldSize is None:
             worldSize = torch.cuda.device_count()
+        torch.cuda.init()
     else:
         print("We're using CPU.")
         device = 'cpu'
         if worldSize is None:
             worldSize = 1
 
-    embedSize = 256
-    resultTensor = torch.zeros(len(dataset), embedSize).share_memory_()
-    print('Expecting Results:', resultTensor.shape)
+    pool = mp.Pool(worldSize)
+    baseArgs = (worldSize, batchSize, dataset)
+    args = [(rank,) + baseArgs for rank in range(worldSize)]
+    results = list(pool.starmap(worker, args))
+    pool.close()
+    pool.join()  # shouldn't be necessary; in case loose workers
 
-    args = (worldSize, batchSize, dataset, resultTensor)
-    torch.multiprocessing.spawn(
-        worker, args=args, nprocs=worldSize, join=True)
-
-    # Try transfer to CPU just in case
-    if resultTensor.is_cuda:
-        resultTensor = resultTensor.cpu()
-    resultTensor = resultTensor.numpy()
-
-    # Note: this tensor is on shared memory
-    print("Success:", resultTensor.shape)
-    return resultTensor
+    return sum(results, [])

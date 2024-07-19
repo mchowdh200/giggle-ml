@@ -50,6 +50,7 @@ def main():
     limit = 100
 
     results = batchInfer(prepareDataset(limit), batchSize)
+    print("Success.")
 
     if outFile:
         print("Serializing embeddings...")

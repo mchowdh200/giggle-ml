@@ -99,6 +99,7 @@ def generate_embeddings(fastaPath, bedPath, batchSize=16, outPath=None, limit=No
 
     dataset = ListDataset(bedTokenized)
     results = batchInfer(dataset, batchSize)
+    print("Success.")
 
     if not outPath:
         return results
