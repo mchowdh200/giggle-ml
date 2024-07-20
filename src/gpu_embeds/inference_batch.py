@@ -139,7 +139,7 @@ class HyenaDNAPreTrainedModel(PreTrainedModel):
 #########################################################################
 
 
-def prepareModel(rank, device):
+def prepareModel(rank, device, barrier):
     '''
     this selects which backbone to use, and grabs weights/ config from HF
     4 options:
@@ -180,7 +180,7 @@ def prepareModel(rank, device):
             f"Invalid pretrained model name: {pretrained_model_name}")
 
     if rank != 0:
-        dist.barrier()
+        barrier.wait()
 
     model = HyenaDNAPreTrainedModel.from_pretrained(
         './checkpoints',
@@ -193,7 +193,7 @@ def prepareModel(rank, device):
 
     # ensure only rank 0 can download the model
     if rank == 0:
-        dist.barrier()
+        barrier.wait()
 
     return model
 
@@ -218,7 +218,7 @@ def infer_loop(rank, worldSize, model, device, dataLoader):
     return totalEmbeds
 
 
-def worker(rank, worldSize, batchSize, dataset):
+def worker(rank, worldSize, batchSize, dataset, barrier):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
@@ -239,7 +239,7 @@ def worker(rank, worldSize, batchSize, dataset):
     else:
         device = torch.device('cpu')
 
-    model = prepareModel(rank, device)
+    model = prepareModel(rank, device, barrier)
     model.to(device)
     model = DDP(model, device_ids=devIds)
     model.eval()
@@ -256,18 +256,19 @@ def batchInfer(dataset, batchSize=16, worldSize=None):
         device = 'cuda'
         if worldSize is None:
             worldSize = torch.cuda.device_count()
-        torch.cuda.init()
     else:
         print("We're using CPU.")
         device = 'cpu'
         if worldSize is None:
             worldSize = 1
 
-    pool = mp.Pool(worldSize)
-    baseArgs = (worldSize, batchSize, dataset)
-    args = [(rank,) + baseArgs for rank in range(worldSize)]
-    results = list(pool.starmap(worker, args))
-    pool.close()
-    pool.join()  # shouldn't be necessary; in case loose workers
+    # big operation
+    mp.set_start_method('spawn', force=True)
+    with mp.Pool(worldSize) as pool:
+        with mp.Manager() as manager:
+            barrier = manager.Barrier(worldSize)
+            baseArgs = (worldSize, batchSize, dataset, barrier)
+            args = [(rank,) + baseArgs for rank in range(worldSize)]
+            results = list(pool.starmap(worker, args))
 
     return sum(results, [])

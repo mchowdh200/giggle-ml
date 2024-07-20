@@ -101,9 +101,7 @@ def generate_embeddings(fastaPath, bedPath, batchSize=16, outPath=None, limit=No
     results = batchInfer(dataset, batchSize)
     print("Success.")
 
-    if not outPath:
-        return results
-
-    print("Serializing embeddings...")
-    np.save(outPath, results)
+    if outPath:
+        print("Serializing embeddings...")
+        np.save(outPath, results)
     return results
