@@ -29,12 +29,14 @@ chrmSizes = [
     57.23    # Chromosome Y
 ]
 
-chrmSizes = list(map(lambda x: x * 1e6, chrmSizes))  # In Mbp
+chrmSizes = [30]*5
+
+# chrmSizes = list(map(lambda x: x * 1e6, chrmSizes))  # In Mbp
 chrmSizes = list(map(round, chrmSizes))
 
 chrmNames = [f"chr{i+1}" for i, _ in enumerate(chrmSizes)]
-chrmNames[22] = "chrX"
-chrmNames[23] = "chrY"
+# chrmNames[22] = "chrX"
+# chrmNames[23] = "chrY"
 
 
 class Chromosome:
@@ -83,10 +85,13 @@ class Chromosome:
 
 def synthesize():
     # INFO: Config
-    seqLenMin, seqLenMax = int(1e3), int(25e3)
+    # seqLenMin, seqLenMax = int(1e3), int(25e3)
+    # amntUniverses = 1
+    # seqPerUniverse = int(2e5)
+    seqLenMin, seqLenMax = 2, 10
     amntUniverses = 1
-    seqPerUniverse = int(2e5)
-    outDir = "data/synthetic"
+    seqPerUniverse = 5
+    outDir = "data/synthetic/x"
 
     # ---------------- Synthesize intervals ----------------
     print("Synthesizing intervals...")
@@ -139,7 +144,8 @@ def synthesize():
         for chrmId, chrm in enumerate(blocks):
             chrmName = chrmNames[chrmId]
             out.append(chrm.fasta_format(chrmName))
-        f.write("\n".join(out))
+            out.append("\n")
+        f.write("".join(out))
 
 
 synthesize()
