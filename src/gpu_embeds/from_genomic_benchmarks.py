@@ -42,16 +42,11 @@ def prepareDataset(limit):
     return TruncatedDataset(dataset, limit)
 
 
-def main():
-    # INFO: Config
-    # outFile = "./data/embeddings.npy"
-    outFile = None
-    batchSize = 10
-    limit = 100
-
-    results = batchInfer(prepareDataset(limit), batchSize)
+def main(limit=100, batchSize=10, outFile=None):
+    results = batchInfer(prepareDataset(limit), outFile, batchSize)
     print("Success.")
 
     if outFile:
         print("Serializing embeddings...")
-        np.save(results, outFile)
+        np.save(outFile, results)
+    return results
