@@ -1,10 +1,11 @@
 from gpu_embeds.inference_batch import batchInfer
 from gpu_embeds.standalone_hyenadna import CharacterTokenizer
 from torch.utils.data import DataLoader
-from Bio import SeqIO
 import torch
-import sys
 import numpy as np
+from collections import deque
+from functools import cached_property
+from pyfaidx import Fasta
 
 
 # TODO: extract
@@ -19,89 +20,99 @@ class ListDataset(torch.utils.data.Dataset):
         return self.contents[idx]
 
 
-def generate_embeddings(fastaPath, bedPath, batchSize=16, outPath=None, limit=None):
-    #  chrm id --> SeqIO.SeqRecord object
-    fastaContent = list()
-    nameMap = dict()
+class BedDataset(torch.utils.data.Dataset):
+    def __init__(self, bedPath, inMemory=True, bufferSize=100, limit=None):
+        self.bedPath = bedPath
+        self.inMemory = inMemory
+        self.bufferSize = bufferSize
+        limit = float('inf') if limit is None else limit
 
-    print("Parsing inputs...")
-    if limit is not None:
-        print(f"Limiting to {limit} sequences.")
+        if inMemory:
+            self.bedContent = []
+            with open(bedPath) as f:
+                for i, line in enumerate(f):
+                    if i < limit:
+                        name, start, stop = line.split()[:3]
+                        start = int(start)
+                        stop = int(stop)
+                        self.bedContent.append((name, start, stop))
+                        continue
+                    break
+            self.length = len(self.bedContent)
+        else:
+            self.length = min(sum(1 for line in open(bedPath)), limit)
+            self.bedBuffer = {}
+            self.queue = deque()
 
-    for entry in SeqIO.parse(open(fastaPath), 'fasta'):
-        name = entry.id
-        seq = entry.seq
+    def __len__(self):
+        return self.length
 
-        try:
-            # The old way, removed in Biopython 1.73
-            seq = seq.tostring()
-        except AttributeError:
-            # The new way, needs Biopython 1.45 or later.
-            # Don't use this on Biopython 1.44 or older as truncates
-            seq = str(seq)
-
-        nameMap[name] = len(fastaContent)
-        seq = seq.upper()  # aCgT -> ACGT
-        fastaContent.append(seq)
-
-    bedContent = []
-    with open(bedPath) as f:
-        for line in f:
-            if limit is not None and limit == 0:
+    def fetch(self, idx):
+        for i, line in enumerate(open(self.bedPath)):
+            if i >= idx + self.bufferSize // 2:
                 break
-            limit -= 1
+            if i >= idx:
+                if i not in self.bedBuffer:
+                    name, start, stop = line.split()[:3]
+                    start = int(start)
+                    stop = int(stop)
+                    self.bedBuffer[i] = (name, start, stop)
+                    self.queue.append(i)
 
-            name, start, stop = line.split()[:3]
-            start = int(start)
-            stop = int(stop)
+        while len(self.queue) > self.bufferSize:
+            self.bedBuffer.pop(self.queue.popleft())
 
-            if name not in nameMap:
-                raise ValueError(
-                    f"Chromosome name, \"{name}\", not recognized.")
+    def __getitem__(self, idx):
+        if self.inMemory:
+            return self.bedContent[idx]
+        else:
+            if idx not in self.bedBuffer:
+                self.fetch(idx)
+            return self.bedBuffer[idx]
 
-            chrm = nameMap[name]
-            seq = fastaContent[chrm][start-1: stop]
-            bedContent.append(seq)
 
-    max_length = len(max(bedContent))
-    max_length = 500
-    bedTokenized = []
-    tokenizer = CharacterTokenizer(
-        # add DNA characters, N is uncertain
-        characters=['A', 'C', 'G', 'T', 'N'],
-        model_max_length=max_length + 2,  # to account for special tokens, like EOS
-        add_special_tokens=False,  # we handle special tokens elsewhere
-        padding_side='left',  # since HyenaDNA is causal, we pad on the left
-    )
+class SeqDataset(torch.utils.data.Dataset):
+    def __init__(self, fastaPath, bedDataset):
+        self.fastaPath = fastaPath
+        self.bedDataset = bedDataset
+        self.padToLength = 500
+        self.tokenizer = self.prepareTokenizer()
 
-    bedContentFiltered = list(filter(lambda x: x, bedContent))
-    if len(bedContentFiltered) != len(bedContent):
-        print(str(len(bedContent) - len(bedContentFiltered)) +
-              " intervals in BED file did not map to a sequence." +
-              " Discarding bad entries.\n" +
-              str(len(bedContentFiltered)) +
-              " entries mapped successfully. ")
+    @cached_property
+    def index(self):
+        # why one_based_attributes=True by default?
+        return Fasta(self.fastaPath, one_based_attributes=False)
 
-    print('Tokenizing...')
-    for seq in bedContentFiltered:
-        tok = tokenizer(seq,
-                        add_special_tokens=False,
-                        padding="max_length",
-                        max_length=max_length,
-                        truncation=True
-                        )
+    def prepareTokenizer(self):
+        return CharacterTokenizer(
+            # add DNA characters, N is uncertain
+            characters=['A', 'C', 'G', 'T', 'N'],
+            # to account for special tokens, like EOS
+            model_max_length=self.padToLength + 2,
+            add_special_tokens=False,  # we handle special tokens elsewhere
+            padding_side='left',  # since HyenaDNA is causal, we pad on the left
+        )
 
-        # TODO: print dict keys, is there a mask? --> embedding aggregation
+    def __len__(self):
+        return len(self.bedDataset)
+
+    def __getitem__(self, idx):
+        name, start, stop = self.bedDataset[idx]
+        if name not in self.index:
+            raise ValueError(f"Chromosome name, \"{name}\", not recognized.")
+
+        seq = self.index[name][start:stop].seq
+
+        if len(seq) == 0:
+            raise ValueError(f"Failed fasta mapping for {name}:{start}-{stop}")
+
+        # Begin tokenization
+        seq = seq.upper()  # aCgT -> ACGT
+        tok = self.tokenizer(seq,
+                             add_special_tokens=False,
+                             padding="max_length",
+                             max_length=self.padToLength,
+                             truncation=True)
+
         tok = tok['input_ids']
-        tok = torch.LongTensor(tok)
-        # tok = torch.LongTensor(tok).unsqueeze(0)  # unsqueeze for batch dim
-        bedTokenized.append(tok)
-
-    dataset = ListDataset(bedTokenized)
-    results = batchInfer(dataset, batchSize)
-    print("Success.")
-
-    if outPath:
-        print("Serializing embeddings...")
-        np.save(outPath, results)
-    return results
+        return torch.LongTensor(tok)
