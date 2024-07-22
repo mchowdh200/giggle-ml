@@ -12,6 +12,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
 
+import tracemalloc
 import json
 import os
 import subprocess
@@ -198,12 +199,14 @@ def prepareModel(rank, device, barrier):
     return model
 
 
-def infer_loop(rank, worldSize, model, device, dataLoader):
+def infer_loop(rank, worldSize, batchSize, model, device, dataLoader, outPath):
     """inference loop."""
     rprint = lambda *args: print(f"[{rank}]:", *args)
-    totalEmbeds = []
+    outFile = np.memmap(outPath, dtype='float32', mode='w+',
+                        shape=(len(dataLoader) * batchSize, 256))
 
     with torch.inference_mode():
+        tracemalloc.start()
         for i, input in enumerate(dataLoader):
             input = input.to(device)
             # execute model, retrieve embeddings
@@ -211,14 +214,25 @@ def infer_loop(rank, worldSize, model, device, dataLoader):
             # mean aggregation, flatten batch dimension
             output = torch.mean(output, dim=1)
 
-            # TODO: avoid .cat -- reconstructing tensor?
-            totalEmbeds.extend(output)
-            rprint(f"Batch {i},\tAggregate: {len(totalEmbeds)}")
+            for j, single in enumerate(output):
+                outFile[i * batchSize + j] = single
 
-    return totalEmbeds
+            if i % 10 == 0:
+                snapshot = tracemalloc.take_snapshot()
+                current, peak = tracemalloc.get_traced_memory()
+                top_stats = snapshot.statistics('lineno')
+                print(f"Process {mp.current_process().name}:")
+                print("\t==>  ", f"Peak memory usage: {peak / 10**6:.2f} MB")
+                for stat in top_stats[:5]:
+                    print('\t-', stat)
+            rprint(f"Batch: {i}\t/ {len(dataLoader)}")
+
+    # "close" the memmap
+    outFile.flush()
+    del outFile
 
 
-def worker(rank, worldSize, batchSize, dataset, barrier):
+def worker(rank, worldSize, batchSize, dataset, outFile, barrier):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
@@ -244,31 +258,32 @@ def worker(rank, worldSize, batchSize, dataset, barrier):
     model = DDP(model, device_ids=devIds)
     model.eval()
 
-    return infer_loop(rank, worldSize, model, device, dataLoader)
+    outFile += "." + str(rank)
+    infer_loop(rank, worldSize, batchSize, model, device, dataLoader, outFile)
 
 
 # TODO: stop hardcoding embedding dimensionality
-def batchInfer(dataset, batchSize=16, worldSize=None):
+def batchInfer(dataset, outFile, batchSize=16, worldSize=None):
     device = None
-    worldSize = None
     if torch.cuda.is_available():
         print("We're using", torch.cuda.device_count(), "GPUs!")
         device = 'cuda'
         if worldSize is None:
             worldSize = torch.cuda.device_count()
     else:
-        print("We're using CPU.")
         device = 'cpu'
         if worldSize is None:
             worldSize = 1
+        print(f"We're using {worldSize} CPUs.")
 
     # big operation
     mp.set_start_method('spawn', force=True)
     with mp.Pool(worldSize) as pool:
         with mp.Manager() as manager:
             barrier = manager.Barrier(worldSize)
-            baseArgs = (worldSize, batchSize, dataset, barrier)
+            baseArgs = (worldSize, batchSize, dataset, outFile, barrier)
             args = [(rank,) + baseArgs for rank in range(worldSize)]
+            # TODO: no longer need map: remove pool
             results = list(pool.starmap(worker, args))
 
-    return sum(results, [])
+    # return np.array(sum(results, []))
