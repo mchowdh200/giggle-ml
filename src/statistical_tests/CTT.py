@@ -1,49 +1,59 @@
 import numpy as np
-from scipy.spatial.distance import cdist
+from sklearn.metrics.pairwise import euclidean_distances
 
 
-def squared_euclidean_distance(point1, point2):
-    return np.sum((point2 - point2) ** 2)
+"""
+    Cluster Tendency Test (CTT):
+
+- Evaluates how well region embeddings can form clusters
+- Higher score indicates greater tendency to cluster
+- Only requires the embeddings themselves, not training data
+
+High Level:
+    (After initial subsampling)
+    1. Subsample (again) for test points.
+    2. For each, get **single** nearest neighbor.
+    3. Sum these distances and distances to a random(ly generated, not sampled) point
+    4. Call the neighbor distances D_T and random D_R, CTT = D_R / (D_R + D_T)
+
+Notes:
+    Initial Subsampling:
+    "To reduce the computational complexity, we first sample N_S = min(10^4, N) region embeddings from the original N embeddings."
+
+    **Single** nearest neighbor to test point:
+    The paper does not justify this decision, but it was likely for performance reasons.
+"""
 
 
-def calculate_DT(Q, NT):
-    # Function to calculate DT
-    DT = 0
-    for q_star in Q:
-        q_hat = min(Q[np.where(~np.all(Q == q_star, axis=1))],
-                    key=lambda x: squared_euclidean_distance(x, q_star))
-        DT += squared_euclidean_distance(q_star, q_hat)
-    return DT
+def cluster_tendency_test(embeds, testPointRate=.1, considerationLimit=10000):
+    # TODO: scipy::euclidean_distances room for optimization?
+    # And currently naive KNN.
 
+    # Sample embeds if necessary
+    if len(embeds) > considerationLimit:
+        indices = np.random.choice(embeds, considerationLimit, replace=False)
+        embeds = embeds[indices]
 
-def calculate_DR(Q, NT):
-    # Function to calculate DR
-    DR = 0
-    for _ in range(NT):
-        # Generate a random point uniformly distributed within the range of embeddings in Q
-        u = np.random.uniform(Q.min(axis=0), Q.max(axis=0))
-        # Find the nearest neighbor to u in Q
-        q_tilde = min(Q, key=lambda x: squared_euclidean_distance(x, u))
-        # Calculate squared Euclidean distance between u and q_tilde
-        DR += squared_euclidean_distance(u, q_tilde)
-    return DR
+    # Further subsample for test points
+    testIndices = np.random.choice(
+        len(embeds), len(embeds) * testPointRate, replace=False)
+    testPoints = embeds[testIndices]
 
+    # Calculate distances for test embeddings
+    distTests = euclidean_distances(testPoints, embeds)  # matrix: all combos
+    np.fill_diagonal(distTests, np.inf)  # Exclude self-distances
+    d_t = np.sum(np.min(distTests, axis=1))  # Get NN & sum dists at once
 
-def main(embeds, num_iterations=10):
-    # Limit NS to 10000 or the size of embeds if it's smaller
-    NS = min(10000, len(embeds))
-    NT = NS // 10  # NT is 10% of NS
+    # Generate random points
+    embedMin = np.min(embeds, axis=0)
+    embedMax = np.max(embeds, axis=0)
+    embedDim = embeds.shape[1]
+    randomPoints = np.random.uniform(
+        embedMin, embedMax, (len(testPoints), embedDim))
 
-    Q = embeds[np.random.choice(embeds.shape[0], NS, replace=False)]
+    # Calculate distances for random points
+    distsRandom = euclidean_distances(randomPoints, embeds)
+    d_r = np.sum(np.min(distsRandom, axis=1))
 
-    DT_sum = 0
-    DR_sum = 0
-    for _ in range(num_iterations):
-        T = Q[np.random.choice(Q.shape[0], NT, replace=False)]
-        DT_sum += calculate_DT(T, NT)
-        DR_sum += calculate_DR(Q, NT)
-
-    print("Sum of squared Euclidean distances between test points and their nearest neighbors (DT):", DT_sum)
-    print("Sum of squared Euclidean distances between random points and their nearest neighbors in Q (DR):", DR_sum)
-    CTT = DR_sum / (DR_sum + DT_sum)
-    print("Cluster Tendency Test (CTT) Score:", CTT)
+    # Calculate CTT score
+    return d_r / (d_r + d_t)
