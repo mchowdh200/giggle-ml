@@ -4,6 +4,7 @@ from sklearn.metrics.pairwise import euclidean_distances
 
 """
     Cluster Tendency Test (CTT):
+    Derived from the Hopkins Statistic
 
 - Evaluates how well region embeddings can form clusters
 - Higher score indicates greater tendency to cluster
@@ -25,29 +26,35 @@ Notes:
 """
 
 
-def cluster_tendency_test(embeds, testPointRate=.1, considerationLimit=10000):
+def ctt(embeds, testPointRate=.1, considerationLimit=10000):
     # TODO: scipy::euclidean_distances room for optimization?
     # And currently naive KNN.
 
     # Sample embeds if necessary
     if len(embeds) > considerationLimit:
-        indices = np.random.choice(embeds, considerationLimit, replace=False)
+        indices = np.random.choice(
+            len(embeds), considerationLimit, replace=False)
         embeds = embeds[indices]
 
     # Further subsample for test points
-    testIndices = np.random.choice(
-        len(embeds), len(embeds) * testPointRate, replace=False)
-    testPoints = embeds[testIndices]
+    testPointAmnt = int(len(embeds) * testPointRate)
+    testPointIndices = np.random.choice(
+        len(embeds), testPointAmnt, replace=False)
+    testPoints = embeds[testPointIndices]
 
     # Calculate distances for test embeddings
+    # TODO: consider optimization with KNN (kd/ball?) trees
     distTests = euclidean_distances(testPoints, embeds)  # matrix: all combos
-    np.fill_diagonal(distTests, np.inf)  # Exclude self-distances
+    # Account for self-dist
+    distTests[np.arange(len(testPoints)), testPointIndices] = np.inf
     d_t = np.sum(np.min(distTests, axis=1))  # Get NN & sum dists at once
 
     # Generate random points
     embedMin = np.min(embeds, axis=0)
     embedMax = np.max(embeds, axis=0)
     embedDim = embeds.shape[1]
+    # TODO: adjust min max based on percetile to account
+    # for distribution shape
     randomPoints = np.random.uniform(
         embedMin, embedMax, (len(testPoints), embedDim))
 
@@ -56,4 +63,6 @@ def cluster_tendency_test(embeds, testPointRate=.1, considerationLimit=10000):
     d_r = np.sum(np.min(distsRandom, axis=1))
 
     # Calculate CTT score
-    return d_r / (d_r + d_t)
+    score = d_r / (d_r + d_t)
+    print(f"CTT: {score}")
+    return score
