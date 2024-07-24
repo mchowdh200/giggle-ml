@@ -1,76 +1,73 @@
 import numpy as np
-from sklearn.metrics.pairwise import cosine_distances
-from sklearn.neighbors import NearestNeighbors
-from joblib import Parallel, delayed
+from sklearn.metrics.pairwise import euclidean_distances
+from scipy.spatial import cKDTree
 
 
-def genome_distance(r, r_tilde, high_number=1e9):
-    c, s, e = r
-    c_tilde, s_tilde, e_tilde = r_tilde
+def npt(embeds, intervals, k=100, testPointRate=.1):
+    """
+    Neighborhood Preserving Test (NPT):
 
-    s, e, s_tilde, e_tilde = int(s), int(e), int(s_tilde), int(e_tilde)
+    - Evaluates how well the genomic neighborhood of regions is preserved in embedding space
+    - Calculates overlap between k-nearest neighbors in genome space vs embedding space
+    - Requires genomic coordinates but not training data
 
-    if c == c_tilde:
-        return max(s - e_tilde, s_tilde - e, 0)
-    return high_number
+    High Level:
+        1. Sample regions
+        2. For each sampled region, find K-nearest neighbors in the
+            (total, not sampled) genome space and embedding space.
+        3. Calculate overlap ratio between these two sets of neighbors
+        4. Average overlap ratios to get Neighborhood Preserving Ratio (NPR)
+        5. Compare NPR to that of random embeddings to get significance (SNPR)
+        6. Typically calculated for various K values
+    """
 
+    querySize = int(testPointRate * len(embeds))
+    sampleIndices = np.random.choice(len(embeds), querySize, replace=False)
 
-def prepare_bed_data(regions):
-    return np.array([[chromosome, int(start), int(end)] for chromosome, start, end in regions])
+    queryEmbeds = embeds[sampleIndices]
+    queryIntervals = intervals[sampleIndices]
 
+    # Build KD-trees for the full datasets
+    embedTree = cKDTree(embeds)
+    intervalTree = cKDTree(intervals)
 
-def calculate_qNPR(B, Q, K, high_number=1e9, n_jobs=1):
-    Q = np.array(Q)
-    overlaps = []
+    # Find K-nearest neighbors in both spaces
+    npr = get_npr(embedTree, intervalTree,
+                  queryEmbeds, queryIntervals, k)
 
-    # Create a NearestNeighbors object for embedding space using cosine distance
-    nbrs_embedding = NearestNeighbors(
-        n_neighbors=K, metric='cosine', n_jobs=n_jobs).fit(Q)
+    # Calculate NPR for random embeddings
+    randomEmbeds = np.random.rand(*embeds.shape)
+    randomTree = cKDTree(randomEmbeds)
+    nprRandom = get_npr(randomTree, intervalTree,
+                        queryEmbeds, queryIntervals, k)
 
-    def calculate_overlap(i):
-        # Find K-nearest neighbors in genome space
-        distances_genome = []
-        for j in range(len(B)):
-            if i != j:
-                distances_genome.append(
-                    (genome_distance(B[i], B[j], high_number), j))
-        distances_genome.sort(key=lambda x: x[0])
-        indices_genome = [idx for _, idx in distances_genome[:K]]
+    # Calculate SNPR
+    snpr = np.log10(npr / nprRandom)
 
-        # Find K-nearest neighbors in embedding space using cosine distance
-        distances_embedding, indices_embedding = nbrs_embedding.kneighbors([
-                                                                           Q[i]])
+    print(f"NPR: {npr:.4f}")
+    print(f"Random NPR: {nprRandom:.4f}")
+    print(f"SNPR: {snpr:.4f}")
 
-        # Calculate overlap ratio
-        overlap = len(set(indices_genome).intersection(
-            set(indices_embedding[0]))) / K
-        return overlap
-
-    overlaps = Parallel(n_jobs=n_jobs)(
-        delayed(calculate_overlap)(i) for i in range(len(Q)))
-
-    qNPR = np.mean(overlaps)
-    return qNPR
-
-
-def create_pairs(regions, embeddings):
-    num_regions = len(regions)
-    if num_regions > len(regions) // 2:
-        num_regions = len(regions) // 2
-
-    region_pairs = [(regions[i], regions[i + 1])
-                    for i in range(0, 2 * num_regions, 2)]
-    embedding_pairs = [(i, i + 1) for i in range(0, 2 * num_regions, 2)]
-
-    return region_pairs, embedding_pairs
+    return {
+        'NPR': npr,
+        'Random NPR': nprRandom,
+        'SNPR': snpr
+    }
 
 
-def main(regions, embeds, n_jobs=2, k=10):
-    B = prepare_bed_data(regions)
-    Q = embeds  # :(
-
-    # Ensure the number of regions and embeddings match
-    region_pairs, embedding_pairs = create_pairs(regions, Q)
-
-    qNPR = calculate_qNPR(B, Q, k, n_jobs=n_jobs)
-    print(f"qNPR: {qNPR}")
+def get_npr(tree1, tree2, queries1, queries2, k):
+    """
+    Calculate the NPR between two KD-trees
+    """
+    # print(queries1, queries2)
+    _, neighbors1 = tree1.query(queries1, k=k+1)
+    # print(neighbors1)
+    _, neighbors2 = tree2.query(queries2, k=k+1)
+    # print(neighbors2)
+    overlap = [set(n1[1:]) & set(n2[1:])
+               for n1, n2 in zip(neighbors1, neighbors2)]
+    # print(overlap)
+    percentOverlap = [len(o) / k for o in overlap]
+    # print()
+    # print()
+    return np.mean(percentOverlap)

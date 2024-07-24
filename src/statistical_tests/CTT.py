@@ -2,31 +2,30 @@ import numpy as np
 from sklearn.metrics.pairwise import euclidean_distances
 
 
-"""
-    Cluster Tendency Test (CTT):
-    Derived from the Hopkins Statistic
-
-- Evaluates how well region embeddings can form clusters
-- Higher score indicates greater tendency to cluster
-- Only requires the embeddings themselves, not training data
-
-High Level:
-    (After initial subsampling)
-    1. Subsample (again) for test points.
-    2. For each, get **single** nearest neighbor.
-    3. Sum these distances and distances to a random(ly generated, not sampled) point
-    4. Call the neighbor distances D_T and random D_R, CTT = D_R / (D_R + D_T)
-
-Notes:
-    Initial Subsampling:
-    "To reduce the computational complexity, we first sample N_S = min(10^4, N) region embeddings from the original N embeddings."
-
-    **Single** nearest neighbor to test point:
-    The paper does not justify this decision, but it was likely for performance reasons.
-"""
-
-
 def ctt(embeds, testPointRate=.1, considerationLimit=10000):
+    """
+    Cluster Tendency Test (CTT):
+        Derived from the Hopkins Statistic
+
+    - Evaluates how well region embeddings can form clusters
+    - Higher score indicates greater tendency to cluster
+    - Only requires the embeddings themselves, not training data
+
+    High Level:
+        (After initial subsampling)
+        1. Subsample (again) for test points.
+        2. For each, get **single** nearest neighbor.
+        3. Sum these distances and distances to a random(ly generated, not sampled) point
+        4. Call the neighbor distances D_T and random D_R, CTT = D_R / (D_R + D_T)
+
+    Notes:
+        Initial Subsampling:
+        "To reduce the computational complexity, we first sample N_S = min(10^4, N) region embeddings from the original N embeddings."
+
+        **Single** nearest neighbor to test point:
+        The paper does not justify this decision, but it was likely for performance reasons.
+    """
+
     # TODO: scipy::euclidean_distances room for optimization?
     # And currently naive KNN.
 
