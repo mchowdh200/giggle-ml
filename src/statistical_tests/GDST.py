@@ -47,7 +47,7 @@ def gdst(embeds, intervals, considerLimit=100000):
     slope, intercept, r_value, p_value, std_err = linregress(
         genomDists, embedDists)
 
-    print(f"GSDT Score (slope): {slope:.6f}")
+    print(f"GDST Score (slope): {slope:.6f}")
     print(f"Correlation: {correl:.6f}")
 
     return {

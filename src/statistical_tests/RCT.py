@@ -1,62 +1,56 @@
+import numpy as np
 from sklearn.model_selection import KFold
 from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import r2_score
-import numpy as np
-import argparse
 
 
-def main(B, Q, num_folds=2):
+def rct(embeds, seqs, folds=5):
     """
-        Calculate RCT score for given data.
-        Parameters:
-        B: NpArray, Binary embeddings (labels).
-        Q: NpArray, Query embeddings (inputs).
+    Reconstruction Test (RCT):
+
+    - Evaluates how much of the original training information is preserved in the embeddings
+    - Uses a regression task to predict original binary data from embeddings
+    - Requires access to both embeddings and original sequence nucleotides
+
+    High Level:
+        1. Perform K-fold cross-validation
+        2. For each fold:
+            a. Train a neural network to predict input sequences from embeddings
+            b. Calculate R^2 score on the test set
+        3. RCT score is the average R^2 across folds
+
+    Notes:
+        - Uses a simple multi-layer perceptron for the regression task
+        - Paper uses a 200 hidden layer with ReLU activations
     """
 
-    kf = KFold(n_splits=num_folds)
-    r2_scores = []
+    kf = KFold(n_splits=folds, shuffle=True)
+    scores = []
 
-    for train_index, test_index in kf.split(B):
-        X_train, X_test = Q[train_index], Q[test_index]
-        y_train, y_test = B[train_index], B[test_index]
+    for i, (train_index, test_index) in enumerate(kf.split(embeds)):
+        X_train, X_test = embeds[train_index], embeds[test_index]
+        y_train, y_test = seqs[train_index], seqs[test_index]
 
-        # Define and train the neural network
-        model = MLPRegressor(hidden_layer_sizes=(100,), random_state=42)
+        # Initialize and train the model
+        model = MLPRegressor(hidden_layer_sizes=(
+            200,), max_iter=1000, activation='relu')
+
+        print(f"Training Fold \t{i + 1} / {folds}")
         model.fit(X_train, y_train)
 
-        # Make predictions on the test set
+        # Predict and calculate R^2 score
         y_pred = model.predict(X_test)
-
-        # Calculate R2 score
         r2 = r2_score(y_test, y_pred)
+        scores.append(r2)
+        print(" - Complete")
 
-        r2_scores.append(r2)
+    rct = np.mean(scores)
+    stddev = np.std(scores)
 
-        # Calculate the average R2 score across all folds
-        rct_score = np.mean(r2_scores)
-    return rct_score
+    print(f"RCT Score: {rct:.4f}")
+    print(f"Std Dev: {stddev:.4f}")
 
-
-if __name__ == "__main__":
-    # example usage
-    parser = argparse.ArgumentParser(
-        description="Calculate RCT score for given data.")
-    parser.add_argument(
-        "-b", type=str, help="File containing binary embeddings (labels).", required=True)
-    parser.add_argument(
-        "-q", type=str, help="File containing query embeddings (inputs).", required=True)
-    parser.add_argument(
-        "-f", type=int, help="Number of folds for K-fold cross-validation.", default=2)
-    args = parser.parse_args()
-
-    try:
-        B = np.loadtxt(args.b)
-        Q = np.loadtxt(args.q)
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        exit(1)
-
-    num_folds = args.f
-
-    rct_score = main(B, Q, num_folds)
-    print("RCT score:", rct_score)
+    return {
+        'Rct': rct,
+        'StdDev': np.std(scores)
+    }
