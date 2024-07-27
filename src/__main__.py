@@ -1,8 +1,9 @@
-from statistical_tests import tests
-from gpu_embeds.from_fasta import generate_embeddings
-
-
-# TODO: repair RCT & CTT
+from gpu_embeds.inference_batch import batchInfer
+from gpu_embeds.from_genomic_benchmarks import main as genom_main
+import numpy as np
+from types import SimpleNamespace
+from gpu_embeds.from_fasta import BedDataset, SeqDataset
+import statistical_tests.tests as tests
 
 
 def get_intervals(bedPath):
@@ -17,32 +18,49 @@ def get_intervals(bedPath):
     return intervals
 
 
-# from gpu_embeds.from_genomic_benchmarks import main
-def main():
+def embeds(limit, batchSize, paths, workers, bufferSize):
+    print("Preparing bed dataset...")
+    bedDs = BedDataset(paths.bed, limit=limit,
+                       inMemory=False, bufferSize=bufferSize)
+    print("Preparing fasta dataset...")
+    fastaDs = SeqDataset(paths.fasta, bedDs)
+    print("Running inference...")
+    batchInfer(fastaDs, paths.embeds, batchSize, workers)
 
-    # def main_():
-    # TODO: hoist defaults into generate_embeddings fn signature?
-    limit = 100
-    batchSize = 5
-    # fastaPath = "./data/synthetic/seqs.fa"
-    # bedPath = "./data/synthetic/universe_0.bed"
-    fastaPath = "./data/hg38.fa"
-    bedPath = "./data/hg38_trf.bed"
-    # outPath = "./data/synthetic/uni_0_embeds.npy"
-    outPath = None
 
-    intervals = get_intervals(bedPath)[:limit]
-    embeds = generate_embeddings(
-        fastaPath,
-        bedPath,
-        batchSize=batchSize,
-        limit=limit)
+def run_tests(limit, paths):
+    bedDs = BedDataset(paths.bed, limit=limit, inMemory=True)
+    limit = min(limit, len(bedDs))
+    intervals = [bedDs[i] for i in range(limit)]
+
+    embeds = np.memmap(paths.embeds + ".0", dtype=np.float32, mode="r")
+    embeds = embeds.reshape(-1, 256)
 
     print()
+    tests.ctt(embeds)
     tests.gdst(intervals, embeds)
-    tests.npt(intervals, embeds)
+    # tests.npt(intervals, embeds)
     tests.cct(intervals, embeds)
 
 
 if __name__ == "__main__":
-    main()
+    print("This is main")
+
+    # INFO: Config
+    limit = 1000
+    batchSize = 5
+    workers = 2
+    bufferSize = 200
+
+    # paths = SimpleNamespace(
+    #     fasta="./data/hg38.fa",
+    #     bed="./data/hg38_trf.bed",
+    #     embeds="./data/embeddings.npy")
+    paths = SimpleNamespace(
+        fasta="./data/synthetic/seqs.fa",
+        bed="./data/synthetic/universe_0.bed",
+        embeds="./data/synthetic/embeds")
+
+    # embeds(limit, batchSize, paths, workers, bufferSize)
+    run_tests(limit, paths)
+    # genom_main(limit, batchSize, paths.embeds)
