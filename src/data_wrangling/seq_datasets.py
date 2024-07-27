@@ -8,18 +8,6 @@ from functools import cached_property
 from pyfaidx import Fasta
 
 
-# TODO: extract
-class ListDataset(torch.utils.data.Dataset):
-    def __init__(self, contents):
-        self.contents = contents
-
-    def __len__(self):
-        return len(self.contents)
-
-    def __getitem__(self, idx):
-        return self.contents[idx]
-
-
 class BedDataset(torch.utils.data.Dataset):
     def __init__(self, bedPath, inMemory=True, bufferSize=100, limit=None):
         self.bedPath = bedPath
@@ -71,27 +59,15 @@ class BedDataset(torch.utils.data.Dataset):
             return self.bedBuffer[idx]
 
 
-class SeqDataset(torch.utils.data.Dataset):
+class FastaDataset(torch.utils.data.Dataset):
     def __init__(self, fastaPath, bedDataset):
         self.fastaPath = fastaPath
         self.bedDataset = bedDataset
-        self.padToLength = 500
-        self.tokenizer = self.prepareTokenizer()
 
     @cached_property
     def index(self):
         # why one_based_attributes=True by default?
         return Fasta(self.fastaPath, one_based_attributes=False)
-
-    def prepareTokenizer(self):
-        return CharacterTokenizer(
-            # add DNA characters, N is uncertain
-            characters=['A', 'C', 'G', 'T', 'N'],
-            # to account for special tokens, like EOS
-            model_max_length=self.padToLength + 2,
-            add_special_tokens=False,  # we handle special tokens elsewhere
-            padding_side='left',  # since HyenaDNA is causal, we pad on the left
-        )
 
     def __len__(self):
         return len(self.bedDataset)
@@ -105,6 +81,31 @@ class SeqDataset(torch.utils.data.Dataset):
 
         if len(seq) == 0:
             raise ValueError(f"Failed fasta mapping for {name}:{start}-{stop}")
+
+        return seq
+
+
+class TokenizingDataset(torch.utils.data.Dataset):
+    def __init__(self, fastaDataset):
+        self.fastaDataset = fastaDataset
+        self.padToLength = 500
+        self.tokenizer = self.prepareTokenizer()
+
+    def prepareTokenizer(self):
+        return CharacterTokenizer(
+            # add DNA characters, N is uncertain
+            characters=['A', 'C', 'G', 'T', 'N'],
+            # to account for special tokens, like EOS
+            model_max_length=self.padToLength + 2,
+            add_special_tokens=False,  # we handle special tokens elsewhere
+            padding_side='left',  # since HyenaDNA is causal, we pad on the left
+        )
+
+    def __len__(self):
+        return len(self.fastaDataset)
+
+    def __getitem__(self, idx):
+        seq = self.fastaDataset[idx]
 
         # Begin tokenization
         seq = seq.upper()  # aCgT -> ACGT
