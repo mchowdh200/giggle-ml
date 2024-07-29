@@ -39,9 +39,11 @@ def gdst(embeds, intervals, considerLimit=100000):
     correl = np.corrcoef(genomDists, embedDists)[0, 1]
 
     # Filter for finite distances
-    finite_mask = np.isfinite(genomDists)
-    embedDists = embedDists[finite_mask]
-    genomDists = genomDists[finite_mask]
+    finiteMask = np.isfinite(genomDists)
+    print(embedDists, genomDists)
+    embedDists = embedDists[finiteMask]
+    genomDists = genomDists[finiteMask]
+    print(embedDists, genomDists)
 
     # Fit linear regression
     slope, intercept, r_value, p_value, std_err = linregress(

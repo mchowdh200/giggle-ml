@@ -24,8 +24,15 @@ def npt(embeds, intervals, k=100, testPointRate=.1):
     querySize = int(testPointRate * len(embeds))
     sampleIndices = np.random.choice(len(embeds), querySize, replace=False)
 
-    queryEmbeds = embeds[sampleIndices]
-    queryIntervals = intervals[sampleIndices]
+    queryEmbeds = [None] * querySize
+    queryIntervals = [None] * querySize
+
+    intervals = list(map(lambda x: (x[1], x[2]), intervals))
+
+    for i, idx in enumerate(sampleIndices):
+        queryEmbeds[i] = embeds[idx]
+        # TODO: separate kdTree for each chromosome
+        queryIntervals[i] = intervals[idx]
 
     # Build KD-trees for the full datasets
     embedTree = cKDTree(embeds)
