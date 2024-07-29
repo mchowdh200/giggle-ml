@@ -21,8 +21,9 @@ def npt(embeds, intervals, k=100, testPointRate=.1):
         6. Typically calculated for various K values
     """
 
-    querySize = int(testPointRate * len(embeds))
-    sampleIndices = np.random.choice(len(embeds), querySize, replace=False)
+    considerLimit = min(len(embeds), len(intervals))
+    querySize = int(testPointRate * considerLimit)
+    sampleIndices = np.random.choice(considerLimit, querySize, replace=False)
 
     queryEmbeds = [None] * querySize
     queryIntervals = [None] * querySize

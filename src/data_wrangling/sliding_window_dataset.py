@@ -57,9 +57,9 @@ class SlidingWindowDataset(Dataset):
             raise ValueError(
                 f"Gap size error above {errThreshold}. Backing sequence is too short.", error)
 
-        for i in range(0, len(backingData) - windowSize, gapSize):
-            left = i
-            right = i + windowSize
+        for i in range(self.spreeCount):
+            left = i * gapSize
+            right = left + windowSize
             yield backingData[left:right]
 
     def __getitem__(self, idx):

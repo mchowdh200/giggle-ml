@@ -3,7 +3,7 @@ from scipy.spatial.distance import cosine
 from scipy.stats import linregress
 
 
-def gdst(embeds, intervals, considerLimit=100000):
+def gdst(embeds, intervals, considerLimit=1000):
     """
     Genome Distance Scaling Test (GDST):
 
@@ -22,11 +22,11 @@ def gdst(embeds, intervals, considerLimit=100000):
         - Genome distance is calculated as base pair distance on same chromosome, infinity for different chromosomes
     """
 
-    considerLimit = min(considerLimit, len(embeds) * (len(embeds) - 1) // 2)
-    print(f"Using {considerLimit} pairs of regions")
+    considerLimit = min(considerLimit, len(embeds), len(intervals))
+    print(f"Using {considerLimit} regions")
 
     # Sample pairs of regions
-    indices = np.random.choice(len(embeds), (considerLimit, 2))
+    indices = np.random.choice(considerLimit, (considerLimit, 2))
 
     # Calculate embedding distances (ED)
     embedDists = np.array([cosine(embeds[i], embeds[j]) for i, j in indices])
@@ -40,10 +40,8 @@ def gdst(embeds, intervals, considerLimit=100000):
 
     # Filter for finite distances
     finiteMask = np.isfinite(genomDists)
-    print(embedDists, genomDists)
     embedDists = embedDists[finiteMask]
     genomDists = genomDists[finiteMask]
-    print(embedDists, genomDists)
 
     # Fit linear regression
     slope, intercept, r_value, p_value, std_err = linregress(

@@ -4,7 +4,7 @@ from data_wrangling.seq_datasets import TokenizedDataset
 
 from gpu_embeds.inference_batch import batchInfer
 import numpy as np
-from scipy.spatial.distance import cosine
+from matplotlib import pyplot as plt
 
 
 def swt(embedOutPath, fastaDataset, gapFactor=.1, considerLimit=128):
@@ -32,16 +32,29 @@ def swt(embedOutPath, fastaDataset, gapFactor=.1, considerLimit=128):
         if bins[binIdx] is None:
             bins[binIdx] = []
 
-        rootIdx = i - binIdx
+        rootIdx = i // binAmnt * binAmnt  # 0th item of bin
         rootEmbed = embeds[rootIdx]
         thisEmbed = embeds[i]
-        # TODO: is this the best metric?
-        dist = cosine(rootEmbed, thisEmbed)
 
+        # TODO: is this the best metric?
+        dist = cosine_similarity(rootEmbed, thisEmbed)
+        # dist = np.linalg.norm(rootEmbed - thisEmbed)
         bins[binIdx].append(dist)
 
     avgs = [np.mean(bin) for bin in bins]
+    labels = [None] * binAmnt
 
     for i in range(len(avgs)):
-        label = 100 - round(i * gapFactor * 100)
-        print(f'Bin {label}%: {avgs[i]}')
+        labels[i] = 100 - round(i * gapFactor * 100)
+        print(f'Bin {labels[i]}%: {avgs[i]}')
+
+    plt.plot(labels, avgs)
+    plt.title('Intersection Similarity')
+    plt.xlabel('Overlap %')
+    plt.ylabel('Cosine similarity')
+    plt.xticks(labels)
+    plt.show()
+
+
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))

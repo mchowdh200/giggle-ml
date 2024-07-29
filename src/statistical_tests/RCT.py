@@ -28,8 +28,10 @@ def rct(embeds, seqs, folds=5):
     scores = []
 
     for i, (train_index, test_index) in enumerate(kf.split(embeds)):
-        X_train, X_test = embeds[train_index], embeds[test_index]
-        y_train, y_test = seqs[train_index], seqs[test_index]
+        X_train = subseq(embeds, train_index)
+        X_test = subseq(embeds, test_index)
+        y_train = subseq(seqs, train_index)
+        y_test = subseq(seqs, test_index)
 
         # Initialize and train the model
         model = MLPRegressor(hidden_layer_sizes=(
@@ -54,3 +56,13 @@ def rct(embeds, seqs, folds=5):
         'Rct': rct,
         'StdDev': np.std(scores)
     }
+
+
+def subseq(data, indices):
+    return np.array([data[i] for i in indices])
+
+
+def dna2float(seqs):
+    map = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 4}
+    array = [[map[c] for c in seq] for seq in seqs]
+    return array
