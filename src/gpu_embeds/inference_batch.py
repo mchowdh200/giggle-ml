@@ -22,7 +22,6 @@ import numpy as np
 
 from gpu_embeds.standalone_hyenadna import HyenaDNAModel
 from gpu_embeds.standalone_hyenadna import CharacterTokenizer
-from gpu_embeds.genomic_benchmark_dataset import GenomicBenchmarkDataset
 from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
 from gpu_embeds.standalone_hyenadna import CharacterTokenizer
 
@@ -204,6 +203,7 @@ def infer_loop(rank, worldSize, batchSize, model, device, dataLoader, outPath):
     rprint = lambda *args: print(f"[{rank}]:", *args)
     outFile = np.memmap(outPath, dtype='float32', mode='w+',
                         shape=(len(dataLoader) * batchSize, 256))
+    # TODO: assumption regarding shape does not apply in case of uneven batch sizes
 
     with torch.inference_mode():
         tracemalloc.start()
@@ -263,7 +263,7 @@ def worker(rank, worldSize, batchSize, dataset, outFile, barrier):
 
 
 # TODO: stop hardcoding embedding dimensionality
-def batchInfer(dataset, outFile, batchSize=16, worldSize=None):
+def batchInfer(dataset, outPath, batchSize=16, worldSize=None):
     device = None
     if torch.cuda.is_available():
         print("We're using", torch.cuda.device_count(), "GPUs!")
@@ -281,9 +281,26 @@ def batchInfer(dataset, outFile, batchSize=16, worldSize=None):
     with mp.Pool(worldSize) as pool:
         with mp.Manager() as manager:
             barrier = manager.Barrier(worldSize)
-            baseArgs = (worldSize, batchSize, dataset, outFile, barrier)
+            baseArgs = (worldSize, batchSize, dataset, outPath, barrier)
             args = [(rank,) + baseArgs for rank in range(worldSize)]
             # TODO: no longer need map: remove pool
             results = list(pool.starmap(worker, args))
 
-    # return np.array(sum(results, []))
+    # aggregate results into a single file and delete others
+
+    outFile = np.memmap(outPath, dtype='float32', mode='w+',
+                        shape=(len(dataset), 256))
+    nextIdx = 0
+
+    for rank in range(worldSize):
+        rankOutPath = outPath + "." + str(rank)
+
+        rankFile = np.memmap(rankOutPath, dtype='float32', mode='r')
+        rankFile = rankFile.reshape((-1, 256))
+        outFile[nextIdx:nextIdx + len(rankFile)] = rankFile
+
+        nextIdx += len(rankFile)
+        del rankFile
+        os.remove(outPath + "." + str(rank))
+
+    outFile.flush()

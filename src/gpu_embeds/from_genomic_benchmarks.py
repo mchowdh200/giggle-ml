@@ -1,9 +1,9 @@
 import torch
 import numpy as np
 from gpu_embeds.inference_batch import batchInfer
-from gpu_embeds.truncated_dataset import TruncatedDataset
+from data_wrangling.truncated_dataset import TruncatedDataset
+from data_wrangling.genomic_benchmark_dataset import GenomicBenchmarkDataset
 from gpu_embeds.standalone_hyenadna import CharacterTokenizer
-from gpu_embeds.genomic_benchmark_dataset import GenomicBenchmarkDataset
 
 
 # TODO: extract (from_[fasta, genomicbench]) similarity
