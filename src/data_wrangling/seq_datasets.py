@@ -85,13 +85,13 @@ class FastaDataset(torch.utils.data.Dataset):
         return seq
 
 
-class TokenizingDataset(torch.utils.data.Dataset):
+class TokenizedDataset(torch.utils.data.Dataset):
     def __init__(self, fastaDataset):
         self.fastaDataset = fastaDataset
         self.padToLength = 500
-        self.tokenizer = self.prepareTokenizer()
 
-    def prepareTokenizer(self):
+    @cached_property
+    def tokenizer(self):
         return CharacterTokenizer(
             # add DNA characters, N is uncertain
             characters=['A', 'C', 'G', 'T', 'N'],
@@ -117,3 +117,6 @@ class TokenizingDataset(torch.utils.data.Dataset):
 
         tok = tok['input_ids']
         return torch.LongTensor(tok)
+
+
+# TODO:! Inference is much slower when multiple workers, synchronization issue?
