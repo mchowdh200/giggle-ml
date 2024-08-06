@@ -41,18 +41,31 @@ def swt(embedOutPath, fastaDataset, gapFactor=.1, considerLimit=128):
         # dist = np.linalg.norm(rootEmbed - thisEmbed)
         bins[binIdx].append(dist)
 
-    avgs = [np.mean(bin) for bin in bins]
-    labels = [None] * binAmnt
+    avgs = [None] * binAmnt
+    error = [None] * binAmnt
+    for i, bin in enumerate(bins):
+        avgs[i] = np.mean(bin)
+        std = np.std(bin)
+        n = len(bin)
+        # 1.96 is the z-score for 95% confidence
+        error[i] = 1.96 * std / np.sqrt(n)
 
+    labels = [None] * binAmnt
     for i in range(len(avgs)):
         labels[i] = 100 - round(i * gapFactor * 100)
         print(f'Bin {labels[i]}%: {avgs[i]}')
 
-    plt.plot(labels, avgs)
     plt.title('Intersection Similarity')
     plt.xlabel('Overlap %')
     plt.ylabel('Cosine similarity')
+
+    # Line graph
+    plt.plot(labels, avgs)
     plt.xticks(labels)
+    # Error bars
+    plt.errorbar(labels, avgs, yerr=error, fmt='o', color='black',
+                 ecolor='lightgray', elinewidth=2, capsize=0)
+
     plt.show()
 
 
