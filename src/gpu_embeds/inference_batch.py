@@ -273,7 +273,7 @@ def batchInfer(dataset, outPath, batchSize=16, worldSize=None):
     else:
         device = 'cpu'
         if worldSize is None:
-            worldSize = 1
+            worldSize = 4
         print(f"We're using {worldSize} CPUs.")
 
     # big operation
