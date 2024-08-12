@@ -37,8 +37,8 @@ def swt(embedOutPath, fastaDataset, gapFactor=.1, considerLimit=128):
         thisEmbed = embeds[i]
 
         # TODO: is this the best metric?
-        dist = cosine_similarity(rootEmbed, thisEmbed)
-        # dist = np.linalg.norm(rootEmbed - thisEmbed)
+        # dist = cosine_similarity(rootEmbed, thisEmbed)
+        dist = np.linalg.norm(rootEmbed - thisEmbed)
         bins[binIdx].append(dist)
 
     avgs = [None] * binAmnt
@@ -57,7 +57,7 @@ def swt(embedOutPath, fastaDataset, gapFactor=.1, considerLimit=128):
 
     plt.title('Intersection Similarity')
     plt.xlabel('Overlap %')
-    plt.ylabel('Cosine similarity')
+    plt.ylabel('Euclidian Distance')
 
     # Line graph
     plt.plot(labels, avgs)
