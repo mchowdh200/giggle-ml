@@ -2,7 +2,7 @@ from gpu_embeds.inference_batch import batchInfer
 from gpu_embeds.from_genomic_benchmarks import main as genom_main
 import numpy as np
 from types import SimpleNamespace
-from data_wrangling.seq_datasets import BedDataset, SeqDataset
+from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
 import statistical_tests.tests as tests
 
 
@@ -21,36 +21,43 @@ def get_intervals(bedPath):
 def embeds(limit, batchSize, paths, workers, bufferSize):
     print("Preparing bed dataset...")
     bedDs = BedDataset(paths.bed, limit=limit,
-                       inMemory=False, bufferSize=bufferSize)
-    print("Preparing fasta dataset...")
-    fastaDs = SeqDataset(paths.fasta, bedDs)
+                       inMemory=True, bufferSize=bufferSize)
+    print("Preparing seq dataset...")
+    fastaDs = FastaDataset(paths.fasta, bedDs)
+    seqDs = TokenizedDataset(fastaDs)
     print("Running inference...")
-    batchInfer(fastaDs, paths.embeds, batchSize, workers)
+    batchInfer(seqDs, paths.embeds, batchSize, workers)
 
 
-def run_tests(limit, paths):
-    bedDs = BedDataset(paths.bed, limit=limit, inMemory=True)
-    limit = min(limit, len(bedDs))
-    intervals = [bedDs[i] for i in range(limit)]
+def run_tests(paths, limit):
+    intervals = BedDataset(paths.bed, limit=limit, inMemory=True)
+    fastaDs = FastaDataset(paths.fasta, intervals)
+    tokDs = TokenizedDataset(fastaDs)
 
-    embeds = np.memmap(paths.embeds + ".0", dtype=np.float32, mode="r")
+    tests.swt(paths.embeds, fastaDs, considerLimit=limit)
+    print()
+
+    embeds = np.memmap(paths.embeds, dtype=np.float32, mode="r")
     embeds = embeds.reshape(-1, 256)
 
-    print()
-    tests.ctt(embeds)
-    tests.gdst(intervals, embeds)
-    # tests.npt(intervals, embeds)
-    tests.cct(intervals, embeds)
+    # tests.ctt(embeds)
+    # print()
+    # tests.gdst(embeds, intervals)
+    # print()
+    # tests.npt(embeds, intervals)
+    # print()
+    # tests.rct(embeds, tokDs)
+    # print()
 
 
 if __name__ == "__main__":
     print("This is main")
 
     # INFO: Config
-    limit = 1000
-    batchSize = 5
-    workers = 2
-    bufferSize = 200
+    limit = 440
+    batchSize = 11
+    workers = 1
+    bufferSize = 100
 
     # paths = SimpleNamespace(
     #     fasta="./data/hg38.fa",
@@ -59,8 +66,8 @@ if __name__ == "__main__":
     paths = SimpleNamespace(
         fasta="./data/synthetic/seqs.fa",
         bed="./data/synthetic/universe_0.bed",
-        embeds="./data/synthetic/embeds")
+        embeds="./data/synthetic/embeds.npy")
 
     # embeds(limit, batchSize, paths, workers, bufferSize)
-    run_tests(limit, paths)
+    run_tests(paths, limit)
     # genom_main(limit, batchSize, paths.embeds)
