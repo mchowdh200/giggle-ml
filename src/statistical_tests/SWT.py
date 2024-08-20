@@ -1,13 +1,11 @@
 from data_wrangling.sliding_window_dataset import SlidingWindowDataset
 from data_wrangling.truncated_dataset import TruncatedDataset
 from data_wrangling.seq_datasets import TokenizedDataset
-
-from gpu_embeds.inference_batch import batchInfer
 import numpy as np
 from matplotlib import pyplot as plt
 
 
-def swt(embedOutPath, fastaDataset, gapFactor=.1, considerLimit=128):
+def swt(embedOutPath, fastaDataset, infSystem, gapFactor=.1, considerLimit=128):
     swDataset = SlidingWindowDataset(fastaDataset, gapFactor)
     binAmnt = swDataset.spreeCount
     # Round to multiple of binAmnt
@@ -17,7 +15,7 @@ def swt(embedOutPath, fastaDataset, gapFactor=.1, considerLimit=128):
 
     print('Creating embeddings...')
     # TODO: configurable batch size
-    batchInfer(shortDataset, embedOutPath, batchSize=binAmnt)
+    infSystem.batchInfer(shortDataset, embedOutPath, batchSize=binAmnt)
     embeds = np.memmap(embedOutPath, dtype='float32', mode='r')
     embedDim = 256
     embeds = embeds.reshape((-1, embedDim))

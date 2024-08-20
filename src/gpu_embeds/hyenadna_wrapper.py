@@ -139,7 +139,7 @@ class HyenaDNAPreTrainedModel(PreTrainedModel):
         return scratch_model
 
 
-def prepareModel(rank, device, barrier):
+def prepare_model(rank, device):
     '''
     this selects which backbone to use, and grabs weights/ config from HF
     4 options:
@@ -180,7 +180,7 @@ def prepareModel(rank, device, barrier):
             f"Invalid pretrained model name: {pretrained_model_name}")
 
     if rank != 0:
-        barrier.wait()
+        dist.barrier()
 
     model = HyenaDNAPreTrainedModel.from_pretrained(
         './checkpoints',
@@ -193,6 +193,6 @@ def prepareModel(rank, device, barrier):
 
     # ensure only rank 0 can download the model
     if rank == 0:
-        barrier.wait()
+        dist.barrier()
 
     return model

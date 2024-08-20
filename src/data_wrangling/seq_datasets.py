@@ -1,4 +1,3 @@
-from gpu_embeds.inference_batch import batchInfer
 from gpu_embeds.standalone_hyenadna import CharacterTokenizer
 from torch.utils.data import DataLoader
 import torch
