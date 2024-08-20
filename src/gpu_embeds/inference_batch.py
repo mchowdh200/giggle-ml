@@ -7,7 +7,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 import os
 from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
-from gpu_embeds.hyenadna_wrapper import prepareModel
+from gpu_embeds.hyenadna_wrapper import prepare_model
 
 
 class BatchInferHyenaDNA:
@@ -16,8 +16,11 @@ class BatchInferHyenaDNA:
         self.useDDP = useDDP
         self.useMeanAggregation = useMeanAggregation
 
-    def prepareModel(self, rank, device):
-        return prepareModel(rank, device)
+    def prepare_model(self, rank, device):
+        return prepare_model(rank, device)
+
+    def item_to_device(self, item, device):
+        item = item.to(device)
 
     def infer_loop(self, rank, worldSize, model, device, dataLoader, outPath):
         """inference loop."""
@@ -30,7 +33,8 @@ class BatchInferHyenaDNA:
         with torch.inference_mode():
             tracemalloc.start()
             for i, input in enumerate(dataLoader):
-                input = input.to(device)
+                # TODO: .to call on cpu side string tuples
+                self.item_to_device(input, device)
                 # execute model, retrieve embeddings
                 output = model(input).cpu()
                 # mean aggregation, flatten batch dimension
@@ -75,7 +79,7 @@ class BatchInferHyenaDNA:
         else:
             device = torch.device('cpu')
 
-        model = self.prepareModel(rank, device)
+        model = self.prepare_model(rank, device)
         model.to(device)
         if self.useDDP:
             model = DDP(model, device_ids=devIds)
