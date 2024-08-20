@@ -3,6 +3,7 @@ import torch.nn as nn
 from data_wrangling.list_dataset import ListDataset
 from gpu_embeds.inference_batch import BatchInferHyenaDNA
 import numpy as np
+import os
 
 
 class IdentityModel(nn.Module):
@@ -19,7 +20,7 @@ class BatchInfTesting(BatchInferHyenaDNA):
         super(BatchInfTesting, self).__init__(
             embedDim, useDDP=False, useMeanAggregation=False)
 
-    def prepareModel(self, rank, device):
+    def prepare_model(self, rank, device):
         return IdentityModel()
 
 
@@ -42,4 +43,5 @@ def test_inference_batch():
     outputs = outputs.reshape((-1, 10))
     inputs = inputs.numpy()
 
+    os.remove(outPath)
     assert np.allclose(inputs, outputs)
