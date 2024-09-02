@@ -13,6 +13,7 @@
           packages = with pkgs; [ 
 					 	python311
             git-lfs
+            faiss
 					];
         };
       }
