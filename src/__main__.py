@@ -89,6 +89,6 @@ if __name__ == "__main__":
         bed="./data/synthetic/universe_0.bed",
         embeds="./data/synthetic/embeds.npy")
 
-    # make_embeds(limit, batchSize, paths, workers, bufferSize)
+    make_embeds(limit, batchSize, paths, workers, bufferSize)
     run_tests(paths, limit)
     # genom_main(limit, batchSize, paths.embeds)
