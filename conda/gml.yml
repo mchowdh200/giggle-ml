@@ -1,22 +1,22 @@
-name: /Users/simon/Code/work/giggle-ml/conda/gml
+name: gml
 channels:
   - defaults
 dependencies:
-  - bzip2=1.0.8=h80987f9_6
-  - ca-certificates=2024.7.2=hca03da5_0
-  - git-lfs=3.5.1=hca03da5_0
-  - libffi=3.4.4=hca03da5_1
-  - ncurses=6.4=h313beb8_0
-  - openssl=3.0.15=h80987f9_0
-  - pip=24.2=py311hca03da5_0
-  - python=3.11.9=hb885b13_0
-  - readline=8.2=h1a28f6b_0
-  - setuptools=72.1.0=py311hca03da5_0
-  - sqlite=3.45.3=h80987f9_0
-  - tk=8.6.14=h6ba3021_0
-  - wheel=0.43.0=py311hca03da5_0
-  - xz=5.4.6=h80987f9_1
-  - zlib=1.2.13=h18a0788_1
+  - bzip2=1.0.8
+  - ca-certificates=2024.7.2
+  - git-lfs=3.5.1
+  - libffi=3.4.4
+  - ncurses=6.4
+  - openssl=3.0.15
+  - pip=24.2
+  - python=3.11.9
+  - readline=8.2
+  - setuptools=72.1.0
+  - sqlite=3.45.3
+  - tk=8.6.14
+  - wheel=0.43.0
+  - xz=5.4.6
+  - zlib=1.2.13
   - pip:
       - aiobotocore==2.13.2
       - aiohappyeyeballs==2.3.7
@@ -65,7 +65,7 @@ dependencies:
       - hpack==4.0.0
       - httpcore==1.0.5
       - httpx==0.27.0
-      - huggingface-hub==0.24.5
+      - huggingface-hub==0.24.6
       - humanfriendly==10.0
       - hyperframe==6.0.1
       - idna==3.7
@@ -99,8 +99,6 @@ dependencies:
       - numcodecs==0.13.0
       - numpy==1.26.4
       - omegaconf==2.3.0
-      - onnx==1.16.2
-      - onnxruntime==1.19.0
       - orjson==3.10.7
       - packaging==24.0
       - pandas==2.2.2
@@ -172,4 +170,4 @@ dependencies:
       - yarl==1.9.4
       - zarr==2.18.2
       - zipp==3.19.2
-prefix: /Users/simon/Code/work/giggle-ml/conda/gml
+prefix: /Users/simon/app/miniconda3/envs/gml
