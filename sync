@@ -1,0 +1,19 @@
+#!/bin/bash
+
+sync="rsync -iva . fijicluster:projects/giggle-ml \
+    --exclude conda/gml \
+    --exclude src/data \
+    --exclude src/checkpoints \
+    --exclude checkpoints \
+    --exclude src/content \
+    --exclude .git \
+    --exclude .direnv \
+    --exclude venv \
+    --exclude src/__pycache__ \
+    --exclude src/gpu_embeds/__pycache__ \
+    --exclude src/statistical_tests/__pycache__ \
+    --exclude '**/__pycache__' \
+"
+
+$sync
+fswatch -ro . | xargs -n1 -I{} $sync
