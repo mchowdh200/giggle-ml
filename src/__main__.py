@@ -5,18 +5,9 @@ from types import SimpleNamespace
 from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
 import statistical_tests.tests as tests
 import faiss
-
-
-def get_intervals(bedPath):
-    with open(bedPath) as f:
-        intervals = []
-        for line in f:
-            columns = line.strip().split()
-            chromosome, start, end, *_ = columns
-            start = int(start)
-            end = int(end)
-            intervals.append((chromosome, start, end))
-    return intervals
+from collections import defaultdict
+from matplotlib import pyplot as plt
+from utils.bed_utils import get_intervals
 
 
 def getInfSystem():
@@ -91,7 +82,9 @@ def intersection_scan(vecdb,
                       testIntervals,
                       testEmbeds,
                       ancientResultsPath,
-                      k=1000):
+                      k=30):
+    print('k =', k)
+
     testEmbeds = np.memmap(testEmbeds, dtype=np.float32, mode="r") \
         .reshape(-1, 256)
     fullEmbeds = np.memmap(fullEmbeds, dtype=np.float32, mode="r") \
@@ -113,16 +106,18 @@ def intersection_scan(vecdb,
     _, ids = vecdb.search(testEmbeds, k)
 
     nativeResults = dict()
+
     for i, neighborIds in enumerate(ids):
         testInt = testIntervals[i]
         neighborInts = [fullIntervals[id] for id in neighborIds]
+
         intersectingNeighbors = list(filter(
             lambda x: intersects(x, testInt), neighborInts))
+
         nativeResults[testInt] = intersectingNeighbors
 
-    print('Native non zero entries', sum(
-        filter(lambda x: x != 0,
-               map(len, nativeResults.values()))))
+    querySeqLens = list(map(lambda x: x[2] - x[1], testIntervals))
+    print('Query Sequence Lengths', set(querySeqLens))
 
     # parse ancient results
 
@@ -148,9 +143,16 @@ def intersection_scan(vecdb,
         ancientResults[head] = profile
         ancientResults.pop(None)
 
+    highestDepthPerQuery = max(map(len, ancientResults.values()))
+    print('Highest depth per query (ground truth)', highestDepthPerQuery)
+
     # perform analysis
 
     hits = 0
+
+    # histogram at 10% intervals
+    hitCountByOverlap = defaultdict(int)
+    missCountByOverlap = defaultdict(int)
 
     for query, ancientProfile in ancientResults.items():
         if query not in nativeResults:
@@ -158,8 +160,8 @@ def intersection_scan(vecdb,
             continue
 
         nativeProfile = nativeResults[query]
-        setNative = set(map(lambda x: frozenset(x), nativeProfile))
-        setAncient = set(map(lambda x: frozenset(x), ancientProfile))
+        setNative = set(nativeProfile)
+        setAncient = set(ancientProfile)
         overlap = len(setAncient.intersection(setNative))
         if overlap < min(len(nativeProfile), len(ancientProfile)):
             print('Mismatch',
@@ -171,14 +173,84 @@ def intersection_scan(vecdb,
             print(' - ancient', ancientProfile)
         hits += overlap
 
-    total = sum(map(len, ancientResults.values()))
-    recall = hits / total
-    print('recall', recall)
+        for miss in setAncient:
+            start = max(miss[1], query[1])
+            end = min(miss[2], query[2])
+            intervalOverlap = end - start
+            intervalOverlap /= (miss[2] - miss[1])  # normalized
+            # round to nearest 10% -- NOT truncating to 10%
+            intervalOverlap = round(intervalOverlap * 10) * 10
 
-    print('hit count', total)
-    print('hit count (native)', sum(map(len, nativeResults.values())))
-    print('query count: ancient, native', len(
-        ancientResults), len(nativeResults))
+            if miss not in setNative:
+                missCountByOverlap[intervalOverlap] += 1
+            else:
+                hitCountByOverlap[intervalOverlap] += 1
+
+    hitProbByOverlap = dict()
+    for overlap, hitCount in hitCountByOverlap.items():
+        missCount = missCountByOverlap[overlap]
+        total = hitCount + missCount
+        hitProbByOverlap[overlap] = hitCount / total
+
+    # recall by overlap plot (exact overlap band)
+    plt.figure()
+    plt.bar(hitProbByOverlap.keys(), hitProbByOverlap.values())
+    plt.xticks(list(hitProbByOverlap.keys()))
+    plt.yticks(list(map(lambda x: x / 10, range(0, 11))))
+    plt.title(f"Hit Probability at Overlap, k={k}")
+    plt.axhline(y=0.5, color='g', linestyle='-')
+    plt.savefig("./experiments/giggleBench/hitProbAtOverlap.png")
+
+    # recall by ATLEAST OVERLAP plot
+
+    aggregateHitCountByOverlap = defaultdict(int)
+    aggregateMissCountByOverlap = defaultdict(int)
+
+    for overlap in reversed(sorted(hitProbByOverlap.keys())):
+        prevHits = aggregateHitCountByOverlap[overlap + 10]
+        thisHits = hitCountByOverlap[overlap]
+        aggregateHitCountByOverlap[overlap] = prevHits + thisHits
+
+        prevMisses = aggregateMissCountByOverlap[overlap + 10]
+        thisMisses = missCountByOverlap[overlap]
+        aggregateMissCountByOverlap[overlap] = prevMisses + thisMisses
+
+    del aggregateHitCountByOverlap[110]
+    del aggregateMissCountByOverlap[110]
+
+    hitProbByAtLeastOverlap = dict()
+    for overlap, hitCount in aggregateHitCountByOverlap.items():
+        missCount = aggregateMissCountByOverlap[overlap]
+        total = hitCount + missCount
+        hitProbByAtLeastOverlap[overlap] = hitCount / total
+
+    plt.figure()
+    plt.bar(hitProbByAtLeastOverlap.keys(), hitProbByAtLeastOverlap.values())
+    plt.xticks(list(hitProbByOverlap.keys()))
+    plt.yticks(list(map(lambda x: x / 10, range(0, 11))))
+    plt.title(f"Recall by Overlap Cutoff, k={k}")
+    plt.axhline(y=0.5, color='g', linestyle='-')
+    plt.savefig("./experiments/giggleBench/recallByOverlapCutoff.png")
+
+    print('Native non zero hits', sum(
+        filter(lambda x: x != 0,
+               map(len, nativeResults.values()))))
+
+    hitCountAncient = sum(map(len, ancientResults.values()))
+    hitCountNative = sum(map(len, nativeResults.values()))
+    print("Hit Count")
+    print(' - ground truth', hitCountAncient)
+    print(' - native', hitCountNative)
+
+    queryCountAncient = len(ancientResults)
+    queryCountNative = len(nativeResults)
+    print('Query count: ancient, native', queryCountAncient, queryCountNative)
+
+    print('Intersect probability overall',
+          hitCountNative / (queryCountNative * k))
+
+    recall = hits / hitCountAncient
+    print('recall', recall)
 
     return recall
 
