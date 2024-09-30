@@ -2,10 +2,11 @@
 
 sync="rsync -iva . fijicluster:projects/giggle-ml \
     --exclude conda/gml \
-    --exclude src/data \
+    --exclude data \
     --exclude src/checkpoints \
     --exclude checkpoints \
     --exclude src/content \
+    --exclude content \
     --exclude .git \
     --exclude .direnv \
     --exclude venv \

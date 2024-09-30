@@ -3,8 +3,8 @@ checkpoints
 venv/
 conda/gml
 
-src/data
-src/checkpoints
-src/content
+data
+checkpoints
+content
 
 .direnv
