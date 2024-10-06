@@ -22,35 +22,14 @@ def intersects(x, y):
     return max(start1, start2) <= min(end1, end2)
 
 
-def by_chromosome(intervals):
-    byChrm = defaultdict(list)
-    byChrm[intervals[0][0]] = range(len(intervals))
-
-    for i, interval in enumerate(intervals):
-        chrm, *_ = interval
-        byChrm[chrm].append(i)
-
-        # TODO: chaotic ordering will break when multiple shards/chromosomes
-        if len(byChrm) > 1:
-            raise ValueError("multiple chromosomes not yet supported")
-    return byChrm
-
-
 def build_vecdb_shards(intervals, embeds):
     dim = embeds.shape[1]
-    shards = defaultdict(lambda: faiss.IndexFlatL2(dim))
-    byChrm = by_chromosome(intervals)
-
-    for chrm, indices in byChrm.items():
-        print(" - Building shard for", chrm)
-        shard = shards[chrm]
-        correspondingEmbeds = embeds[indices]
-        shard.add(correspondingEmbeds)
-
-    return shards
+    shard = faiss.IndexFlatL2(dim)
+    shard.add(embeds)
+    return shard
 
 
-def modern_giggle(vecdbShards,
+def modern_giggle(shard,
                   sampleIntervals: SwellChunkDataset,
                   sampleEmbeds,
                   queryIntervals: SwellChunkDataset,
@@ -58,28 +37,21 @@ def modern_giggle(vecdbShards,
                   k):
 
     results = dict()
-    byChrm = by_chromosome(queryIntervals)
 
-    for chrm, shard in vecdbShards.items():
-        batchQueryIds = byChrm[chrm]
+    _, knn = shard.search(queryEmbeds, k)
+    print(" - completed KNN search")
 
-        bachQueryEmbeds = queryEmbeds[batchQueryIds]
-        print(f" - {len(batchQueryIds)} queries on shard", chrm)
+    for queryId, neighbors in enumerate(knn):
+        backingInterval = queryIntervals.baseItem(queryId)
+        intersections = set()
 
-        knn = zip(batchQueryIds, shard.search(bachQueryEmbeds, k)[1])
-        print("\t- completed KNN search")
+        for neighborId in neighbors:
+            neighborInterval = sampleIntervals.baseItem(neighborId)
 
-        for queryId, neighbors in knn:
-            backingInterval = queryIntervals.baseItem(queryId)
-            intersections = set()
+            if intersects(backingInterval, neighborInterval):
+                intersections.add(neighborInterval)
 
-            for neighborId in neighbors:
-                neighborInterval = sampleIntervals.baseItem(neighborId)
-
-                if intersects(backingInterval, neighborInterval):
-                    intersections.add(neighborInterval)
-
-            results[backingInterval] = list(intersections)
+        results[backingInterval] = list(intersections)
 
     return results
 
@@ -243,29 +215,21 @@ def main():
     padToLength = 100
     k = 100
 
-    querySwellFactor = 2
+    querySwellFactor = 0
     queryChunkAmnt = 3
     sampleSwellFactor = 0
-    sampleChunkAmnt = 1
+    sampleChunkAmnt = 3
 
     paths = SimpleNamespace(
         fasta="./data/hg38.fa",
         queryBed="./data/giggleBench/query.bed",
         sampleBed="./data/giggleBench/sample.bed",
 
-        queryEmbeds="./data/giggleBench/embeds/swell_query/" + "/query.npy",
-        sampleEmbeds="./data/giggleBench/embeds/straight" + "/sample.npy",
+        queryEmbeds="./data/giggleBench/embeds/chunk_only/" + "/query.npy",
+        sampleEmbeds="./data/giggleBench/embeds/chunk_only" + "/sample.npy",
 
-        experimentalAnalysis="./experiments/giggleBench/swell_query",
+        experimentalAnalysis="./experiments/giggleBench/chunk_only",
         ancientResults="./data/giggleBench/gresults.gbed")
-
-    # write config information to info.md
-    with open(paths.experimentalAnalysis + "/info.md", "w") as f:
-        f.write(f"k: {k}\n")
-        f.write(f"querySwellFactor: {querySwellFactor}\n")
-        f.write(f"queryChunkAmnt: {queryChunkAmnt}\n")
-        f.write(f"sampleSwellFactor: {sampleSwellFactor}\n")
-        f.write(f"sampleChunkAmnt: {sampleChunkAmnt}\n")
 
     sampleIntervals = SwellChunkDataset(
         BedDataset(
@@ -285,10 +249,10 @@ def main():
         querySwellFactor,
         queryChunkAmnt)
 
-    # Make embeddings
-
     infSystem = BatchInferHyenaDNA()
     dim = infSystem.embedDim
+
+    # Make embeddings
 
     # sampleTokens = TokenizedDataset(
     #     FastaDataset(paths.fasta, sampleIntervals),
@@ -307,6 +271,14 @@ def main():
     queryEmbeds = queryEmbeds.reshape(-1, dim)
 
     # Perform analysis
+
+    # write config information to info.md
+    with open(paths.experimentalAnalysis + "/info.md", "w") as f:
+        f.write(f"k: {k}\n")
+        f.write(f"querySwellFactor: {querySwellFactor}\n")
+        f.write(f"queryChunkAmnt: {queryChunkAmnt}\n")
+        f.write(f"sampleSwellFactor: {sampleSwellFactor}\n")
+        f.write(f"sampleChunkAmnt: {sampleChunkAmnt}\n")
 
     print("Building vector database shards")
     vdbShards = build_vecdb_shards(sampleIntervals, sampleEmbeds)
