@@ -43,3 +43,16 @@ class Chunk(Transform):
             end = start + chunkSize
 
         return (chrm, start, end)
+
+
+class VaryLength(Transform):
+    def __init__(self, generator):
+        # generator: (idx) -> float
+        super().__init__()
+        self.generator = generator
+
+    def __call__(self, item, idx):
+        chrm, start, end = item
+        size = end - start
+        delta = int(self.generator(idx) * size)
+        return (chrm, start, end + delta)
