@@ -3,7 +3,7 @@ from gpu_embeds.from_genomic_benchmarks import main as genom_main
 import numpy as np
 from types import SimpleNamespace
 from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
-import statistical_tests.tests as tests
+import embed_tests.tests as tests
 import faiss
 from collections import defaultdict
 from matplotlib import pyplot as plt
