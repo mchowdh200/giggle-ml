@@ -1,6 +1,6 @@
-Date: 2024-10-21 07:34:56.080326
+Date: 2024-10-21 07:55:20.158389
 Parameters:
-	expName: straight
+	expName: straight-highpad
 	k: 100
 	querySwellFactor: 1
 	queryChunkAmnt: 1

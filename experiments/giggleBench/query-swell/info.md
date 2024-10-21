@@ -1,8 +1,8 @@
-Date: 2024-10-21 07:34:56.080326
+Date: 2024-10-21 07:51:49.618244
 Parameters:
-	expName: straight
-	k: 100
-	querySwellFactor: 1
+	expName: query-swell
+	k: 200
+	querySwellFactor: 2
 	queryChunkAmnt: 1
 	sampleSwellFactor: 1
 	sampleChunkAmnt: 1

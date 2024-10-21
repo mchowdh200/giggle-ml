@@ -1,9 +1,9 @@
-Date: 2024-10-21 07:34:56.080326
+Date: 2024-10-21 07:37:04.597543
 Parameters:
-	expName: straight
+	expName: translate
 	k: 100
 	querySwellFactor: 1
 	queryChunkAmnt: 1
 	sampleSwellFactor: 1
 	sampleChunkAmnt: 1
-	queryTranslation: 0
+	queryTranslation: 10

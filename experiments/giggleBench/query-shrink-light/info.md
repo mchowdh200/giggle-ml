@@ -1,8 +1,8 @@
-Date: 2024-10-21 07:34:56.080326
+Date: 2024-10-21 08:16:53.550446
 Parameters:
-	expName: straight
-	k: 100
-	querySwellFactor: 1
+	expName: query-shrink-light
+	k: 90
+	querySwellFactor: 0.9
 	queryChunkAmnt: 1
 	sampleSwellFactor: 1
 	sampleChunkAmnt: 1

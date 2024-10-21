@@ -226,19 +226,19 @@ def main():
 
     limit = None
     batchSize = 1000
-    workers = 1
+    workers = 2
     bufferSize = 10
     inputsInMemory = True
 
     padToLength = 100
-    k = 100
+    k = 90
 
-    querySwellFactor = 3
-    queryChunkAmnt = 3
+    querySwellFactor = 0.9
+    queryChunkAmnt = 1
     sampleSwellFactor = 1
     sampleChunkAmnt = 1
     queryTranslation = 0
-    expName = "query-thirds"
+    expName = "query-shrink-light"
 
     makeNewEmbeds = len(sys.argv) < 2 or sys.argv[1] != "analysis"
     doAnalysis = not makeNewEmbeds
