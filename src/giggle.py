@@ -181,7 +181,7 @@ def analyze_results(modernResults, ancientResults, outDir, k):
     ticks = np.arange(0, 1.1, 0.1)
 
     plt.figure()
-    plt.bar(ticks, hitProb, width=0.08)
+    plt.bar(ticks, hitProb, width=0.1)
 
     plt.xticks(ticks)
     plt.xlim(0, 1)
@@ -208,7 +208,7 @@ def analyze_results(modernResults, ancientResults, outDir, k):
     hitProbSum = runningHits / runningTotals
 
     plt.figure()
-    plt.bar(ticks, hitProbSum, width=0.08)
+    plt.bar(ticks, hitProbSum, width=0.1)
 
     plt.xticks(ticks)
     plt.xlim(0, 1)
@@ -231,14 +231,14 @@ def main():
     inputsInMemory = True
 
     padToLength = 100
-    k = 90
+    k = 100
 
-    querySwellFactor = 0.9
+    querySwellFactor = 1
     queryChunkAmnt = 1
     sampleSwellFactor = 1
     sampleChunkAmnt = 1
     queryTranslation = 0
-    expName = "query-shrink-light"
+    expName = "straight"
 
     makeNewEmbeds = len(sys.argv) < 2 or sys.argv[1] != "analysis"
     doAnalysis = not makeNewEmbeds
