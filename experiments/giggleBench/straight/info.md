@@ -1,4 +1,4 @@
-Date: 2024-10-21 10:40:12.660116
+Date: 2024-10-21 10:42:30.528895
 Parameters:
 	expName: straight
 	k: 100

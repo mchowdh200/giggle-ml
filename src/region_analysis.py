@@ -7,14 +7,15 @@ import faiss
 
 def main():
     k = 100
+    kMergeBoost = 2
     trials = 1000
-    renormalize = True
+    renormalize = True  # True for cosine similarity, False for L2 distance
 
     paths = SimpleNamespace(
         fasta="./data/hg38.fa",
         sampleBed="./data/giggleBench/sample.bed",
         sampleEmbeds="./data/giggleBench/embeds/straight/sample.npy",
-        outDir="embedAnalysis/umap")
+        outDir="embedAnalysis/aggregateEmbed")
 
     infSystem = BatchInferHyenaDNA()
     dim = infSystem.embedDim
@@ -34,13 +35,19 @@ def main():
         embed = embed.reshape(1, -1)
         vdb.add(embed)
 
+    queryGaps = []
     resultsTruth = []
     resultsBaseline = []
 
     for _ in range(trials):
         query1 = np.random.randint(0, len(embeds))
         query2 = np.random.randint(0, len(embeds))
+
         truthEmbeds = embeds[[query1, query2]].reshape(2, -1)
+
+        if renormalize:
+            norms = np.linalg.norm(truthEmbeds, axis=1).reshape(-1, 1)
+            truthEmbeds = truthEmbeds / norms
 
         embedMerge = np.mean(truthEmbeds, axis=0)
         if renormalize:
@@ -55,7 +62,7 @@ def main():
         _, knnTruth = vdb.search(truthEmbeds, k)
         knnTruth = knnTruth.flatten()
 
-        _, knnMerge = vdb.search(embedMerge, k * 2)
+        _, knnMerge = vdb.search(embedMerge, k * kMergeBoost)
         knnMerge = knnMerge.flatten()
 
         _, knnBaseline = vdb.search(embedBaseline, k * 2)
@@ -68,12 +75,32 @@ def main():
         resultsTruth.append(recallTruth)
         resultsBaseline.append(recallBaseline)
 
+        queryGap = None
+        if renormalize:
+            queryGap = np.dot(truthEmbeds[0], truthEmbeds[1])
+        else:
+            queryGap = np.linalg.norm(truthEmbeds[0] - truthEmbeds[1])
+        queryGaps.append(queryGap)
+
     recallTruth = round(np.mean(resultsTruth), 3)
     recallBaseline = round(np.mean(resultsBaseline), 3)
 
     print("Recall:", recallTruth)
     print("Random Recall:", recallBaseline)
     print("% Improvement:", recallTruth / recallBaseline - 1)
+    print()
+
+    # Correlation between gap and recall
+
+    plt.scatter(queryGaps, resultsTruth, alpha=0.4)
+    plt.ylabel("Recall")
+
+    if renormalize:
+        plt.xlabel("Cosine Similarity")
+    else:
+        plt.xlabel("L2 Distance")
+
+    plt.savefig(paths.outDir + "/gap_vs_recall.png", dpi=300)
 
 
 if __name__ == "__main__":
