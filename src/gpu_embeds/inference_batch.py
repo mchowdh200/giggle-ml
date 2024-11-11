@@ -10,6 +10,9 @@ from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
 from gpu_embeds.hyenadna_wrapper import prepare_model
 
 
+doMemorySnapshots = False
+
+
 class BatchInferHyenaDNA:
     def __init__(self, embedDim=256, useDDP=True, useMeanAggregation=True):
         self.embedDim = embedDim
@@ -44,15 +47,16 @@ class BatchInferHyenaDNA:
                 outFile[nextIdx:nextIdx + len(output)] = output
                 nextIdx += len(output)
 
-                if i % 10 == 0:
-                    snapshot = tracemalloc.take_snapshot()
-                    current, peak = tracemalloc.get_traced_memory()
-                    top_stats = snapshot.statistics('lineno')
-                    print(f"Process {mp.current_process().name}:")
-                    print(
-                        "\t==>  ", f"Peak memory usage: {peak / 10**6:.2f} MB")
-                    for stat in top_stats[:5]:
-                        print('\t-', stat)
+                if doMemorySnapshots:
+                    if i % 10 == 0:
+                        snapshot = tracemalloc.take_snapshot()
+                        current, peak = tracemalloc.get_traced_memory()
+                        top_stats = snapshot.statistics('lineno')
+                        print(f"Process {mp.current_process().name}:")
+                        print(
+                            "\t==>  ", f"Peak memory usage: {peak / 10**6:.2f} MB")
+                        for stat in top_stats[:5]:
+                            print('\t-', stat)
                 rprint(f"Batch: {i}\t/ {len(dataLoader)}")
 
         # "close" the memmap
