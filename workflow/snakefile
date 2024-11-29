@@ -1,0 +1,7 @@
+def exp(input):
+  
+
+rule all:
+  input:
+    expand("output/{sample}.txt", sample = input)
+  

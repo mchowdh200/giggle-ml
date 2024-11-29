@@ -44,7 +44,6 @@ def rct(embeds, seqs, folds=5):
         y_pred = model.predict(X_test)
         r2 = r2_score(y_test, y_pred)
         scores.append(r2)
-        print(" - Complete")
 
     rct = np.mean(scores)
     stddev = np.std(scores)

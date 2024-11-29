@@ -92,7 +92,6 @@ class HyenaDNAPreTrainedModel(PreTrainedModel):
     def from_pretrained(cls,
                         path,
                         model_name,
-                        download=False,
                         config=None,
                         device='cpu',
                         use_head=False,
@@ -100,11 +99,14 @@ class HyenaDNAPreTrainedModel(PreTrainedModel):
                         ):
         # first check if it is a local path
         pretrained_model_name_or_path = os.path.join(path, model_name)
-        if os.path.isdir(pretrained_model_name_or_path) and download == False:
+        if os.path.isdir(pretrained_model_name_or_path):
+            print("Using cached model checkpoint",
+                  pretrained_model_name_or_path)
             if config is None:
                 config = json.load(
                     open(os.path.join(pretrained_model_name_or_path, 'config.json')))
         else:
+            print("Downloading model from Hugging Face")
             hf_url = f'https://huggingface.co/LongSafari/{model_name}'
 
             subprocess.run(
@@ -185,7 +187,6 @@ def prepare_model(rank, device):
     model = HyenaDNAPreTrainedModel.from_pretrained(
         './checkpoints',
         pretrained_model_name,
-        download=(rank == 0),
         config=backbone_cfg,
         device=device,
         use_head=use_head,

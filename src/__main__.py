@@ -3,52 +3,47 @@ from gpu_embeds.from_genomic_benchmarks import main as genom_main
 import numpy as np
 from types import SimpleNamespace
 from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
-import statistical_tests.tests as tests
-from gpu_embeds.region2vec_wrapper import R2VBatchInf
-
-
-def get_intervals(bedPath):
-    with open(bedPath) as f:
-        intervals = []
-        for line in f:
-            columns = line.strip().split()
-            chromosome, start, end, *_ = columns
-            start = int(start)
-            end = int(end)
-            intervals.append((chromosome, start, end))
-    return intervals
+import embed_tests.tests as tests
+import faiss
+from collections import defaultdict
+from matplotlib import pyplot as plt
+from utils.bed_utils import get_intervals
+from giggle import build_vecdb, intersection_scan
 
 
 def getInfSystem():
     # HyenaDNA
-    # return BatchInferHyenaDNA()
+    return BatchInferHyenaDNA()
 
     # Region2Vec
-    return R2VBatchInf()
+    # return R2VBatchInf()
 
 
-def embeds(limit, batchSize, paths, workers, bufferSize):
+def make_embeds(limit, batchSize, paths, workers, bufferSize, inMemory=True):
     print("Preparing bed dataset...")
     bedDs = BedDataset(paths.bed, limit=limit,
-                       inMemory=True, bufferSize=bufferSize)
+                       inMemory=inMemory, bufferSize=bufferSize)
     # print("Preparing seq dataset...")
     print("Running inference...")
     inf = getInfSystem()
 
     # HyenaDNA
-    # fastaDs = FastaDataset(paths.fasta, bedDs)
-    # seqDs = TokenizedDataset(fastaDs)
-    # inf.batchInfer(seqDs, paths.embeds, batchSize, workers)
+    fastaDs = FastaDataset(paths.fasta, bedDs)
+    seqDs = TokenizedDataset(fastaDs)
+    inf.batchInfer(seqDs, paths.embeds, batchSize, workers)
 
     # Region2Vec
-    inf.batchInfer(bedDs, paths.embeds, batchSize, workers)
+    # inf.batchInfer(bedDs, paths.embeds, batchSize, workers)
 
 
-def doSWT(intervals, infSystem, limit):
+def advanced_tests(intervals, embeds, infSystem, limit):
     fastaDs = FastaDataset(paths.fasta, intervals)
     tokDs = TokenizedDataset(fastaDs)
+
+    # TODO: only god knows why the reverse order causes a crash
     tests.swt(paths.embeds, fastaDs, infSystem, considerLimit=limit)
     print()
+    tests.rct(embeds, tokDs)
 
 
 def run_tests(paths, limit):
@@ -59,35 +54,58 @@ def run_tests(paths, limit):
     embedDim = infSystem.embedDim
     embeds = embeds.reshape(-1, embedDim)
 
-    # doSWT(intervals, infSystem, limit)
+    print()
+    advanced_tests(intervals, embeds, infSystem, limit)
+    print()
     tests.ctt(embeds)
     print()
     tests.gdst(embeds, intervals)
     print()
     tests.npt(embeds, intervals)
-    print()
-    # tests.rct(embeds, tokDs)
-    # print()
 
 
-if __name__ == "__main__":
+def main():
     print("This is main")
 
     # INFO: Config
-    limit = 440
-    batchSize = 11
-    workers = 1
+    limit = None
+    batchSize = 200
+    workers = 2
     bufferSize = 100
+    inputsInMemory = False
 
     # paths = SimpleNamespace(
     #     fasta="./data/hg38.fa",
     #     bed="./data/hg38_trf.bed",
     #     embeds="./data/embeddings.npy")
-    paths = SimpleNamespace(
-        fasta="./data/synthetic/seqs.fa",
-        bed="./data/synthetic/universe_0.bed",
-        embeds="./data/synthetic/embeds.npy")
+    # paths = SimpleNamespace(
+    #     fasta="./data/synthetic/seqs.fa",
+    #     bed="./data/synthetic/universe_0.bed",
+    #     embeds="./data/synthetic/embeds.npy")
 
-    embeds(limit, batchSize, paths, workers, bufferSize)
-    run_tests(paths, limit)
+    # Giggle Misc
+    paths = SimpleNamespace(
+        fasta="./data/hg38.fa",
+        bed="./data/giggleBench/sample.bed",
+        embeds="./data/giggleBench/embeds_sample.npy")
+
+    testPaths = SimpleNamespace(
+        fasta="./data/hg38.fa",
+        bed="./data/giggleBench/query.bed",
+        embeds="./data/giggleBench/embeds_query.npy")
+
+    # make_embeds(limit, batchSize, paths, workers, bufferSize, inputsInMemory)
+    # make_embeds(limit, batchSize, testPaths,
+    #             workers, bufferSize, inputsInMemory)
+
+    vdb = build_vecdb(paths.embeds, getInfSystem().embedDim)
+    giggleResultsPath = "./data/giggleBench/gresults.gbed"
+    intersection_scan(vdb, paths.bed, paths.embeds,
+                      testPaths.bed, testPaths.embeds,
+                      giggleResultsPath)
+    # run_tests(paths, limit)
     # genom_main(limit, batchSize, paths.embeds)
+
+
+if __name__ == "__main__":
+    main()

@@ -49,7 +49,8 @@ def gdst(embeds, intervals, considerLimit=None):
         pairs.append(pair)
 
     # Calculate embedding distances (ED)
-    embedDists = np.array([cosine(embeds[i], embeds[j]) for i, j in pairs])
+    # embedDists = np.array([cosine(embeds[i], embeds[j]) for i, j in pairs])
+    embedDists = np.array([euclidian(embeds[i], embeds[j]) for i, j in pairs])
 
     # Calculate genome distances (GD)
     genomDists = np.array([genome_distance(intervals[i], intervals[j])
@@ -97,3 +98,7 @@ def genome_distance(interval1, interval2):
         # Using an arbitrary constant, geniml uses 1e10
         dist = dist / 1e6
         return dist
+
+
+def euclidian(v1, v2):
+    return np.linalg.norm(v1 - v2)

@@ -85,9 +85,9 @@ class FastaDataset(torch.utils.data.Dataset):
 
 
 class TokenizedDataset(torch.utils.data.Dataset):
-    def __init__(self, fastaDataset):
+    def __init__(self, fastaDataset, padToLength=500):
         self.fastaDataset = fastaDataset
-        self.padToLength = 500
+        self.padToLength = padToLength
 
     @cached_property
     def tokenizer(self):
