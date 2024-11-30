@@ -10,11 +10,11 @@ from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
 from gpu_embeds.hyenadna_wrapper import prepare_model
 
 
-doMemorySnapshots = False
+doMemorySnapshots = True
 
 
 class BatchInferHyenaDNA:
-    def __init__(self, embedDim=256, useDDP=True, useMeanAggregation=True):
+    def __init__(self, embedDim=128, useDDP=True, useMeanAggregation=True):
         self.embedDim = embedDim
         self.useDDP = useDDP
         self.useMeanAggregation = useMeanAggregation
@@ -37,12 +37,11 @@ class BatchInferHyenaDNA:
             tracemalloc.start()
             for i, input in enumerate(dataLoader):
                 # TODO: .to call on cpu side string tuples
-                self.item_to_device(input, device)
+                input = self.item_to_device(input, device)
                 # execute model, retrieve embeddings
                 output = model(input).cpu()
                 # mean aggregation, flatten batch dimension
                 if self.useMeanAggregation:
-                    # TODO: mean aggregation should happen in hyenadna model wrapper
                     output = torch.mean(output, dim=1)
                 outFile[nextIdx:nextIdx + len(output)] = output
                 nextIdx += len(output)

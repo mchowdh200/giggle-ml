@@ -33,4 +33,4 @@ class R2VBatchInf(BatchInferHyenaDNA):
 
     def item_to_device(self, item, device):
         # TODO: moving regions to GPU not yet supported
-        pass
+        return item

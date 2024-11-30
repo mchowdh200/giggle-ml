@@ -154,7 +154,7 @@ def prepare_model(rank, device):
 
     # select model
     # use None if training from scratch
-    pretrained_model_name = 'hyenadna-medium-160k-seqlen'
+    pretrained_model_name = 'hyenadna-tiny-1k-seqlen'
 
     max_lengths = {
         'hyenadna-tiny-1k-seqlen': 1024,
