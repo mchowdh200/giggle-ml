@@ -29,8 +29,14 @@ class BatchInferHyenaDNA:
         """inference loop."""
         sampleCount = len(dataLoader.sampler)
         rprint = lambda *args: print(f"[{rank}]:", *args)
+
+        # remove outFile if exists
+        if os.path.exists(outPath):
+            os.remove(outPath)
+
         outFile = np.memmap(outPath, dtype='float32', mode='w+',
                             shape=(sampleCount, self.embedDim))
+        print("Allocated memmap.")
         nextIdx = 0
 
         with torch.inference_mode():
@@ -40,9 +46,11 @@ class BatchInferHyenaDNA:
                 input = self.item_to_device(input, device)
                 # execute model, retrieve embeddings
                 output = model(input).cpu()
+
                 # mean aggregation, flatten batch dimension
                 if self.useMeanAggregation:
                     output = torch.mean(output, dim=1)
+
                 outFile[nextIdx:nextIdx + len(output)] = output
                 nextIdx += len(output)
 
@@ -64,9 +72,12 @@ class BatchInferHyenaDNA:
 
     def worker(self, rank, worldSize, batchSize, dataset, outFile):
         os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '12355'
+        os.environ['MASTER_PORT'] = '12356'
         backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
         dist.init_process_group(backendType, rank=rank, world_size=worldSize)
+
+        if not dist.is_initialized():
+            raise "Failed to initialize distributed backend"
 
         sampler = BlockDistributedSampler(
             dataset, num_replicas=worldSize, rank=rank)
