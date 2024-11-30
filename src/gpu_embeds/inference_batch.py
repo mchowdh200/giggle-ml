@@ -10,7 +10,7 @@ from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
 from gpu_embeds.hyenadna_wrapper import prepare_model
 
 
-doMemorySnapshots = True
+doMemorySnapshots = False
 
 
 class BatchInferHyenaDNA:
@@ -23,7 +23,7 @@ class BatchInferHyenaDNA:
         return prepare_model(rank, device)
 
     def item_to_device(self, item, device):
-        item = item.to(device)
+        return item.to(device)
 
     def infer_loop(self, rank, worldSize, model, device, dataLoader, outPath):
         """inference loop."""
