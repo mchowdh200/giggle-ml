@@ -2,7 +2,7 @@
 
 #SBATCH --partition=nvidia-a100
 #SBATCH --gres=gpu:2
-#SBATCH --mem=160G
+#SBATCH --mem=420G
 
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -10,8 +10,7 @@
 
 #SBATCH --job-name=giggleML
 #SBATCH --output=giggleML-sbatch.out
-
-# #SBATCH --time=00:05:00
+#SBATCH --time=9:00:00
 
 clear
 

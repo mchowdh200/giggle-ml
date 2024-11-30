@@ -4,50 +4,44 @@ from gpu_embeds.inference_batch import BatchInferHyenaDNA
 
 
 def main():
-    limit = None
     workers = 2
-    batchSize = int(10e3)
+    batchSize = int(5e3)
     bufferSize = batchSize * 2
     inputsInMemory = True
-    seqMaxLen = 500
+    seqMaxLen = 1000
 
     fastaPath = "./data/hg19.fa"
     intervalDir = "./data/roadmap_epigenomics/roadmap_sort"
     embedsDir = "./data/roadmap_epigenomics/embeds"
 
     infSystem = BatchInferHyenaDNA()
-    bedFiles = os.listdir(intervalDir)
+    ids = os.listdir(intervalDir)
+    sourceDatasets = list()
+    outPaths = list()
 
-    print("Starting inference on", len(bedFiles), "bed files.")
-    for i, name in enumerate(bedFiles):
-        if limit and i >= limit:
-            break
-
+    print("Starting inference on", len(ids), "bed files.")
+    for name in ids:
         embedFile = os.path.join(embedsDir, name + ".npy")
-
-        if os.path.exists(embedFile):
-            continue
+        outPaths.append(embedFile)
 
         bedFile = os.path.join(intervalDir, name)
-        bedDs = BedDataset(
-            bedFile,
-            inputsInMemory,
-            bufferSize=bufferSize,
-            maxLen=seqMaxLen
-        )
-
-        fastaDs = FastaDataset(
-            fastaPath,
-            bedDs
-        )
 
         dataset = TokenizedDataset(
-            fastaDs,
+            FastaDataset(
+                fastaPath,
+                BedDataset(
+                    bedFile,
+                    inputsInMemory,
+                    bufferSize=bufferSize,
+                    maxLen=seqMaxLen
+                )
+            ),
             padToLength=seqMaxLen
         )
 
-        infSystem.batchInfer(dataset, embedFile, batchSize, workers)
-        print(f"\t== ", i, "/", len(bedFiles))
+        sourceDatasets.append(dataset)
+
+    infSystem.batchInfer(sourceDatasets, outPaths, batchSize, workers)
 
 
 if __name__ == '__main__':

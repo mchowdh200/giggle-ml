@@ -4,7 +4,8 @@ import tracemalloc
 from torch import distributed as dist
 from torch import multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+from typing import List
 import os
 from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
 from gpu_embeds.hyenadna_wrapper import prepare_model
@@ -19,11 +20,14 @@ class BatchInferHyenaDNA:
         self.useDDP = useDDP
         self.useMeanAggregation = useMeanAggregation
 
+
     def prepare_model(self, rank, device):
         return prepare_model(rank, device)
 
+
     def item_to_device(self, item, device):
         return item.to(device)
+
 
     def infer_loop(self, rank, worldSize, model, device, dataLoader, outPath):
         """inference loop."""
@@ -70,7 +74,8 @@ class BatchInferHyenaDNA:
         outFile.flush()
         del outFile
 
-    def worker(self, rank, worldSize, batchSize, dataset, outFile):
+
+    def worker(self, rank, worldSize, batchSize, datasets, outPaths):
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '12356'
         backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
@@ -79,15 +84,12 @@ class BatchInferHyenaDNA:
         if not dist.is_initialized():
             raise "Failed to initialize distributed backend"
 
-        sampler = BlockDistributedSampler(
-            dataset, num_replicas=worldSize, rank=rank)
-        dataLoader = DataLoader(dataset, batch_size=batchSize,
-                                sampler=sampler, shuffle=False)
-
         # TODO: does not work on mig partitions
         device = None
         devIds = None
-        if torch.cuda.is_available():
+
+        # TODO: not quite functional for gpu-cpu mix
+        if torch.cuda.is_available() and rank < torch.cuda.device_count():
             device = torch.device(f'cuda:{rank}')
             devIds = [rank]
         else:
@@ -99,11 +101,29 @@ class BatchInferHyenaDNA:
             model = DDP(model, device_ids=devIds)
         model.eval()
 
-        outFile += "." + str(rank)
-        self.infer_loop(rank, worldSize, model,
-                        device, dataLoader, outFile)
+        for i, dataset, outPath in zip(range(len(datasets)), datasets, outPaths):
+            if os.path.exists(outPath):
+                continue
 
-    def batchInfer(self, dataset, outPath, batchSize=16, worldSize=None):
+            sampler = BlockDistributedSampler(
+                dataset, num_replicas=worldSize, rank=rank)
+            dataLoader = DataLoader(dataset, batch_size=batchSize,
+                                    sampler=sampler, shuffle=False)
+
+            outPath += "." + str(rank)
+            self.infer_loop(rank, worldSize, model,
+                            device, dataLoader, outPath + '__')
+            # it is now finished, rename x__ -> x
+            os.rename(outPath + '__', outPath)
+
+            if rank == 0:
+                print(f"\t- Finished {i+1} / {len(datasets)}")
+
+
+
+    def batchInfer(self, datasets: List[Dataset], outPaths: List[str], batchSize=16, worldSize=None):
+        assert len(datasets) == len(outPaths)
+
         device = None
         if torch.cuda.is_available():
             print("We're using", torch.cuda.device_count(), "GPUs!")
@@ -118,24 +138,28 @@ class BatchInferHyenaDNA:
 
         # big operation
         mp.set_start_method('spawn', force=True)
-        args = (worldSize, batchSize, dataset, outPath)
+        args = (worldSize, batchSize, datasets, outPaths)
         mp.spawn(self.worker, args=args, nprocs=worldSize)
 
         # aggregate results into a single file and delete others
+        # TODO: aggregation can also be parallelized
+        for dataset, outPath in zip(datasets, outPaths):
+            if os.path.exists(outPath):
+                continue
 
-        outFile = np.memmap(outPath, dtype='float32', mode='w+',
-                            shape=(len(dataset), self.embedDim))
-        nextIdx = 0
+            outFile = np.memmap(outPath, dtype='float32', mode='w+',
+                                shape=(len(dataset), self.embedDim))
+            nextIdx = 0
 
-        for rank in range(worldSize):
-            rankOutPath = outPath + "." + str(rank)
+            for rank in range(worldSize):
+                rankOutPath = outPath + "." + str(rank)
 
-            rankFile = np.memmap(rankOutPath, dtype='float32', mode='r')
-            rankFile = rankFile.reshape((-1, self.embedDim))
-            outFile[nextIdx:nextIdx + len(rankFile)] = rankFile
+                rankFile = np.memmap(rankOutPath, dtype='float32', mode='r')
+                rankFile = rankFile.reshape((-1, self.embedDim))
+                outFile[nextIdx:nextIdx + len(rankFile)] = rankFile
 
-            nextIdx += len(rankFile)
-            del rankFile
-            os.remove(outPath + "." + str(rank))
+                nextIdx += len(rankFile)
+                del rankFile
+                os.remove(outPath + "." + str(rank))
 
-        outFile.flush()
+            outFile.flush()
