@@ -15,13 +15,6 @@
 
 clear
 
-# because apparently srun fights my permission configuration
-on_exit() {
-  chmod +x ./run.sh
-}
-
-trap on_exit EXIT
-
 sgpu "
 echo \"Starting job.\"
 
