@@ -21,7 +21,7 @@ def getInfSystem():
 
 def make_embeds(limit, batchSize, paths, workers, bufferSize, inMemory=True):
     print("Preparing bed dataset...")
-    bedDs = BedDataset(paths.bed, limit=limit,
+    bedDs = BedDataset(paths.bed, rowLimit=limit,
                        inMemory=inMemory, bufferSize=bufferSize)
     # print("Preparing seq dataset...")
     print("Running inference...")
@@ -47,7 +47,7 @@ def advanced_tests(intervals, embeds, infSystem, limit):
 
 
 def run_tests(paths, limit):
-    intervals = BedDataset(paths.bed, limit=limit, inMemory=True)
+    intervals = BedDataset(paths.bed, rowLimit=limit, inMemory=True)
     infSystem = getInfSystem()
 
     embeds = np.memmap(paths.embeds, dtype=np.float32, mode="r")

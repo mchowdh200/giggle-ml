@@ -8,17 +8,19 @@ from pyfaidx import Fasta
 
 
 class BedDataset(torch.utils.data.Dataset):
-    def __init__(self, bedPath, inMemory=True, bufferSize=100, limit=None):
+    def __init__(self, bedPath, inMemory=True, bufferSize=100, rowLimit=None, maxLen=None):
         self.bedPath = bedPath
         self.inMemory = inMemory
         self.bufferSize = bufferSize
-        limit = float('inf') if limit is None else limit
+
+        rowLimit = float('inf') if rowLimit is None else rowLimit
+        self.maxLen = float('inf') if maxLen is None else maxLen
 
         if inMemory:
             self.bedContent = []
             with open(bedPath) as f:
                 for i, line in enumerate(f):
-                    if i < limit:
+                    if i < rowLimit:
                         name, start, stop = line.split()[:3]
                         start = int(start)
                         stop = int(stop)
@@ -27,7 +29,7 @@ class BedDataset(torch.utils.data.Dataset):
                     break
             self.length = len(self.bedContent)
         else:
-            self.length = min(sum(1 for line in open(bedPath)), limit)
+            self.length = min(sum(1 for line in open(bedPath)), rowLimit)
             self.bedBuffer = {}
             self.queue = deque()
 
@@ -51,11 +53,16 @@ class BedDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         if self.inMemory:
-            return self.bedContent[idx]
+            interval = self.bedContent[idx]
         else:
             if idx not in self.bedBuffer:
                 self.fetch(idx)
-            return self.bedBuffer[idx]
+            interval = self.bedBuffer[idx]
+
+        chrom, start, stop = interval
+        size = min(self.maxLen, stop - start)
+        interval = (chrom, start, start + size)
+        return interval
 
 
 class FastaDataset(torch.utils.data.Dataset):

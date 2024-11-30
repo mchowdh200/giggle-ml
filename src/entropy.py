@@ -111,7 +111,7 @@ if __name__ == "__main__":
                     fastaPath=paths.fasta,
                     bedDataset=BedDataset(
                         bedPath=samplePath,
-                        limit=intervalLimit,
+                        rowLimit=intervalLimit,
                         inMemory=True,
                         bufferSize=30)))
 

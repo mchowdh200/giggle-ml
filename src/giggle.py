@@ -260,7 +260,7 @@ def main():
         backingDataset=BedDataset(
             paths.sampleBed,
             inMemory=inputsInMemory,
-            limit=limit,
+            rowLimit=limit,
             bufferSize=bufferSize),
         transforms=[
             Transform.Swell(swellFactor=sampleSwellFactor),
@@ -271,7 +271,7 @@ def main():
         backingDataset=BedDataset(
             paths.queryBed,
             inMemory=inputsInMemory,
-            limit=limit,
+            rowLimit=limit,
             bufferSize=bufferSize),
         transforms=[
             Transform.Translate(offset=queryTranslation),
