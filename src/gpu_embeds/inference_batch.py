@@ -1,15 +1,14 @@
+import multiprocessing as mp
+import os
+import tracemalloc
+from typing import List
+
 import numpy as np
 import torch
-import tracemalloc
-from torch import distributed as dist
-from torch import multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
-from typing import List
-import os
-from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
-from gpu_embeds.hyenadna_wrapper import prepare_model
 
+from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
+from gpu_embeds.hyenadna_backend import prepare_model
 
 doMemorySnapshots = False
 
@@ -46,9 +45,7 @@ class BatchInferHyenaDNA:
         with torch.inference_mode():
             tracemalloc.start()
             for i, input in enumerate(dataLoader):
-                # TODO: .to call on cpu side string tuples
                 input = self.item_to_device(input, device)
-                # execute model, retrieve embeddings
                 output = model(input).cpu()
 
                 # mean aggregation, flatten batch dimension
@@ -76,13 +73,13 @@ class BatchInferHyenaDNA:
 
 
     def worker(self, rank, worldSize, batchSize, datasets, outPaths):
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '12356'
-        backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
-        dist.init_process_group(backendType, rank=rank, world_size=worldSize)
+        # os.environ['MASTER_ADDR'] = 'localhost'
+        # os.environ['MASTER_PORT'] = '12356'
+        # backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
+        # dist.init_process_group(backendType, rank=rank, world_size=worldSize)
 
-        if not dist.is_initialized():
-            raise "Failed to initialize distributed backend"
+        # if not dist.is_initialized():
+        #     raise "Failed to initialize distributed backend"
 
         # TODO: does not work on mig partitions
         device = None
@@ -97,8 +94,9 @@ class BatchInferHyenaDNA:
 
         model = self.prepare_model(rank, device)
         model.to(device)
-        if self.useDDP:
-            model = DDP(model, device_ids=devIds)
+
+        # if self.useDDP:
+        #     model = DDP(model, device_ids=devIds)
         model.eval()
 
         for i, dataset, outPath in zip(range(len(datasets)), datasets, outPaths):
@@ -137,11 +135,18 @@ class BatchInferHyenaDNA:
             print(f"We're using {worldSize} CPUs.")
 
         # big operation
-        mp.set_start_method('spawn', force=True)
-        args = (worldSize, batchSize, datasets, outPaths)
-        mp.spawn(self.worker, args=args, nprocs=worldSize)
 
-        # aggregate results into a single file and delete others
+        workers = list()
+        args = (worldSize, batchSize, datasets, outPaths)
+        mp.set_start_method('spawn')
+
+        for rank in range(worldSize):
+            p = mp.Process(target=self.worker, args=(rank, *args))
+            p.start()
+            workers.append(p)
+
+        [p.join() for p in workers]
+
         # TODO: aggregation can also be parallelized
         for dataset, outPath in zip(datasets, outPaths):
             if os.path.exists(outPath):

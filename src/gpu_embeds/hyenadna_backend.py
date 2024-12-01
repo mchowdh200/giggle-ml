@@ -5,23 +5,15 @@ you can just loop thru a dataloader like this.
 
 """
 
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.multiprocessing as mp
-
-import tracemalloc
 import json
 import os
 import subprocess
-import transformers
-from transformers import PreTrainedModel, AutoModelForCausalLM, PretrainedConfig
-import numpy as np
+
+import torch
+from transformers import PreTrainedModel
+
 from gpu_embeds.standalone_hyenadna import HyenaDNAModel
-from gpu_embeds.standalone_hyenadna import CharacterTokenizer
-from gpu_embeds.standalone_hyenadna import CharacterTokenizer
+
 
 # helper 1
 
@@ -181,9 +173,6 @@ def prepare_model(rank, device):
         raise ValueError(
             f"Invalid pretrained model name: {pretrained_model_name}")
 
-    if rank != 0:
-        dist.barrier()
-
     model = HyenaDNAPreTrainedModel.from_pretrained(
         './checkpoints',
         pretrained_model_name,
@@ -191,9 +180,5 @@ def prepare_model(rank, device):
         device=device,
         use_head=use_head,
         n_classes=n_classes)
-
-    # ensure only rank 0 can download the model
-    if rank == 0:
-        dist.barrier()
 
     return model

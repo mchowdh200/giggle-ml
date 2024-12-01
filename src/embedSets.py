@@ -1,10 +1,11 @@
 import os
+
 from data_wrangling.seq_datasets import TokenizedDataset, FastaDataset, BedDataset
 from gpu_embeds.inference_batch import BatchInferHyenaDNA
 
 
 def main():
-    workers = 2
+    workers = 8
     batchSize = int(5e3)
     bufferSize = batchSize * 2
     inputsInMemory = True
