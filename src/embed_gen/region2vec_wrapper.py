@@ -1,8 +1,9 @@
-from torch import tensor
-from geniml.region2vec import Region2VecExModel as BackingModel
 import torch.nn as nn
 from geniml.io import Region
-from gpu_embeds.inference_batch import BatchInferHyenaDNA
+from geniml.region2vec import Region2VecExModel as BackingModel
+from torch import tensor
+
+from embed_gen.inference_batch import BatchInferHyenaDNA
 
 
 def prepareModel(rank, device):

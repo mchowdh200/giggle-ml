@@ -1,11 +1,11 @@
-import numpy as np
-from data_wrangling.seq_datasets import BedDataset
-from data_wrangling.transform_dataset import TransformDataset
-from gpu_embeds.inference_batch import BatchInferHyenaDNA
 from types import SimpleNamespace
+
+import numpy as np
 import umap
 import umap.plot
 from matplotlib import pyplot as plt
+
+from embed_gen.inference_batch import BatchInferHyenaDNA
 
 
 def main():

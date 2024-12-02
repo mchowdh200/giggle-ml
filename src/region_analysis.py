@@ -1,8 +1,10 @@
-import numpy as np
-from gpu_embeds.inference_batch import BatchInferHyenaDNA
 from types import SimpleNamespace
-from matplotlib import pyplot as plt
+
 import faiss
+import numpy as np
+from matplotlib import pyplot as plt
+
+from embed_gen.inference_batch import BatchInferHyenaDNA
 
 
 def main():

@@ -1,7 +1,6 @@
-import torch
-from data_wrangling.transform_dataset import *
+import intervalTransforms as IT
 from data_wrangling.list_dataset import ListDataset
-import interval_transforms as IT
+from data_wrangling.transform_dataset import *
 
 
 class IdxTransform(Transform):

@@ -12,17 +12,14 @@ Check out the colab notebook for a simpler and more complete walk through of how
 
 """
 
+import re
 
-import json
-import os
-import subprocess
 import torch
-
 # import transformers
 from transformers import PreTrainedModel
-import re
-from standalone_hyenadna import HyenaDNAModel
+
 from standalone_hyenadna import CharacterTokenizer
+from standalone_hyenadna import HyenaDNAModel
 
 
 # helper 1
@@ -137,7 +134,7 @@ class HyenaDNAPreTrainedModel(PreTrainedModel):
 """# Inference (450k to 1M tokens)!
 
 If all you're interested in is getting embeddings on long DNA sequences
-(inference), then we can do that right here in Colab!
+(embed_gen), then we can do that right here in Colab!
 
 
 *   We provide an example how to load the weights from Huggingface.
@@ -157,7 +154,6 @@ import json
 import os
 import subprocess
 # import transformers
-from transformers import PreTrainedModel
 
 def inference_single():
 
@@ -166,9 +162,9 @@ def inference_single():
     4 options:
       'hyenadna-tiny-1k-seqlen'   # fine-tune on colab ok
       'hyenadna-small-32k-seqlen'
-      'hyenadna-medium-160k-seqlen'  # inference only on colab
-      'hyenadna-medium-450k-seqlen'  # inference only on colab
-      'hyenadna-large-1m-seqlen'  # inference only on colab
+      'hyenadna-medium-160k-seqlen'  # embed_gen only on colab
+      'hyenadna-medium-450k-seqlen'  # embed_gen only on colab
+      'hyenadna-large-1m-seqlen'  # embed_gen only on colab
     '''
 
     # you only need to select which model to use here, we'll do the rest!

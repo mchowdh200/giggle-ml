@@ -1,9 +1,11 @@
+import os
+
+import numpy as np
 import torch
 import torch.nn as nn
+
 from data_wrangling.list_dataset import ListDataset
-from gpu_embeds.inference_batch import BatchInferHyenaDNA
-import numpy as np
-import os
+from embed_gen.inference_batch import BatchInferHyenaDNA
 
 
 class IdentityModel(nn.Module):

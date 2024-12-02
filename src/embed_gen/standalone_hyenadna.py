@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""HyenaDNA training & inference example (Public)
+"""HyenaDNA training & embed_gen example (Public)
 
 This code is adapted from the original colab tutorial on HyenaDNA. Check that out for an easier entry point into the code.
 
@@ -11,28 +11,21 @@ Original file is located at
 
 """
 
-#@title Imports
-# for HyenaDNA specifically
-import torch
-import math
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from functools import partial
-from einops import rearrange
-from typing import Optional
-from functools import partial
-from torch import Tensor
-from torchvision.ops import StochasticDepth
-from collections import namedtuple
-import numpy as np
-import os
 import json
+# @title Imports
+# for HyenaDNA specifically
+import math
+import os
+from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Union
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from einops import rearrange
+from torchvision.ops import StochasticDepth
 from transformers.tokenization_utils import AddedToken, PreTrainedTokenizer
-
 
 """# HyenaDNA
 
