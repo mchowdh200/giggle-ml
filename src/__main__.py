@@ -5,7 +5,6 @@ import numpy as np
 import embed_tests.tests as tests
 from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
 from embed_gen.inference_batch import BatchInferHyenaDNA
-from giggle import build_vecdb
 
 
 def getInfSystem():
@@ -33,7 +32,7 @@ def make_embeds(limit, batchSize, paths, workers, bufferSize, inMemory=True):
     # inf.batchInfer(bedDs, paths.embeds, batchSize, workers)
 
 
-def advanced_tests(intervals, embeds, infSystem, limit):
+def advanced_tests(paths, intervals, embeds, infSystem, limit):
     fastaDs = FastaDataset(paths.fasta, intervals)
     tokDs = TokenizedDataset(fastaDs)
 
@@ -52,7 +51,7 @@ def run_tests(paths, limit):
     embeds = embeds.reshape(-1, embedDim)
 
     print()
-    advanced_tests(intervals, embeds, infSystem, limit)
+    advanced_tests(paths, intervals, embeds, infSystem, limit)
     print()
     tests.ctt(embeds)
     print()
@@ -65,7 +64,7 @@ def main():
     print("This is main")
 
     # INFO: Config
-    limit = None
+    limit = 1000
     batchSize = 200
     workers = 2
     bufferSize = 100
@@ -75,27 +74,27 @@ def main():
     #     fasta="./data/hg38.fa",
     #     bed="./data/hg38_trf.bed",
     #     embeds="./data/embeddings.npy")
-    # paths = SimpleNamespace(
+    # paths = SimpleNamespace(k
     #     fasta="./data/synthetic/seqs.fa",
     #     bed="./data/synthetic/universe_0.bed",
     #     embeds="./data/synthetic/embeds.npy")
 
     # Giggle Misc
-    paths = SimpleNamespace(
-        fasta="./data/hg38.fa",
-        bed="./data/giggleBench/sample.bed",
-        embeds="./data/giggleBench/embeds_sample.npy")
+    # paths = SimpleNamespace(
+    #     fasta="./data/hg38.fa",
+    #     bed="./data/giggleBench/sample.bed",
+    #     embeds="./data/giggleBench/embeds_sample.npy")
 
     testPaths = SimpleNamespace(
         fasta="./data/hg38.fa",
         bed="./data/giggleBench/query.bed",
-        embeds="./data/giggleBench/embeds_query.npy")
+        embeds="./data/giggleBench/embeds/straight/query.npy")
 
-    make_embeds(limit, batchSize, paths, workers, bufferSize, inputsInMemory)
-    make_embeds(limit, batchSize, testPaths, workers, bufferSize, inputsInMemory)
+    # make_embeds(limit, batchSize, paths, workers, bufferSize, inputsInMemory)
+    # make_embeds(limit, batchSize, testPaths, workers, bufferSize, inputsInMemory)
 
-    vdb = build_vecdb(paths.embeds, getInfSystem().embedDim)
-    run_tests(paths, limit)
+    # vdb = build_vecdb(paths.embeds, getInfSystem().embedDim)
+    run_tests(testPaths, limit)
     # genom_main(limit, batchSize, paths.embeds)
 
 
