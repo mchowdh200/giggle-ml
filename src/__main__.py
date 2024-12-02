@@ -1,14 +1,11 @@
-from gpu_embeds.inference_batch import BatchInferHyenaDNA
-from gpu_embeds.from_genomic_benchmarks import main as genom_main
-import numpy as np
 from types import SimpleNamespace
-from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
+
+import numpy as np
+
 import embed_tests.tests as tests
-import faiss
-from collections import defaultdict
-from matplotlib import pyplot as plt
-from utils.bed_utils import get_intervals
-from giggle import build_vecdb, intersection_scan
+from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
+from embed_gen.inference_batch import BatchInferHyenaDNA
+from giggle import build_vecdb
 
 
 def getInfSystem():
@@ -21,7 +18,7 @@ def getInfSystem():
 
 def make_embeds(limit, batchSize, paths, workers, bufferSize, inMemory=True):
     print("Preparing bed dataset...")
-    bedDs = BedDataset(paths.bed, rowLimit=limit,
+    bedDs = BedDataset(paths.bed, rowsLimit=limit,
                        inMemory=inMemory, bufferSize=bufferSize)
     # print("Preparing seq dataset...")
     print("Running inference...")
@@ -47,7 +44,7 @@ def advanced_tests(intervals, embeds, infSystem, limit):
 
 
 def run_tests(paths, limit):
-    intervals = BedDataset(paths.bed, rowLimit=limit, inMemory=True)
+    intervals = BedDataset(paths.bed, rowsLimit=limit, inMemory=True)
     infSystem = getInfSystem()
 
     embeds = np.memmap(paths.embeds, dtype=np.float32, mode="r")
@@ -94,16 +91,11 @@ def main():
         bed="./data/giggleBench/query.bed",
         embeds="./data/giggleBench/embeds_query.npy")
 
-    # make_embeds(limit, batchSize, paths, workers, bufferSize, inputsInMemory)
-    # make_embeds(limit, batchSize, testPaths,
-    #             workers, bufferSize, inputsInMemory)
+    make_embeds(limit, batchSize, paths, workers, bufferSize, inputsInMemory)
+    make_embeds(limit, batchSize, testPaths, workers, bufferSize, inputsInMemory)
 
     vdb = build_vecdb(paths.embeds, getInfSystem().embedDim)
-    giggleResultsPath = "./data/giggleBench/gresults.gbed"
-    intersection_scan(vdb, paths.bed, paths.embeds,
-                      testPaths.bed, testPaths.embeds,
-                      giggleResultsPath)
-    # run_tests(paths, limit)
+    run_tests(paths, limit)
     # genom_main(limit, batchSize, paths.embeds)
 
 

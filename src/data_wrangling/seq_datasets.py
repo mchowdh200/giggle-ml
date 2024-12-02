@@ -1,26 +1,27 @@
-from gpu_embeds.standalone_hyenadna import CharacterTokenizer
-from torch.utils.data import DataLoader
-import torch
-import numpy as np
 from collections import deque
 from functools import cached_property
+
+import torch
 from pyfaidx import Fasta
+from torch.utils.data import DataLoader
+
+from embed_gen.standalone_hyenadna import CharacterTokenizer
 
 
 class BedDataset(torch.utils.data.Dataset):
-    def __init__(self, bedPath, inMemory=True, bufferSize=100, rowLimit=None, maxLen=None):
+    def __init__(self, bedPath, inMemory=True, bufferSize=100, rowsLimit=None, maxLen=None):
         self.bedPath = bedPath
         self.inMemory = inMemory
         self.bufferSize = bufferSize
 
-        rowLimit = float('inf') if rowLimit is None else rowLimit
+        rowsLimit = float('inf') if rowsLimit is None else rowsLimit
         self.maxLen = float('inf') if maxLen is None else maxLen
 
         if inMemory:
             self.bedContent = []
             with open(bedPath) as f:
                 for i, line in enumerate(f):
-                    if i < rowLimit:
+                    if i < rowsLimit:
                         name, start, stop = line.split()[:3]
                         start = int(start)
                         stop = int(stop)
@@ -29,7 +30,7 @@ class BedDataset(torch.utils.data.Dataset):
                     break
             self.length = len(self.bedContent)
         else:
-            self.length = min(sum(1 for line in open(bedPath)), rowLimit)
+            self.length = min(sum(1 for line in open(bedPath)), rowsLimit)
             self.bedBuffer = {}
             self.queue = deque()
 

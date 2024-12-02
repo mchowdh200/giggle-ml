@@ -1,5 +1,4 @@
 from torch.utils.data import Sampler
-from math import ceil
 
 
 class BlockDistributedSampler(Sampler):

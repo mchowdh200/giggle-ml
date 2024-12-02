@@ -1,7 +1,7 @@
 import os
 
 from data_wrangling.seq_datasets import TokenizedDataset, FastaDataset, BedDataset
-from gpu_embeds.inference_batch import BatchInferHyenaDNA
+from embed_gen.inference_batch import BatchInferHyenaDNA
 
 
 def main():

@@ -1,17 +1,19 @@
-import faiss
-from pathlib import Path
 import datetime
 import sys
-import numpy as np
-import matplotlib.pyplot as plt
 from collections import defaultdict
-from data_wrangling.seq_datasets import BedDataset
-from data_wrangling.seq_datasets import TokenizedDataset
-from data_wrangling.seq_datasets import FastaDataset
-from data_wrangling.transform_dataset import TransformDataset
-import interval_transforms as Transform
-from gpu_embeds.inference_batch import BatchInferHyenaDNA
+from pathlib import Path
 from types import SimpleNamespace
+
+import faiss
+import matplotlib.pyplot as plt
+import numpy as np
+
+import intervalTransforms as Transform
+from data_wrangling.seq_datasets import BedDataset
+from data_wrangling.seq_datasets import FastaDataset
+from data_wrangling.seq_datasets import TokenizedDataset
+from data_wrangling.transform_dataset import TransformDataset
+from embed_gen.inference_batch import BatchInferHyenaDNA
 
 
 # TODO: extract intersection utilities
@@ -260,7 +262,7 @@ def main():
         backingDataset=BedDataset(
             paths.sampleBed,
             inMemory=inputsInMemory,
-            rowLimit=limit,
+            rowsLimit=limit,
             bufferSize=bufferSize),
         transforms=[
             Transform.Swell(swellFactor=sampleSwellFactor),
@@ -271,7 +273,7 @@ def main():
         backingDataset=BedDataset(
             paths.queryBed,
             inMemory=inputsInMemory,
-            rowLimit=limit,
+            rowsLimit=limit,
             bufferSize=bufferSize),
         transforms=[
             Transform.Translate(offset=queryTranslation),

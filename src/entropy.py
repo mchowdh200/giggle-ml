@@ -1,15 +1,17 @@
-import numpy as np
 import os
-from utils.basic_logger import BasicLogger
+from types import SimpleNamespace
+
+import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cosine
 from scipy.special import softmax
 from scipy.stats import entropy
-from gpu_embeds.inference_batch import BatchInferHyenaDNA
-from types import SimpleNamespace
+
 from data_wrangling.seq_datasets import BedDataset
-from data_wrangling.seq_datasets import TokenizedDataset
 from data_wrangling.seq_datasets import FastaDataset
+from data_wrangling.seq_datasets import TokenizedDataset
+from embed_gen.inference_batch import BatchInferHyenaDNA
+from utils.basic_logger import BasicLogger
 
 
 def entropy_by_distance(embeds: np.ndarray, aggregateEmbed: np.ndarray) -> float:
@@ -111,7 +113,7 @@ if __name__ == "__main__":
                     fastaPath=paths.fasta,
                     bedDataset=BedDataset(
                         bedPath=samplePath,
-                        rowLimit=intervalLimit,
+                        rowsLimit=intervalLimit,
                         inMemory=True,
                         bufferSize=30)))
 
