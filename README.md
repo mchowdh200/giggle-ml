@@ -8,6 +8,11 @@ More info
 
 1. [Current state of the project](wiki/state.md)
 2. [Statistical test methods for gauging embedding quality](wiki/sheffieldEmbedQualityTests.md)
+3. A few results
+   - [Results of  Sheffield's statistical tests](./embedAnalysis/sheffieldTestResults.md)
+   - [Sliding Window Test](./embedAnalysis/swt.png)
+   - [Benchmark against legacy Giggle (with some interval transformations to increase performance)](./experiments/giggleBench/all-thirds/recallByGEOverlap.png)
+   - [HyenaDNA UMAP](./embedAnalysis/umap/umap.png)
 
 ## Usage
 
