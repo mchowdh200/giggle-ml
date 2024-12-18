@@ -7,28 +7,27 @@ Dec 18th, 2024
 
 ### Embedding generation framework
 
-- Batch inference implemented & tested at a scale of 50+ million datapoints.
+- Batch inference implemented & tested at a scale of 50+ million data points.
     - Required parallelization solutions to support efficiency across multiple A100s, large inputs, and networked
       resources.
-- Inference framework modularized to be agnostic to ML model.
+- The inference framework is modularized to be agnostic to the ML model.
     - Support for hyenaDNA; implemented a very small wrapper. A single vector is produced from the hyenaDNA transformer
     - via mean aggregation.
     - Genomic Benchmark dataset integration.
-    - Support for "Region2Vec": a model by Sheffield et al. It was designed for similar purpose to GiggleML, but does
-      not operator on nucleotide information.
+    - Support for "Region2Vec": a model by Sheffield et al. It was designed for a similar purpose to GiggleML but does
+      not operate on nucleotide information.
 
 ### Embedding diagnostic
 
-- Brief literature review mostly regarding paper by Sheffield et al. Statistical tests for embedding quality found in a
-  paper by Sheffield. I summarized the methods in a one-pager, [here](sheffieldEmbedQualityTests.md).
+- Brief literature review mostly regarding papers by Sheffield et al. In particular, statistical tests for embedding quality are summarized the methods in a one-pager, [here](sheffieldEmbedQualityTests.md).
 - Statistical tests reimplemented.
     - They were originally implemented by Chris (Ex-LayerLab), but for smoother system-wide integration, among other
       issues, I reimplemented all of these tests. The 4 tests are [summarized](sheffieldEmbedQualityTests.md).
 - Sliding Window Test (SWT) implemented. This is another diagnostic similar to Sheffield's tests. It regards the
   embedding similarity with interval overlap relationship; relevant to achieving capabilities of the legacy Giggle
   system.
-- Implemented two approaches to computing entropy of an interval set. The idea was to determine if a theme could be
-  quantitatively verified in bed files with specific function. Analysis of these results compared to the other metrics
+- Implemented two approaches to computing the entropy of an interval set. The idea was to determine if a theme could be
+  quantitatively verified in bed files with a specific function. Analysis of these results compared to the other metrics
   is not yet complete.
 - Interval synthesizer to verify embedding diagnostics performance on random data.
     - Interval sizes are controlled and are placed realistically, within chromosome boundaries. Chromosome sizes were
@@ -36,7 +35,7 @@ Dec 18th, 2024
 
 ### Legacy Giggle Benchmark
 
-This includes not only the benchmark, but a series of experiments conducted with intention to increase recall (wrt the
+This includes not only the benchmark but a series of experiments conducted with the intention to increase recall (wrt the
 legacy system) without significant performance burden.
 
 This required
@@ -64,6 +63,6 @@ A major time sync.
 ## Codebase
 
 - Documented.
-- Reproducible (among other things, random number generator seeds are version controlled and documented).
-- Important entrypoints have associated snakemake rules.
+- Reproducible (among other things, random number generator seeds are version-controlled and documented).
+- Important entry points have associated snakemake rules.
 - Partial test coverage.
