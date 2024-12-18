@@ -6,7 +6,7 @@
 This is script is a simple HuggingFace wrapper around a HyenaDNA model, to enable a one click example
 of how to load the pretrained weights and get embeddings.
 
-It will instantiate a HyenaDNA model (model class is in the `standalone_hyenadna.py`), and handle the downloading of pretrained weights from HuggingFace.
+It will instantiate a HyenaDNA model (model class is in the `standaloneHyenadna.py`), and handle the downloading of pretrained weights from HuggingFace.
 
 Check out the colab notebook for a simpler and more complete walk through of how to use HyenaDNA with pretrained weights.
 
@@ -18,8 +18,8 @@ import torch
 # import transformers
 from transformers import PreTrainedModel
 
-from standalone_hyenadna import CharacterTokenizer
-from standalone_hyenadna import HyenaDNAModel
+from standaloneHyenadna import CharacterTokenizer
+from standaloneHyenadna import HyenaDNAModel
 
 
 # helper 1
@@ -134,7 +134,7 @@ class HyenaDNAPreTrainedModel(PreTrainedModel):
 """# Inference (450k to 1M tokens)!
 
 If all you're interested in is getting embeddings on long DNA sequences
-(embed_gen), then we can do that right here in Colab!
+(embedGen), then we can do that right here in Colab!
 
 
 *   We provide an example how to load the weights from Huggingface.
@@ -162,9 +162,9 @@ def inference_single():
     4 options:
       'hyenadna-tiny-1k-seqlen'   # fine-tune on colab ok
       'hyenadna-small-32k-seqlen'
-      'hyenadna-medium-160k-seqlen'  # embed_gen only on colab
-      'hyenadna-medium-450k-seqlen'  # embed_gen only on colab
-      'hyenadna-large-1m-seqlen'  # embed_gen only on colab
+      'hyenadna-medium-160k-seqlen'  # embedGen only on colab
+      'hyenadna-medium-450k-seqlen'  # embedGen only on colab
+      'hyenadna-large-1m-seqlen'  # embedGen only on colab
     '''
 
     # you only need to select which model to use here, we'll do the rest!

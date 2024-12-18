@@ -1,6 +1,6 @@
 import intervalTransforms as IT
-from data_wrangling.list_dataset import ListDataset
-from data_wrangling.transform_dataset import *
+from dataWrangling.listDataset import ListDataset
+from dataWrangling.transformDataset import *
 
 
 class IdxTransform(Transform):

@@ -5,7 +5,7 @@ import umap
 import umap.plot
 from matplotlib import pyplot as plt
 
-from embed_gen.inference_batch import BatchInferHyenaDNA
+from embedGen.inferenceBatch import BatchInferHyenaDNA
 
 
 def main():

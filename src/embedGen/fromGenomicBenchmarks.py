@@ -1,9 +1,9 @@
 import numpy as np
 
-from data_wrangling.genomic_benchmark_dataset import GenomicBenchmarkDataset
-from data_wrangling.truncated_dataset import TruncatedDataset
-from embed_gen.inference_batch import BatchInferHyenaDNA
-from embed_gen.standalone_hyenadna import CharacterTokenizer
+from dataWrangling.genomicBenchmarkDataset import GenomicBenchmarkDataset
+from dataWrangling.truncatedDataset import TruncatedDataset
+from embedGen.inferenceBatch import BatchInferHyenaDNA
+from embedGen.standaloneHyenadna import CharacterTokenizer
 
 
 # TODO: extract (from_[fasta, genomicbench]) similarity

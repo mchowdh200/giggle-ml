@@ -1,7 +1,7 @@
 import numpy as np
 
-import embed_tests.tests as tests
-from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
+import embedTests.tests as tests
+from dataWrangling.seqDatasets import BedDataset, FastaDataset, TokenizedDataset
 from utils.strToInfSystem import getInfSystem
 
 

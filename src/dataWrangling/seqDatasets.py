@@ -5,7 +5,7 @@ import torch
 from pyfaidx import Fasta
 from torch.utils.data import DataLoader
 
-from embed_gen.standalone_hyenadna import CharacterTokenizer
+from embedGen.standaloneHyenadna import CharacterTokenizer
 
 
 class BedDataset(torch.utils.data.Dataset):

@@ -3,7 +3,7 @@ from geniml.io import Region
 from geniml.region2vec import Region2VecExModel as BackingModel
 from torch import tensor
 
-from embed_gen.inference_batch import BatchInferHyenaDNA
+from embedGen.inferenceBatch import BatchInferHyenaDNA
 
 
 def prepareModel(rank, device):

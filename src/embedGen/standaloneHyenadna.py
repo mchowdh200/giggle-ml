@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""HyenaDNA training & embed_gen example (Public)
+"""HyenaDNA training & embedGen example (Public)
 
 This code is adapted from the original colab tutorial on HyenaDNA. Check that out for an easier entry point into the code.
 

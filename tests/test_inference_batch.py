@@ -4,8 +4,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from data_wrangling.list_dataset import ListDataset
-from embed_gen.inference_batch import BatchInferHyenaDNA
+from dataWrangling.listDataset import ListDataset
+from embedGen.inferenceBatch import BatchInferHyenaDNA
 
 
 class IdentityModel(nn.Module):

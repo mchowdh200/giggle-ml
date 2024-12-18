@@ -9,11 +9,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import intervalTransforms as Transform
-from data_wrangling.seq_datasets import BedDataset
-from data_wrangling.seq_datasets import FastaDataset
-from data_wrangling.seq_datasets import TokenizedDataset
-from data_wrangling.transform_dataset import TransformDataset
-from embed_gen.inference_batch import BatchInferHyenaDNA
+from dataWrangling.seqDatasets import BedDataset
+from dataWrangling.seqDatasets import FastaDataset
+from dataWrangling.seqDatasets import TokenizedDataset
+from dataWrangling.transformDataset import TransformDataset
+from embedGen.inferenceBatch import BatchInferHyenaDNA
 from utils.strToInfSystem import getInfSystem
 
 

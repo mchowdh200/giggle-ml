@@ -1,4 +1,4 @@
-from embed_gen.inference_batch import BatchInferHyenaDNA
+from embedGen.inferenceBatch import BatchInferHyenaDNA
 
 
 def getInfSystem(s=snakemake.config.batchInference.preferModel):

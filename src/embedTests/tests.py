@@ -1,9 +1,9 @@
-from embed_tests.CTT import ctt
-from embed_tests.GDST import gdst
-from embed_tests.NPT import npt
-from embed_tests.RCT import rct
+from embedTests.CTT import ctt
+from embedTests.GDST import gdst
+from embedTests.NPT import npt
+from embedTests.RCT import rct
 
-from embed_tests.SWT import swt
+from embedTests.SWT import swt
 
 # TODO: what is this one?
 # from statistical_tests.CCT import main as cct

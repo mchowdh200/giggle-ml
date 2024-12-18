@@ -7,10 +7,10 @@ from scipy.spatial.distance import cosine
 from scipy.special import softmax
 from scipy.stats import entropy
 
-from data_wrangling.seq_datasets import BedDataset
-from data_wrangling.seq_datasets import FastaDataset
-from data_wrangling.seq_datasets import TokenizedDataset
-from embed_gen.inference_batch import BatchInferHyenaDNA
+from dataWrangling.seqDatasets import BedDataset
+from dataWrangling.seqDatasets import FastaDataset
+from dataWrangling.seqDatasets import TokenizedDataset
+from embedGen.inferenceBatch import BatchInferHyenaDNA
 from utils.basicLogger import BasicLogger
 
 

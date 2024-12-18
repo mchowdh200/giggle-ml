@@ -2,8 +2,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from data_wrangling.seq_datasets import TokenizedDataset, FastaDataset, BedDataset
-from data_wrangling.transform_dataset import TransformDataset
+from dataWrangling.seqDatasets import TokenizedDataset, FastaDataset, BedDataset
+from dataWrangling.transformDataset import TransformDataset
 import intervalTransforms as Transform
 from utils.strToInfSystem import getInfSystem
 
@@ -156,7 +156,7 @@ def embedSets(refGenome, bedFiles, embedPaths, seqMinLen, seqMaxLen):
 #         outPaths = list()
 #
 #         if len(bedPaths) > 1:
-#             print("Starting embed_gen on", len(bedPaths), "bed files.")
+#             print("Starting embedGen on", len(bedPaths), "bed files.")
 #
 #         for bedPath in bedPaths:
 #             name = Path(bedPath).stem

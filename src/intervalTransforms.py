@@ -1,4 +1,4 @@
-from data_wrangling.transform_dataset import Transform
+from dataWrangling.transformDataset import Transform
 
 
 class Translate(Transform):

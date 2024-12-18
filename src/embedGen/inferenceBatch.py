@@ -7,8 +7,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from embed_gen.block_distributed_sampler import BlockDistributedSampler
-from embed_gen.hyenadna_backend import prepare_model
+from embedGen.blockDistributedSampler import BlockDistributedSampler
+from embedGen.hyenadnaBackend import prepare_model
 
 doMemorySnapshots = False
 
@@ -29,7 +29,7 @@ class BatchInferHyenaDNA:
 
 
     def infer_loop(self, rank, worldSize, model, device, dataLoader, outPath):
-        """embed_gen loop."""
+        """embedGen loop."""
         sampleCount = len(dataLoader.sampler)
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
