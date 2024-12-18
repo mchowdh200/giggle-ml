@@ -1,0 +1,33 @@
+from embedStatTests import runTests
+
+sys.path.append('./src')
+
+workdir: ".."
+configfile: "config.yaml"
+dataDir = config["dataDir"]
+
+rule synthesizeSequences:
+    params:
+        seqLenMin = int(1e3),
+        seqLenMax = int(25e3),
+        seqPerUniverse = int(2e5),
+        seed = 31415
+    output:
+        outFiles = [ f"{dataDir}synthetic/intervals.bed" ],
+        fastaOut = f"{dataDir}/synthetic/ref.fa"
+    run:
+        from src.synthesis import synthesize
+        synthesize(output.fastaOut, output.outFiles, *params)
+
+
+rule embedQualityTests:
+    params:
+        limit = 1000  # some of the statistical tests are rather inefficient
+                      # and need an input limit to bound runtime
+    input:
+        intervals = f"{dataDir}/giggleBench/query.bed",
+        emebds = f"{dataDir}/giggleBench/embeds/straight/query.npy",
+    output:
+        swtFig = "embedAnalysis/swt.png"
+    run:
+        runTests(input.intervals, input.emebds, params.limit, output.swtFig)

@@ -1,3 +1,10 @@
+from embed_tests.CTT import ctt
+from embed_tests.GDST import gdst
+from embed_tests.NPT import npt
+from embed_tests.RCT import rct
+
+from embed_tests.SWT import swt
+
 # TODO: what is this one?
 # from statistical_tests.CCT import main as cct
 

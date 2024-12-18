@@ -11,7 +11,7 @@ from data_wrangling.seq_datasets import BedDataset
 from data_wrangling.seq_datasets import FastaDataset
 from data_wrangling.seq_datasets import TokenizedDataset
 from embed_gen.inference_batch import BatchInferHyenaDNA
-from utils.basic_logger import BasicLogger
+from utils.basicLogger import BasicLogger
 
 
 def entropy_by_distance(embeds: np.ndarray, aggregateEmbed: np.ndarray) -> float:

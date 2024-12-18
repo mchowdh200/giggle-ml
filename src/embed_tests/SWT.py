@@ -4,8 +4,10 @@ from data_wrangling.seq_datasets import TokenizedDataset
 import numpy as np
 from matplotlib import pyplot as plt
 
+from utils.strToInfSystem import getInfSystem
 
-def swt(embedOutPath, fastaDataset, infSystem, gapFactor=.1, considerLimit=128):
+
+def swt(embedOutPath, fastaDataset, outFig, gapFactor=.1, considerLimit=128):
     swDataset = SlidingWindowDataset(fastaDataset, gapFactor)
     binAmnt = swDataset.spreeCount
     # Round to multiple of binAmnt
@@ -15,7 +17,8 @@ def swt(embedOutPath, fastaDataset, infSystem, gapFactor=.1, considerLimit=128):
 
     print('Creating embeddings...')
     # TODO: configurable batch size
-    infSystem.batchInfer(shortDataset, embedOutPath, batchSize=binAmnt)
+    print(len([shortDataset]), len([embedOutPath]))
+    getInfSystem().batchInfer([shortDataset], [embedOutPath], batchSize=binAmnt)
     embeds = np.memmap(embedOutPath, dtype='float32', mode='r')
     embedDim = 256
     embeds = embeds.reshape((-1, embedDim))
@@ -65,6 +68,7 @@ def swt(embedOutPath, fastaDataset, infSystem, gapFactor=.1, considerLimit=128):
                  ecolor='lightgray', elinewidth=2, capsize=0)
 
     plt.show()
+    plt.savefig(outFig, dpi=300)
 
 
 def cosine_similarity(a, b):
