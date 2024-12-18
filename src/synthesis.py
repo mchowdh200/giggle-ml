@@ -1,3 +1,4 @@
+import random
 from random import randint
 from time import time
 
@@ -29,14 +30,14 @@ chrmSizes = [
     57.23    # Chromosome Y
 ]
 
-chrmSizes = [30]*5
-
-# chrmSizes = list(map(lambda x: x * 1e6, chrmSizes))  # In Mbp
+chrmSizes = list(map(lambda x: x * 1e6, chrmSizes))  # In Mbp
 chrmSizes = list(map(round, chrmSizes))
 
 chrmNames = [f"chr{i+1}" for i, _ in enumerate(chrmSizes)]
-# chrmNames[22] = "chrX"
-# chrmNames[23] = "chrY"
+chrmNames[22] = "chrX"
+chrmNames[23] = "chrY"
+
+print("Using chromosome structure:", list(zip(chrmNames, chrmSizes)))
 
 
 class Chromosome:
@@ -83,20 +84,13 @@ class Chromosome:
         return str(self.blocks)
 
 
-def synthesize():
-    # INFO: Config
-    # seqLenMin, seqLenMax = int(1e3), int(25e3)
-    # amntUniverses = 1
-    # seqPerUniverse = int(2e5)
-    seqLenMin, seqLenMax = 2, 10
-    amntUniverses = 1
-    seqPerUniverse = 5
-    outDir = "data/synthetic/x"
+def synthesize(fastaOut, outFiles, seqLenMin, seqLenMax, seqPerUniverse, seed):
+    random.seed(seed)
 
     # ---------------- Synthesize intervals ----------------
     print("Synthesizing intervals...")
     universes = []
-    for _ in range(amntUniverses):
+    for _ in range(outFiles):
         univ = []
 
         for _ in range(seqPerUniverse):
@@ -132,20 +126,17 @@ def synthesize():
     print("Generating output files...")
     # bed files
     for regId, reg in enumerate(universes):
-        path = f"{outDir}/universe_{regId}.bed"
+        path = outFiles[regId]
         with open(path, "w") as f:
             for chrmId, start, end in reg:
                 chrmName = chrmNames[chrmId]
                 f.write(f"{chrmName}\t{start}\t{end}\n")
 
     # fasta file
-    with open(f"{outDir}/seqs.fa", "w") as f:
+    with open(fastaOut, "w") as f:
         out = []
         for chrmId, chrm in enumerate(blocks):
             chrmName = chrmNames[chrmId]
             out.append(chrm.fasta_format(chrmName))
             out.append("\n")
         f.write("".join(out))
-
-
-synthesize()
