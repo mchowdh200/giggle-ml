@@ -7,3 +7,4 @@ Parameters:
 	sampleSwellFactor: 1
 	sampleChunkAmnt: 1
 	queryTranslation: 0
+precision: 0.02287

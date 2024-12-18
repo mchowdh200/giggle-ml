@@ -1,0 +1,14 @@
+referenceGenome: "./data/hg38.fa"
+
+# Embedding generation
+batchInference:
+  batchSize: 200
+  workers: 2
+  bufferSize: 100
+  inputsInMemory: True
+  rowsLimit: null
+  maxSeqLen: 500
+  preferModel: 'hyenaDNA'
+
+dataDir: 'data'
+experimentsDir: 'experiments'

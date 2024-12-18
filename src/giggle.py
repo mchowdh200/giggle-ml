@@ -14,6 +14,7 @@ from data_wrangling.seq_datasets import FastaDataset
 from data_wrangling.seq_datasets import TokenizedDataset
 from data_wrangling.transform_dataset import TransformDataset
 from embed_gen.inference_batch import BatchInferHyenaDNA
+from utils.strToInfSystem import getInfSystem
 
 
 # TODO: extract intersection utilities
@@ -68,12 +69,12 @@ def build_vecdb_shards(intervals, embeds):
     return shard
 
 
-def modern_giggle(shard,
-                  sampleIntervals: TransformDataset,
-                  sampleEmbeds,
-                  queryIntervals: TransformDataset,
-                  queryEmbeds,
-                  k):
+def modernGiggle(shard,
+                 sampleIntervals: TransformDataset,
+                 sampleEmbeds,
+                 queryIntervals: TransformDataset,
+                 queryEmbeds,
+                 k):
 
     results = defaultdict(set)
 
@@ -95,7 +96,7 @@ def modern_giggle(shard,
     return results
 
 
-def parse_ancient_giggle(path):
+def parseLegacyGiggle(path):
     ancientResults = dict()
     with open(path, "r") as f:
         profile = []
@@ -121,7 +122,7 @@ def parse_ancient_giggle(path):
     return ancientResults
 
 
-def analyze_results(modernResults, ancientResults, outDir, k):
+def analyzeResults(modernResults, ancientResults, overlapPlot, geOverlapPlot, k):
     # checks
 
     for query in modernResults.keys():
@@ -193,7 +194,7 @@ def analyze_results(modernResults, ancientResults, outDir, k):
     plt.xlabel("Overlap")
     plt.ylabel("Recall")
     plt.title("Recall by overlap")
-    plt.savefig(outDir + "/recallByOverlap.png", dpi=300)
+    plt.savefig(overlapPlot, dpi=300)
 
     # recall by >= overlap
 
@@ -220,49 +221,32 @@ def analyze_results(modernResults, ancientResults, outDir, k):
     plt.xlabel(">= Overlap")
     plt.ylabel("Recall")
     plt.title("Recall by at least overlap")
-    plt.savefig(outDir + "/recallByGEOverlap.png", dpi=300)
+    plt.savefig(GEOverlapPlot, dpi=300)
 
 
-def main():
-    # INFO: Config
-
-    limit = None
-    batchSize = 1000
-    workers = 2
-    bufferSize = 10
-    inputsInMemory = True
-
-    padToLength = 100
-    k = 100
-
-    querySwellFactor = 1
-    queryChunkAmnt = 1
-    sampleSwellFactor = 1
-    sampleChunkAmnt = 1
-    queryTranslation = 0
-    expName = "straight"
-
-    makeNewEmbeds = len(sys.argv) < 2 or sys.argv[1] != "analysis"
-    doAnalysis = not makeNewEmbeds
-
-    print("Experiment: ", expName)
-
-    paths = SimpleNamespace(
-        fasta="./data/hg38.fa",
-        queryBed="./data/giggleBench/query.bed",
-        sampleBed="./data/giggleBench/sample.bed",
-
-        queryEmbeds=f"./data/giggleBench/embeds/{expName}/query.npy",
-        sampleEmbeds=f"./data/giggleBench/embeds/{expName}/sample.npy",
-
-        experimentalAnalysis=f"./experiments/giggleBench/{expName}",
-        ancientResults="./data/giggleBench/gresults.gbed")
+def giggleBenchmark(
+        queryIntervalsPath,
+        sampleIntervalsPath,
+        queryEmbedsPath,
+        sampleEmbedsPath,
+        legacyGiggleResults,
+        overlapPlotPath,
+        geOverlapPlotPath,
+        k = 100,
+        querySwellFactor = 1,
+        queryChunkAmnt = 1,
+        sampleSwellFactor = 1,
+        sampleChunkAmnt = 1,
+        queryTranslation = 0,
+):
+    conf = snakemake.config.batchInference
+    bufferSize = conf.bufferSize
+    inputsInMemory = conf.inputsInMemory
 
     sampleIntervals = TransformDataset(
         backingDataset=BedDataset(
-            paths.sampleBed,
+            sampleIntervalsPath,
             inMemory=inputsInMemory,
-            rowsLimit=limit,
             bufferSize=bufferSize),
         transforms=[
             Transform.Swell(swellFactor=sampleSwellFactor),
@@ -271,9 +255,8 @@ def main():
 
     queryIntervals = TransformDataset(
         backingDataset=BedDataset(
-            paths.queryBed,
+            queryIntervalsPath,
             inMemory=inputsInMemory,
-            rowsLimit=limit,
             bufferSize=bufferSize),
         transforms=[
             Transform.Translate(offset=queryTranslation),
@@ -282,69 +265,27 @@ def main():
         ])
 
     print("Length (sample, query):", len(sampleIntervals), len(queryIntervals))
+    dim = getInfSystem().embedDim
 
-    infSystem = BatchInferHyenaDNA()
-    dim = infSystem.embedDim
-
-    # Make embeddings
-    if makeNewEmbeds:
-        sampleTokens = TokenizedDataset(
-            FastaDataset(paths.fasta, sampleIntervals),
-            padToLength=padToLength)
-
-        queryTokens = TokenizedDataset(
-            FastaDataset(paths.fasta, queryIntervals),
-            padToLength=padToLength)
-
-        Path(paths.sampleEmbeds).parent.mkdir(parents=True, exist_ok=True)
-        Path(paths.queryEmbeds).parent.mkdir(parents=True, exist_ok=True)
-
-        infSystem.batchInfer(
-            sampleTokens, paths.sampleEmbeds, batchSize, workers)
-        infSystem.batchInfer(
-            queryTokens, paths.queryEmbeds, batchSize, workers)
-
-    sampleEmbeds = np.memmap(paths.sampleEmbeds, dtype=np.float32, mode="r")
+    sampleEmbeds = np.memmap(sampleEmbedsPath, dtype=np.float32, mode="r")
     sampleEmbeds = sampleEmbeds.reshape(-1, dim)
-    queryEmbeds = np.memmap(paths.queryEmbeds, dtype=np.float32, mode="r")
+    queryEmbeds = np.memmap(queryEmbedsPath, dtype=np.float32, mode="r")
     queryEmbeds = queryEmbeds.reshape(-1, dim)
 
     # Perform analysis
-    if doAnalysis:
-        # write config information to info.md
-        path = paths.experimentalAnalysis + "/info.md"
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            f.write("Date: " + str(datetime.datetime.now()) + "\n")
-            f.write("Parameters:\n")
-            f.write(f"\texpName: {expName}\n")
-            f.write(f"\tk: {k}\n")
-            f.write(f"\tquerySwellFactor: {querySwellFactor}\n")
-            f.write(f"\tqueryChunkAmnt: {queryChunkAmnt}\n")
-            f.write(f"\tsampleSwellFactor: {sampleSwellFactor}\n")
-            f.write(f"\tsampleChunkAmnt: {sampleChunkAmnt}\n")
-            f.write(f"\tqueryTranslation: {queryTranslation}\n")
+    print("Building vector database shards")
+    vdbShards = build_vecdb_shards(sampleIntervals, sampleEmbeds)
 
-        print("Building vector database shards")
-        vdbShards = build_vecdb_shards(sampleIntervals, sampleEmbeds)
+    print("Performing modern giggle")
+    modernResults = modernGiggle(vdbShards,
+                                 sampleIntervals,
+                                 sampleEmbeds,
+                                 queryIntervals,
+                                 queryEmbeds,
+                                 k)
 
-        print("Performing modern giggle")
-        modernResults = modern_giggle(vdbShards,
-                                      sampleIntervals,
-                                      sampleEmbeds,
-                                      queryIntervals,
-                                      queryEmbeds,
-                                      k)
-
-        print("Parsing ancient giggle")
-        ancientResults = parse_ancient_giggle(paths.ancientResults)
-
-        print('k =', k)
-        querySeqLens = list(map(lambda x: x[2] - x[1], queryIntervals))
-        print('Query Sequence Lengths (after swell & chunk)', set(querySeqLens))
-        analyze_results(modernResults, ancientResults,
-                        paths.experimentalAnalysis, k)
-
-
-if __name__ == "__main__":
-    main()
+    print("Parsing ancient giggle")
+    ancientResults = parseLegacyGiggle(legacyGiggleResults)
+    querySeqLens = list(map(lambda x: x[2] - x[1], queryIntervals))
+    print('Query Sequence Lengths (after swell & chunk)', set(querySeqLens))
+    analyzeResults(modernResults, ancientResults, overlapPlotPath, geOverlapPlotPath, k)
