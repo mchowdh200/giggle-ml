@@ -64,6 +64,6 @@ A major time sync.
 ## Codebase
 
 - Documented.
-- Reproducible (among other things, random number generators seeds are version controlled and documented).
+- Reproducible (among other things, random number generator seeds are version controlled and documented).
 - Important entrypoints have associated snakemake rules.
 - Partial test coverage.
