@@ -2,12 +2,12 @@ referenceGenome: "./data/hg38.fa"
 
 # Embedding generation
 batchInference:
-  batchSize: 200
-  workers: 2
-  bufferSize: 100
+  batchSize: 5000
+  workers: 8
+  bufferSize: 10000
   inputsInMemory: True
   rowsLimit: null
-  maxSeqLen: 500
+  maxSeqLen: 100
   preferModel: 'hyenaDNA'
 
 dataDir: 'data'

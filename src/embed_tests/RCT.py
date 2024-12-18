@@ -27,7 +27,7 @@ def rct(embeds, seqs, folds=5):
     kf = KFold(n_splits=folds, shuffle=True)
     scores = []
 
-    for i, (train_index, test_index) in enumerate(kf.split(embeds)):
+    for i, (train_index, test_index) in enumerate(kf.split(seqs)):
         X_train = subseq(embeds, train_index)
         X_test = subseq(embeds, test_index)
         y_train = subseq(seqs, train_index)

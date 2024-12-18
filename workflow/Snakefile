@@ -1,3 +1,4 @@
+from embedPipeline import embedSets
 from embedStatTests import runTests
 
 sys.path.append('./src')
@@ -5,6 +6,9 @@ sys.path.append('./src')
 workdir: ".."
 configfile: "config.yaml"
 dataDir = config["dataDir"]
+
+include: giggleLegacyExperiments.smk
+
 
 rule synthesizeSequences:
     params:
@@ -31,3 +35,21 @@ rule embedQualityTests:
         swtFig = "embedAnalysis/swt.png"
     run:
         runTests(input.intervals, input.emebds, params.limit, output.swtFig)
+
+
+roadmapEpigBedPattern = dataDir + "/roadmap_epigenomics/roadmap_sort/{id}.bed"
+roadmapEpigBedNames, = glob_wildcards(roadmapEpigBedPattern)
+rule RoadmapEpigenomicsEmbeddings:
+    # TODO: roadmap epi workflow should automatically start fiji job
+    input:
+        refGenome = f"{dataDir}/hg19.fa",
+        bedFiles = expand(roadmapEpigBedPattern, id=roadmapEpigBedNames),
+    params:
+        seqMinLen = config['batchInference']['seqMinLen'],
+        seqMaxLen = 1000,
+    output:
+        embeds = expand(dataDir + "/roadmap_epigenomics/embeds/{id}.npy", id=roadmapEpigBedNames)
+    run:
+        embedSets(input.refGenome, input.bedFiles, params.seqMinLen, params.seqMaxLen)
+
+

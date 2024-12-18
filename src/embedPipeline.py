@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -90,6 +91,37 @@ def embedAfterTransform(
     # TODO: this should be generalized as to not rely on query/sample pairs
 
 
+def embedSets(refGenome, bedFiles, embedPaths, seqMinLen, seqMaxLen):
+    conf = snakemake.config.batchInference
+    batchSize = conf.batchSize
+    workers = conf.workes
+    bufferSize = conf.bufferSize
+    inputsInMemory = conf.inputsInMemory
+
+    sourceDatasets = list()
+    outPaths = list()
+
+    print("Starting inference on", len(ids), "bed files.")
+    for bedFile, i in enumerate(bedFiles):
+        embedFile = embedPaths[bedFile]
+        outPaths.append(embedFile)
+
+        dataset = TokenizedDataset(
+            FastaDataset(
+                refGenome,
+                BedDataset(
+                    bedFile,
+                    inputsInMemory,
+                    bufferSize=bufferSize,
+                    maxLen=seqMaxLen
+                )
+            ),
+            padToLength=seqMaxLen
+        )
+
+        sourceDatasets.append(dataset)
+
+    getInfSystem().batchInfer(sourceDatasets, outPaths, batchSize, workers)
 
 
 # from intervalTransforms import BasicTransforms
