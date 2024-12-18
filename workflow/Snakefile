@@ -1,3 +1,7 @@
+import random
+
+import numpy as np
+
 from embedPipeline import embedSets
 from embedStatTests import runTests
 
@@ -26,14 +30,17 @@ rule synthesizeSequences:
 
 rule embedQualityTests:
     params:
-        limit = 1000  # some of the statistical tests are rather inefficient
-                      # and need an input limit to bound runtime
+        limit = 1000,  # some of the statistical tests are rather inefficient
+                       # and need an input limit to bound runtime
+        seed = 31415
     input:
         intervals = f"{dataDir}/giggleBench/query.bed",
         emebds = f"{dataDir}/giggleBench/embeds/straight/query.npy",
     output:
         swtFig = "embedAnalysis/swt.png"
     run:
+        random.seed(params.seed)
+        np.random.seed(params.seed)
         runTests(input.intervals, input.emebds, params.limit, output.swtFig)
 
 
