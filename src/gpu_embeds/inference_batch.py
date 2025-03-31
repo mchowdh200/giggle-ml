@@ -1,11 +1,11 @@
-import multiprocessing as mp
 import os
-import tracemalloc
 from typing import List
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from torch import multiprocessing as mp
+import torch.distributed as dist
 
 from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
 from gpu_embeds.hyenadna_backend import prepare_model
@@ -25,10 +25,10 @@ class BatchInferHyenaDNA:
 
 
     def item_to_device(self, item, device):
-        return item.to(device)
+        return item.to(device, non_blocking=True)
 
 
-    def infer_loop(self, rank, worldSize, model, device, dataLoader, outPath):
+    def infer_loop(self, rank, model, device, dataLoader, outPath):
         """inference loop."""
         sampleCount = len(dataLoader.sampler)
         rprint = lambda *args: print(f"[{rank}]:", *args)
@@ -39,12 +39,12 @@ class BatchInferHyenaDNA:
 
         outFile = np.memmap(outPath, dtype='float32', mode='w+',
                             shape=(sampleCount, self.embedDim))
-        print("Allocated memmap.")
         nextIdx = 0
 
         with torch.inference_mode():
-            tracemalloc.start()
+            # tracemalloc.start()
             for i, input in enumerate(dataLoader):
+                continue
                 input = self.item_to_device(input, device)
                 output = model(input).cpu()
 
@@ -55,17 +55,17 @@ class BatchInferHyenaDNA:
                 outFile[nextIdx:nextIdx + len(output)] = output
                 nextIdx += len(output)
 
-                if doMemorySnapshots:
-                    if i % 10 == 0:
-                        snapshot = tracemalloc.take_snapshot()
-                        current, peak = tracemalloc.get_traced_memory()
-                        top_stats = snapshot.statistics('lineno')
-                        print(f"Process {mp.current_process().name}:")
-                        print(
-                            "\t==>  ", f"Peak memory usage: {peak / 10**6:.2f} MB")
-                        for stat in top_stats[:5]:
-                            print('\t-', stat)
-                rprint(f"Batch: {i}\t/ {len(dataLoader)}")
+                # if doMemorySnapshots:
+                #     if i % 10 == 0:
+                #         snapshot = tracemalloc.take_snapshot()
+                #         current, peak = tracemalloc.get_traced_memory()
+                #         top_stats = snapshot.statistics('lineno')
+                #         print(f"Process {mp.current_process().name}:")
+                #         print(
+                #             "\t==>  ", f"Peak memory usage: {peak / 10**6:.2f} MB")
+                #         for stat in top_stats[:5]:
+                #             print('\t-', stat)
+                rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
 
         # "close" the memmap
         outFile.flush()
@@ -73,30 +73,23 @@ class BatchInferHyenaDNA:
 
 
     def worker(self, rank, worldSize, batchSize, datasets, outPaths):
-        # os.environ['MASTER_ADDR'] = 'localhost'
-        # os.environ['MASTER_PORT'] = '12356'
-        # backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
-        # dist.init_process_group(backendType, rank=rank, world_size=worldSize)
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '12356'
+        backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
+        dist.init_process_group(backendType, rank=rank, world_size=worldSize)
 
-        # if not dist.is_initialized():
-        #     raise "Failed to initialize distributed backend"
+        if not dist.is_initialized():
+            raise "Failed to initialize distributed backend"
 
         # TODO: does not work on mig partitions
-        device = None
-        devIds = None
-
         # TODO: not quite functional for gpu-cpu mix
         if torch.cuda.is_available() and rank < torch.cuda.device_count():
             device = torch.device(f'cuda:{rank}')
-            devIds = [rank]
         else:
             device = torch.device('cpu')
 
         model = self.prepare_model(rank, device)
         model.to(device)
-
-        # if self.useDDP:
-        #     model = DDP(model, device_ids=devIds)
         model.eval()
 
         for i, dataset, outPath in zip(range(len(datasets)), datasets, outPaths):
@@ -105,47 +98,31 @@ class BatchInferHyenaDNA:
 
             sampler = BlockDistributedSampler(
                 dataset, num_replicas=worldSize, rank=rank)
+
             dataLoader = DataLoader(dataset, batch_size=batchSize,
-                                    sampler=sampler, shuffle=False)
+                                    sampler=sampler, shuffle=False,
+                                    pin_memory=True, collate_fn=dataset.collate_fn,
+                                    # num_workers=0)
+                                    num_workers=1, multiprocessing_context='spawn')
 
             outPath += "." + str(rank)
-            self.infer_loop(rank, worldSize, model,
-                            device, dataLoader, outPath + '__')
+            self.infer_loop(rank, model, device, dataLoader, outPath + '__')
             # it is now finished, rename x__ -> x
             os.rename(outPath + '__', outPath)
 
             if rank == 0:
                 print(f"\t- Finished {i+1} / {len(datasets)}")
 
+        dist.barrier()
+        dist.destroy_process_group()
 
 
     def batchInfer(self, datasets: List[Dataset], outPaths: List[str], batchSize=16, worldSize=None):
         assert len(datasets) == len(outPaths)
-
-        device = None
-        if torch.cuda.is_available():
-            print("We're using", torch.cuda.device_count(), "GPUs!")
-            device = 'cuda'
-            if worldSize is None:
-                worldSize = torch.cuda.device_count()
-        else:
-            device = 'cpu'
-            if worldSize is None:
-                worldSize = 4
-            print(f"We're using {worldSize} CPUs.")
-
         # big operation
 
-        workers = list()
         args = (worldSize, batchSize, datasets, outPaths)
-        mp.set_start_method('spawn')
-
-        for rank in range(worldSize):
-            p = mp.Process(target=self.worker, args=(rank, *args))
-            p.start()
-            workers.append(p)
-
-        [p.join() for p in workers]
+        mp.spawn(self.worker, args=args, nprocs=worldSize, join=True) # spawn method
 
         # TODO: aggregation can also be parallelized
         for dataset, outPath in zip(datasets, outPaths):
