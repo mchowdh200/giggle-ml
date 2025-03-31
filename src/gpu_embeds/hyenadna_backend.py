@@ -144,6 +144,8 @@ def prepare_model(rank, device):
       'hyenadna-large-1m-seqlen'  # inference only on colab
     '''
 
+    # TODO: this should pull via AutoModel.from_pretrained
+
     # select model
     # use None if training from scratch
     pretrained_model_name = 'hyenadna-tiny-1k-seqlen'

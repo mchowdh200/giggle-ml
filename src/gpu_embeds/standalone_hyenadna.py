@@ -12,7 +12,6 @@ Original file is located at
 """
 
 #@title Imports
-# for HyenaDNA specifically
 import torch
 import math
 import torch

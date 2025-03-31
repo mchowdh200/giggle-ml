@@ -1,48 +1,57 @@
 import os
+import pyfastx
 
 from data_wrangling.seq_datasets import TokenizedDataset, FastaDataset, BedDataset
 from gpu_embeds.inference_batch import BatchInferHyenaDNA
 
 
 def main():
-    workers = 8
-    batchSize = int(5e3)
+    workers = 2
+    batchSize = 2048
     bufferSize = batchSize * 2
     inputsInMemory = True
     seqMaxLen = 1000
 
-    fastaPath = "./data/hg19.fa"
-    intervalDir = "./data/roadmap_epigenomics/roadmap_sort"
-    embedsDir = "./data/roadmap_epigenomics/embeds"
+    dirRoot = "/cache/siwa3657/data"
+    fastaPath = dirRoot + "/hg19.fa"
+    intervalDir = dirRoot + "/roadm_epi_small/roadmap_sort"
+    embedsDir = dirRoot + "/roadm_epi_small/embeds"
 
     infSystem = BatchInferHyenaDNA()
-    ids = os.listdir(intervalDir)
-    sourceDatasets = list()
+    names = os.listdir(intervalDir)
+    datasets = list()
     outPaths = list()
 
-    print("Starting inference on", len(ids), "bed files.")
-    for name in ids:
+    # use Fastx to read sequences into memory for sharing between workers
+    print("Loading fasta file into memory...")
+    fastaIdx = pyfastx.Fastx(fastaPath)
+    seqs = { name: seq for name, seq, *_ in fastaIdx }
+
+    print("Preparing datasets...")
+    for i, name in enumerate(names):
         embedFile = os.path.join(embedsDir, name + ".npy")
+        bedFile = os.path.join(intervalDir, name)
         outPaths.append(embedFile)
 
-        bedFile = os.path.join(intervalDir, name)
-
-        dataset = TokenizedDataset(
-            FastaDataset(
-                fastaPath,
-                BedDataset(
-                    bedFile,
-                    inputsInMemory,
-                    bufferSize=bufferSize,
-                    maxLen=seqMaxLen
-                )
-            ),
+        bedDataset = BedDataset(
+            bedFile,
+            inputsInMemory,
+            bufferSize=bufferSize,
+            maxLen=seqMaxLen
+        )
+        fastaDataset = FastaDataset(
+            seqs,
+            bedDataset
+        )
+        tokDataset = TokenizedDataset(
+            fastaDataset,
             padToLength=seqMaxLen
         )
 
-        sourceDatasets.append(dataset)
+        datasets.append(tokDataset)
 
-    infSystem.batchInfer(sourceDatasets, outPaths, batchSize, workers)
+    print("Starting inference on", len(datasets), "bed files.")
+    infSystem.batchInfer(datasets, outPaths, batchSize, workers)
 
 
 if __name__ == '__main__':
