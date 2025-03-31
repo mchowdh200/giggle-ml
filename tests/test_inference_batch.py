@@ -1,9 +1,11 @@
+import os
+
+import numpy as np
 import torch
 import torch.nn as nn
+
 from data_wrangling.list_dataset import ListDataset
 from gpu_embeds.inference_batch import BatchInferHyenaDNA
-import numpy as np
-import os
 
 
 class IdentityModel(nn.Module):
@@ -17,8 +19,7 @@ class IdentityModel(nn.Module):
 class BatchInfTesting(BatchInferHyenaDNA):
     def __init__(self):
         embedDim = 10
-        super(BatchInfTesting, self).__init__(
-            embedDim, useDDP=False, useMeanAggregation=False)
+        super(BatchInfTesting, self).__init__(embedDim, useMeanAggregation=False)
 
     def prepare_model(self, rank, device):
         return IdentityModel()
@@ -39,7 +40,7 @@ def test_inference_batch():
     dataset = ListDataset(inputs)
     batchInf.batchInfer(dataset, outPath, batchSize, workers)
 
-    outputs = np.memmap(outPath, dtype='float32', mode='r')
+    outputs = np.memmap(outPath, dtype="float32", mode="r")
     outputs = outputs.reshape((-1, 10))
     inputs = inputs.numpy()
 

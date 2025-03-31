@@ -3,9 +3,9 @@ from typing import List
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
-from torch import multiprocessing as mp
 import torch.distributed as dist
+from torch import multiprocessing as mp
+from torch.utils.data import DataLoader, Dataset
 
 from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
 from gpu_embeds.hyenadna_backend import prepare_model
@@ -14,19 +14,15 @@ doMemorySnapshots = False
 
 
 class BatchInferHyenaDNA:
-    def __init__(self, embedDim=128, useDDP=True, useMeanAggregation=True):
+    def __init__(self, embedDim=128, useMeanAggregation=True):
         self.embedDim = embedDim
-        self.useDDP = useDDP
         self.useMeanAggregation = useMeanAggregation
-
 
     def prepare_model(self, rank, device):
         return prepare_model(rank, device)
 
-
     def item_to_device(self, item, device):
         return item.to(device, non_blocking=True)
-
 
     def infer_loop(self, rank, model, device, dataLoader, outPath):
         """inference loop."""
@@ -37,8 +33,9 @@ class BatchInferHyenaDNA:
         if os.path.exists(outPath):
             os.remove(outPath)
 
-        outFile = np.memmap(outPath, dtype='float32', mode='w+',
-                            shape=(sampleCount, self.embedDim))
+        outFile = np.memmap(
+            outPath, dtype="float32", mode="w+", shape=(sampleCount, self.embedDim)
+        )
         nextIdx = 0
 
         with torch.inference_mode():
@@ -52,7 +49,7 @@ class BatchInferHyenaDNA:
                 if self.useMeanAggregation:
                     output = torch.mean(output, dim=1)
 
-                outFile[nextIdx:nextIdx + len(output)] = output
+                outFile[nextIdx : nextIdx + len(output)] = output
                 nextIdx += len(output)
 
                 # if doMemorySnapshots:
@@ -71,11 +68,10 @@ class BatchInferHyenaDNA:
         outFile.flush()
         del outFile
 
-
     def worker(self, rank, worldSize, batchSize, datasets, outPaths):
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '12356'
-        backendType = 'nccl' if torch.cuda.is_available() else 'gloo'
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "12356"
+        backendType = "nccl" if torch.cuda.is_available() else "gloo"
         dist.init_process_group(backendType, rank=rank, world_size=worldSize)
 
         if not dist.is_initialized():
@@ -84,9 +80,9 @@ class BatchInferHyenaDNA:
         # TODO: does not work on mig partitions
         # TODO: not quite functional for gpu-cpu mix
         if torch.cuda.is_available() and rank < torch.cuda.device_count():
-            device = torch.device(f'cuda:{rank}')
+            device = torch.device(f"cuda:{rank}")
         else:
-            device = torch.device('cpu')
+            device = torch.device("cpu")
 
         model = self.prepare_model(rank, device)
         model.to(device)
@@ -97,18 +93,23 @@ class BatchInferHyenaDNA:
                 continue
 
             sampler = BlockDistributedSampler(
-                dataset, num_replicas=worldSize, rank=rank)
+                dataset, num_replicas=worldSize, rank=rank
+            )
 
-            dataLoader = DataLoader(dataset, batch_size=batchSize,
-                                    sampler=sampler, shuffle=False,
-                                    pin_memory=True, collate_fn=dataset.collate_fn,
-                                    # num_workers=0)
-                                    num_workers=1, multiprocessing_context='spawn')
+            dataLoader = DataLoader(
+                dataset,
+                batch_size=batchSize,
+                sampler=sampler,
+                shuffle=False,
+                pin_memory=True,
+                collate_fn=dataset.collate_fn,
+                num_workers=0,
+            )
 
             outPath += "." + str(rank)
-            self.infer_loop(rank, model, device, dataLoader, outPath + '__')
+            self.infer_loop(rank, model, device, dataLoader, outPath + "__")
             # it is now finished, rename x__ -> x
-            os.rename(outPath + '__', outPath)
+            os.rename(outPath + "__", outPath)
 
             if rank == 0:
                 print(f"\t- Finished {i+1} / {len(datasets)}")
@@ -116,29 +117,31 @@ class BatchInferHyenaDNA:
         dist.barrier()
         dist.destroy_process_group()
 
-
-    def batchInfer(self, datasets: List[Dataset], outPaths: List[str], batchSize=16, worldSize=None):
+    def batchInfer(
+        self, datasets: List[Dataset], outPaths: List[str], batchSize=16, worldSize=None
+    ):
         assert len(datasets) == len(outPaths)
         # big operation
 
         args = (worldSize, batchSize, datasets, outPaths)
-        mp.spawn(self.worker, args=args, nprocs=worldSize, join=True) # spawn method
+        mp.spawn(self.worker, args=args, nprocs=worldSize, join=True)  # spawn method
 
         # TODO: aggregation can also be parallelized
         for dataset, outPath in zip(datasets, outPaths):
             if os.path.exists(outPath):
                 continue
 
-            outFile = np.memmap(outPath, dtype='float32', mode='w+',
-                                shape=(len(dataset), self.embedDim))
+            outFile = np.memmap(
+                outPath, dtype="float32", mode="w+", shape=(len(dataset), self.embedDim)
+            )
             nextIdx = 0
 
             for rank in range(worldSize):
                 rankOutPath = outPath + "." + str(rank)
 
-                rankFile = np.memmap(rankOutPath, dtype='float32', mode='r')
+                rankFile = np.memmap(rankOutPath, dtype="float32", mode="r")
                 rankFile = rankFile.reshape((-1, self.embedDim))
-                outFile[nextIdx:nextIdx + len(rankFile)] = rankFile
+                outFile[nextIdx : nextIdx + len(rankFile)] = rankFile
 
                 nextIdx += len(rankFile)
                 del rankFile
