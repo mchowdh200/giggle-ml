@@ -7,13 +7,15 @@ from transformers import AutoTokenizer
 
 
 class BedDataset(torch.utils.data.Dataset):
-    def __init__(self, bedPath, inMemory=True, bufferSize=100, rowLimit=None, maxLen=None):
+    def __init__(
+        self, bedPath, inMemory=True, bufferSize=100, rowLimit=None, maxLen=None
+    ):
         self.bedPath = bedPath
         self.inMemory = inMemory
         self.bufferSize = bufferSize
 
-        rowLimit = float('inf') if rowLimit is None else rowLimit
-        self.maxLen = float('inf') if maxLen is None else maxLen
+        self.rowLimit = float("inf") if rowLimit is None else rowLimit
+        self.maxLen = float("inf") if maxLen is None else maxLen
 
         if inMemory:
             self._getSeq = self._fetchMemory
@@ -36,10 +38,11 @@ class BedDataset(torch.utils.data.Dataset):
                     content.append((name, start, stop))
                     continue
                 break
-        self.length = len(content)
+
+        return content
 
     def __len__(self):
-        return self.length
+        return len(self.bedContent)
 
     def _fetchMemory(self, idx):
         return self.bedContent[idx]
@@ -92,9 +95,10 @@ class TokenizedDataset(torch.utils.data.Dataset):
     def __init__(self, fastaDataset, padToLength=500):
         self.fastaDataset = fastaDataset
         self.padToLength = padToLength
-        self.modelName = 'LongSafari/hyenadna-tiny-1k-seqlen-hf' # TODO: parameterize
-        self.tokenizer = AutoTokenizer.from_pretrained(self.modelName,
-                                             trust_remote_code=True)
+        self.modelName = "LongSafari/hyenadna-tiny-1k-seqlen-hf"  # TODO: parameterize
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.modelName, trust_remote_code=True
+        )
 
     def __len__(self):
         return len(self.fastaDataset)
@@ -103,11 +107,34 @@ class TokenizedDataset(torch.utils.data.Dataset):
         return self.fastaDataset[idx]
 
     def collate_fn(self, batch):
-        batch = [ seq.upper() for seq in batch ]
-        tok = self.tokenizer.batch_encode_plus(batch,
-                             add_special_tokens=False,
-                             padding="max_length",
-                             max_length=self.padToLength,
-                             truncation=True,
-                             return_tensors="pt")
-        return tok['input_ids']
+        batch = [seq.upper() for seq in batch]
+
+        # Tokenize the entire batch without padding/truncation
+        tokenized = self.tokenizer.batch_encode_plus(
+            batch,
+            add_special_tokens=False,
+            padding=False,
+            truncation=False,
+            return_tensors=None,
+        )["input_ids"]
+
+        chunks = []
+        chunk_groups = []
+        pad_token_id = self.tokenizer.pad_token_id
+
+        for i, tokens in enumerate(tokenized):
+            seq_len = len(tokens)
+            for start in range(0, seq_len, self.padToLength):
+                end = start + self.padToLength
+                chunk = tokens[start:end]
+                # Pad if necessary
+                if len(chunk) < self.padToLength:
+                    chunk += [pad_token_id] * (self.padToLength - len(chunk))
+                chunks.append(chunk)
+                chunk_groups.append(i)
+
+        # Convert to tensors
+        input_ids = torch.tensor(chunks, dtype=torch.long)
+        chunk_groups = torch.tensor(chunk_groups, dtype=torch.long)
+
+        return input_ids, chunk_groups
