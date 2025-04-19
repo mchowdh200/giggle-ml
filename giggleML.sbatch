@@ -1,29 +1,25 @@
 #!/bin/bash
 
 #SBATCH --partition=nvidia-a100
+#SBATCH --nodelist=fijigpu-06
 #SBATCH --gres=gpu:2
 #SBATCH --mem=420G
 
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=32
+#SBATCH --ntasks=32
 
 #SBATCH --job-name=giggleML
 #SBATCH --output=giggleML-sbatch.out
 #SBATCH --time=9:00:00
 
 clear
+echo Starting job.
+source ~/rc/gpu.sh
+mamba activate gml
 
-sgpu "
-echo \"Starting job.\"
+export PYTHONUNBUFFERED=1
+time python -u src/embedSets.py
+#python -m cProfile -o ./prof.pstats src/embedSets.py
 
-source $HOME/rc/gpu.sh
-conda deactivate
-conda activate gml
-
-python src/embedSets.py
-
-conda deactivate
-"
-
-echo "Complete."
+mamba deactivate
+echo Complete.

@@ -26,8 +26,7 @@ class Region2VecModel(nn.Module):
 class R2VBatchInf(BatchInferHyenaDNA):
     def __init__(self):
         embedDim = 100
-        super(R2VBatchInf, self).__init__(
-            embedDim, useDDP=False, useMeanAggregation=False)
+        super(R2VBatchInf, self).__init__(embedDim, useMeanAggregation=False)
 
     def prepare_model(self, rank, device):
         return Region2VecModel()

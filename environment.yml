@@ -1,0 +1,12 @@
+name: gml
+channels:
+  - pkgs/main
+  - pytorch
+dependencies:
+  - numpy
+  - pytest
+  - python=3.11
+  - pytorch::pytorch
+  - transformers
+
+prefix: "/Users/simon/app/miniforge3/envs/gml"
