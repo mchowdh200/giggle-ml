@@ -10,11 +10,10 @@ from torch.utils.data import DataLoader, Dataset
 from gpu_embeds.block_distributed_sampler import BlockDistributedSampler
 from gpu_embeds.hyenadna_backend import prepare_model
 
-doMemorySnapshots = False
-
 
 class BatchInferHyenaDNA:
-    def __init__(self, embedDim=128, useMeanAggregation=True):
+    def __init__(self, embedDim=128, useMeanAggregation=True, maxSeqLen=512):
+        # TODO: maxSeqLen should be inferred
         self.embedDim = embedDim
         self.useMeanAggregation = useMeanAggregation
 
@@ -39,29 +38,33 @@ class BatchInferHyenaDNA:
         nextIdx = 0
 
         with torch.inference_mode():
-            # tracemalloc.start()
-            for i, input in enumerate(dataLoader):
-                continue
-                input = self.item_to_device(input, device)
-                output = model(input).cpu()
+            for i, batch in enumerate(dataLoader):
+                print(type(batch))
+                # tuple case is used for datasets that perform chunking
+                # on long inputs, chunkGroups is used to map chunks
+                # back to original sequences
+                if type(batch) is tuple:
+                    inputIds, chunkGroups = batch
+                    inputIds = self.item_to_device(inputIds, device)
+                    chunkGroups = self.item_to_device(chunkGroups, device)
 
-                # mean aggregation, flatten batch dimension
-                if self.useMeanAggregation:
-                    output = torch.mean(output, dim=1)
+                    embeds = model(inputIds)
 
-                outFile[nextIdx : nextIdx + len(output)] = output
-                nextIdx += len(output)
+                    if self.useMeanAggregation:
+                        chunkEmbeds = embeds.mean(dim=1)
 
-                # if doMemorySnapshots:
-                #     if i % 10 == 0:
-                #         snapshot = tracemalloc.take_snapshot()
-                #         current, peak = tracemalloc.get_traced_memory()
-                #         top_stats = snapshot.statistics('lineno')
-                #         print(f"Process {mp.current_process().name}:")
-                #         print(
-                #             "\t==>  ", f"Peak memory usage: {peak / 10**6:.2f} MB")
-                #         for stat in top_stats[:5]:
-                #             print('\t-', stat)
+                    # Average chunk embeddings by original sequence
+                    outputs = scatter_mean(chunkEmbeds, chunkGroups, dim=0)
+                else:
+                    input = self.item_to_device(batch, device)
+                    outputs = model(batch).cpu()
+
+                    # mean aggregation, flatten batch dimension
+                    if self.useMeanAggregation:
+                        outputs = torch.mean(outputs, dim=1)
+
+                outFile[nextIdx : nextIdx + len(outputs)] = outputs
+                nextIdx += len(outputs)
                 rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
 
         # "close" the memmap

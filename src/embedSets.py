@@ -1,7 +1,8 @@
 import os
+
 import pyfastx
 
-from data_wrangling.seq_datasets import TokenizedDataset, FastaDataset, BedDataset
+from data_wrangling.seq_datasets import BedDataset, FastaDataset, TokenizedDataset
 from gpu_embeds.inference_batch import BatchInferHyenaDNA
 
 
@@ -12,10 +13,10 @@ def main():
     inputsInMemory = True
     seqMaxLen = 1000
 
-    dirRoot = "/cache/siwa3657/data"
+    dirRoot = "data"
     fastaPath = dirRoot + "/hg19.fa"
-    intervalDir = dirRoot + "/roadm_epi_small/roadmap_sort"
-    embedsDir = dirRoot + "/roadm_epi_small/embeds"
+    intervalDir = dirRoot + "/myod"
+    embedsDir = dirRoot + "/myod"
 
     infSystem = BatchInferHyenaDNA()
     names = os.listdir(intervalDir)
@@ -25,7 +26,7 @@ def main():
     # use Fastx to read sequences into memory for sharing between workers
     print("Loading fasta file into memory...")
     fastaIdx = pyfastx.Fastx(fastaPath)
-    seqs = { name: seq for name, seq, *_ in fastaIdx }
+    seqs = {name: seq for name, seq, *_ in fastaIdx}
 
     print("Preparing datasets...")
     for i, name in enumerate(names):
@@ -34,19 +35,10 @@ def main():
         outPaths.append(embedFile)
 
         bedDataset = BedDataset(
-            bedFile,
-            inputsInMemory,
-            bufferSize=bufferSize,
-            maxLen=seqMaxLen
+            bedFile, inputsInMemory, bufferSize=bufferSize, maxLen=seqMaxLen
         )
-        fastaDataset = FastaDataset(
-            seqs,
-            bedDataset
-        )
-        tokDataset = TokenizedDataset(
-            fastaDataset,
-            padToLength=seqMaxLen
-        )
+        fastaDataset = FastaDataset(seqs, bedDataset)
+        tokDataset = TokenizedDataset(fastaDataset, padToLength=seqMaxLen)
 
         datasets.append(tokDataset)
 
@@ -54,5 +46,6 @@ def main():
     infSystem.batchInfer(datasets, outPaths, batchSize, workers)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
+
