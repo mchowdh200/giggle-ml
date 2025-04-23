@@ -1,34 +1,59 @@
+from typing import Sized, final
+
 from torch.utils.data import Sampler
+from typing_extensions import override
 
 
+@final
 class BlockDistributedSampler(Sampler):
-    def __init__(self, dataset, num_replicas=None, rank=None):
+    """
+    Deterministically splits a dataset into contiguous blocks for each replica.
+    Does not require communication between replicas.
+    """
+
+    def __init__(self, dataset: Sized, num_replicas=None, rank=None):
         if num_replicas is None or rank is None:
-            raise ValueError("num_replicas and rank must be set")
-        if rank >= num_replicas or rank < 0:
+            raise ValueError("num_replicas and rank must be provided")
+        if not isinstance(num_replicas, int) or num_replicas <= 0:
+            raise ValueError("num_replicas should be a positive integer")
+        if not isinstance(rank, int) or rank < 0 or rank >= num_replicas:
             raise ValueError(
-                "Invalid rank %d, rank should be in the range [0, num_replicas)" % rank)
+                f"Invalid rank {rank}, rank should be in the range"
+                f" [0, {num_replicas - 1}]"
+            )
 
         self.dataset = dataset
         self.numReplicas = num_replicas
         self.rank = rank
-
         self.totalSize = len(self.dataset)
-        self.rankSize = self.totalSize // self.numReplicas
 
-    def __iter__(self):
-        upper = None
-        if self.rank == self.numReplicas - 1:
-            upper = self.totalSize
+        if self.totalSize == 0:
+            self.numSamples = 0
+        elif self.totalSize < self.numReplicas:
+            # Assign first totalSize ranks one sample each, others get zero
+            self.numSamples = 1 if self.rank < self.totalSize else 0
+            self.lower = self.rank if self.rank < self.totalSize else self.totalSize
+            self.upper = self.rank + 1 if self.rank < self.totalSize else self.totalSize
         else:
-            upper = self.rankSize * (self.rank + 1)
-        lower = self.rankSize * self.rank
-        return iter(range(lower, upper))
+            # Standard case
+            small = self.totalSize // self.numReplicas
+            self.lower = small * self.rank
+            # The last rank takes the remainder
+            self.upper = (
+                self.totalSize
+                if self.rank == self.numReplicas - 1
+                else small * (self.rank + 1)
+            )
+            self.numSamples = self.upper - self.lower
+
+    @override
+    def __iter__(self):
+        # Use pre-calculated bounds
+        return iter(range(self.lower, self.upper))
 
     def __len__(self):
-        if self.rank == self.numReplicas - 1:
-            return self.totalSize - self.rankSize * self.rank
-        return self.rankSize
+        # Return pre-calculated number of samples for this rank
+        return self.numSamples
 
 
 # Testig purposes
