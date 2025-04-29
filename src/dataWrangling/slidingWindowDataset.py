@@ -2,10 +2,13 @@ from torch.utils.data import Dataset
 
 
 class SlidingWindowDataset(Dataset):
-    """  Used for the Sliding Window Test.
+    """Used for the Sliding Window Test.
     Takes sequences from another dataset and returns
     a series of sequences of half-size that overlap
     to various degrees.
+
+    If the sequence length is not divisible by two, the final character is
+    ignored.
 
     Example:
 
@@ -35,7 +38,10 @@ class SlidingWindowDataset(Dataset):
         10% difference, 90% overlap
     """
 
-    def __init__(self, backingDataset, gapFactor=.1):
+    def __init__(self, backingDataset, gapFactor=0.1):
+        if 1 / gapFactor % 1 != 0:
+            print("Warning: gapFactor is not in form 1/integer. Expect data loss.")
+
         self.backingDataset = backingDataset
         self.cache = (None, None)
         self.spreeCount = int(1 / gapFactor) + 1
@@ -52,10 +58,11 @@ class SlidingWindowDataset(Dataset):
         gapSize = int(gapSizeFloat)
         error = 1 - gapSize / gapSizeFloat
 
-        errThreshold = .05
+        errThreshold = 0.05
         if error > errThreshold:
             raise ValueError(
-                f"Gap size error above {errThreshold}. Backing sequence is too short.", error)
+                f"Gap size error above {errThreshold}. Backing sequence is too short.", error
+            )
 
         for i in range(self.spreeCount):
             left = i * gapSize
@@ -63,38 +70,12 @@ class SlidingWindowDataset(Dataset):
             yield backingData[left:right]
 
     def __getitem__(self, idx):
-        backingIdx = idx // self.spreeCount
+        backingIdx: int = idx // self.spreeCount
 
-        if self.cache[0] != backingIdx:
+        if self.cache[1] is None or self.cache[0] != backingIdx:
             nextSet = list(self.slide(backingIdx))
             self.cache = (backingIdx, nextSet)
 
         backingData = self.cache[1]
         offset = idx % self.spreeCount
         return backingData[offset]
-
-
-# TODO: easy unit test
-#
-# if __name__ == "__main__":
-#     content = [
-#         "When is the next train to London?",
-#         "The quick brown fox jumps over the lazy dog",
-#         "All work and no play makes Jack a dull boy",
-#         "123456789"
-#     ]
-#
-#     dataset = SlidingWindowDataset(content, .75)
-#
-#     for i in range(len(dataset)):
-#         x = dataset[i]
-#         print(x)
-#
-#     # When is the next
-#     # next train to Lo
-#     # The quick brown fox j
-#     # fox jumps over the la
-#     # All work and no play
-#     # play makes Jack a dul
-#     # 1234
-#     # 4567

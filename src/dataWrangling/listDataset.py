@@ -1,12 +1,17 @@
+from collections.abc import Sequence
+from typing import final, override
+
 from torch.utils.data import Dataset
 
 
-class ListDataset(Dataset):
-    def __init__(self, data):
+@final
+class ListDataset[T](Dataset[T]):
+    def __init__(self, data: Sequence[T]):
         self.data = data
 
     def __len__(self):
         return len(self.data)
 
-    def __getitem__(self, idx):
+    @override
+    def __getitem__(self, idx: int) -> T:
         return self.data[idx]
