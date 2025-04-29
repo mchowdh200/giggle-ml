@@ -1,62 +1,78 @@
-import random
+sys.path.append(os.path.abspath("src"))
 
+import random
 import numpy as np
 
-from embedPipeline import embedSets
-from embedStatTests import runTests
+from embedGen.embedPipeline import EmbedPipeline
+from embedGen import meanEmbedDict
+from embedModel import HyenaDNA
+from dataWrangling.intervalDataset import BedDataset
 
-sys.path.append('./src')
 
-workdir: ".."
 configfile: "config.yaml"
-dataDir = config["dataDir"]
+DATA = config['data']
+HG = config['hg']
 
-include: giggleLegacyExperiments.smk
+# include: "giggleLegacyExperiments.smk"
+#
+#
+# rule synthesizeSequences:
+#     params:
+#         seqLenMin = int(1e3),
+#         seqLenMax = int(25e3),
+#         seqPerUniverse = int(2e5),
+#         seed = 31415
+#     output:
+#         outFiles = [ f"{DATA}synthetic/intervals.bed" ],
+#         fastaOut = f"{DATA}/synthetic/ref.fa"
+#     run:
+#         from src.synthesis import synthesize
+#         synthesize(output.fastaOut, output.outFiles, *params)
+#
+#
+# rule embedQualityTests:
+#     params:
+#         limit = 1000,  # some of the statistical tests are rather inefficient
+#                        # and need an input limit to bound runtime
+#         seed = 31415
+#     input:
+#         intervals = f"{DATA}/giggleBench/query.bed",
+#         emebds = f"{DATA}/giggleBench/embeds/straight/query.npy",
+#     output:
+#         swtFig = "embedAnalysis/swt.png"
+#     run:
+#         random.seed(params.seed)
+#         np.random.seed(params.seed)
+#         runTests(input.intervals, input.emebds, params.limit, output.swtFig)
 
 
-rule synthesizeSequences:
-    params:
-        seqLenMin = int(1e3),
-        seqLenMax = int(25e3),
-        seqPerUniverse = int(2e5),
-        seed = 31415
-    output:
-        outFiles = [ f"{dataDir}synthetic/intervals.bed" ],
-        fastaOut = f"{dataDir}/synthetic/ref.fa"
-    run:
-        from src.synthesis import synthesize
-        synthesize(output.fastaOut, output.outFiles, *params)
-
-
-rule embedQualityTests:
-    params:
-        limit = 1000,  # some of the statistical tests are rather inefficient
-                       # and need an input limit to bound runtime
-        seed = 31415
-    input:
-        intervals = f"{dataDir}/giggleBench/query.bed",
-        emebds = f"{dataDir}/giggleBench/embeds/straight/query.npy",
-    output:
-        swtFig = "embedAnalysis/swt.png"
-    run:
-        random.seed(params.seed)
-        np.random.seed(params.seed)
-        runTests(input.intervals, input.emebds, params.limit, output.swtFig)
-
-
-roadmapEpigBedPattern = dataDir + "/roadmap_epigenomics/roadmap_sort/{id}.bed"
+roadmapEpigBedPattern = DATA + "/roadmap_epigenomics/beds/{id}.bed.gz"
 roadmapEpigBedNames, = glob_wildcards(roadmapEpigBedPattern)
-rule RoadmapEpigenomicsEmbeddings:
+
+rule roadmapEpigenomicsEmbeds:
     # TODO: roadmap epi workflow should automatically start fiji job
     input:
-        refGenome = f"{dataDir}/hg19.fa",
+        refGenome = HG + "/hg19.fa.gz",
         bedFiles = expand(roadmapEpigBedPattern, id=roadmapEpigBedNames),
-    params:
-        seqMinLen = config['batchInference']['seqMinLen'],
-        seqMaxLen = 1000,
     output:
-        embeds = expand(dataDir + "/roadmap_epigenomics/embeds/{id}.npy", id=roadmapEpigBedNames)
+        embeds = expand(DATA + "/roadmap_epigenomics/embeds/{id}.npy",
+                        id=roadmapEpigBedNames),
+        # associated metadata should also be generated
+        meta = expand(DATA + "/roadmap_epigenomics/embeds/{id}.npy.meta",
+                      id=roadmapEpigBedNames),
+        # the region set collection also produces a "master" mean embed dict
+        master = DATA + "/roadmap_epigenomics/embeds/master.pickle"
     run:
-        embedSets(input.refGenome, input.bedFiles, params.seqMinLen, params.seqMaxLen)
+        batchSize = 64
+        workerCount = 4
 
+        inputData = [
+          BedDataset(bed, associatedFastaPath=input.refGenome)
+          for bed in input.bedFiles
+        ]
 
+        # big job
+        EmbedPipeline(HyenaDNA("32k"), batchSize, workerCount) \
+          .embed(intervals=inputData, out=output.embeds)
+        # little job (produce $master)
+        meanEmbedDict.build(output.embeds, output.master)

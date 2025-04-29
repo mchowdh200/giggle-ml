@@ -9,3 +9,6 @@ __pycache__
 data/*
 # generated fastx indices
 *.fxi
+
+
+.data

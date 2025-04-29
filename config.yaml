@@ -1,29 +1,32 @@
-referenceGenome: "./data/hg38.fa"
-
-# Embedding generation
-batchInference:
-  # Regarding GPU inference...
-  batchSize: 5000
-  # When GPUs are found on the system, GPU workers are initialized
-  # before CPU, process-based, workers.
-  workers: 8
-  # Most relevant datasets can not be entirely loaded into memory and
-  # are instead loaded in bursts corresponding to the bufferSize.
-  bufferSize: 10000
-  # True: eliminates the bufferSize config option and loads the entire
-  # interval dataset into memory.
-  inputsInMemory: True
-  # Some operations take a limit that constrains the amount of information
-  # they will consider. The statistical tests rule has an independent limit
-  # parameter.
-  rowsLimit: null
-  # Min/max sequence lengths inform the tokenizer.
-  minSeqLen: 0
-  maxSeqLen: 100
-  # Some rules may override this value.
-  preferModel: 'hyenaDNA'
+# referenceGenome: "./data/hg38.fa"
+#
+# # Embedding generation
+# batchInference:
+#   # Regarding GPU inference...
+#   batchSize: 5000
+#   # When GPUs are found on the system, GPU workers are initialized
+#   # before CPU, process-based, workers.
+#   workers: 8
+#   # Most relevant datasets can not be entirely loaded into memory and
+#   # are instead loaded in bursts corresponding to the bufferSize.
+#   bufferSize: 10000
+#   # True: eliminates the bufferSize config option and loads the entire
+#   # interval dataset into memory.
+#   inputsInMemory: True
+#   # Some operations take a limit that constrains the amount of information
+#   # they will consider. The statistical tests rule has an independent limit
+#   # parameter.
+#   rowsLimit: null
+#   # Min/max sequence lengths inform the tokenizer.
+#   minSeqLen: 0
+#   maxSeqLen: 100
+#   # Some rules may override this value.
+#   preferModel: 'hyenaDNA'
 
 # Primary (large) data directory.
-dataDir: 'data'
-# Experiments directory contains graphs and other analysis.
-experimentsDir: 'experiments'
+data: 'data'
+# human genome store
+hg: 'data/hg'
+
+# # Experiments directory contains graphs and other analysis.
+# experimentsDir: 'experiments'

@@ -2,75 +2,64 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from dataWrangling.seqDatasets import TokenizedDataset, FastaDataset, BedDataset
-from dataWrangling.transformDataset import TransformDataset
 import intervalTransforms as Transform
+from dataWrangling.seqDatasets import BedDataset, FastaDataset, TokenizedDataset
+from dataWrangling.transformDataset import TransformDataset
 from utils.strToInfSystem import getInfSystem
 
 
-# TODO: notion of config item "preferModel" should be "preferPipeline"
-
-
 def embedAfterTransform(
-        queryIntervals,
-        sampleIntervals,
-        queryEmbeds,
-        sampleEmbeds,
-        infoFile,
-        expName,
-        k,
-        padLength,
-        querySwellFactor,
-        queryChunkAmnt,
-        sampleSwellFactor,
-        sampleChunkAmnt,
-        queryTranslation,
+    queryIntervals,
+    sampleIntervals,
+    queryEmbeds,
+    sampleEmbeds,
+    infoFile,
+    expName,
+    k,
+    padLength,
+    querySwellFactor,
+    queryChunkAmnt,
+    sampleSwellFactor,
+    sampleChunkAmnt,
+    queryTranslation,
 ):
     refGenome = snakemake.config.referenceGenome
     conf = snakemake.config.batchInference
     batchSize = conf.batchSize
-    workers = conf.workes
+    workers = conf.works
     bufferSize = conf.bufferSize
     inputsInMemory = conf.inputsInMemory
     preferModel = conf.preferModel
 
     sampleIntervals = TransformDataset(
-        backingDataset=BedDataset(
-            sampleIntervals,
-            inMemory=inputsInMemory,
-            bufferSize=bufferSize),
+        backingDataset=BedDataset(sampleIntervals, inMemory=inputsInMemory, bufferSize=bufferSize),
         transforms=[
             Transform.Swell(swellFactor=sampleSwellFactor),
-            Transform.Chunk(chunkAmnt=sampleChunkAmnt)
-        ])
+            Transform.Chunk(chunkAmnt=sampleChunkAmnt),
+        ],
+    )
 
     queryIntervals = TransformDataset(
-        backingDataset=BedDataset(
-            queryIntervals,
-            inMemory=inputsInMemory,
-            bufferSize=bufferSize),
+        backingDataset=BedDataset(queryIntervals, inMemory=inputsInMemory, bufferSize=bufferSize),
         transforms=[
             Transform.Translate(offset=queryTranslation),
             Transform.Swell(swellFactor=querySwellFactor),
-            Transform.Chunk(chunkAmnt=queryChunkAmnt)
-        ])
+            Transform.Chunk(chunkAmnt=queryChunkAmnt),
+        ],
+    )
 
     sampleTokens = TokenizedDataset(
-        FastaDataset(refGenome, sampleIntervals),
-        padToLength=padLength)
+        FastaDataset(refGenome, sampleIntervals), padToLength=padLength
+    )
 
-    queryTokens = TokenizedDataset(
-        FastaDataset(refGenome, queryIntervals),
-        padToLength=padLength)
+    queryTokens = TokenizedDataset(FastaDataset(refGenome, queryIntervals), padToLength=padLength)
 
     Path(sampleEmbeds).parent.mkdir(parents=True, exist_ok=True)
     Path(queryEmbeds).parent.mkdir(parents=True, exist_ok=True)
 
     getInfSystem(preferModel).batchInfer(
-        [sampleTokens, queryTokens],
-        [sampleEmbeds, queryEmbeds],
-        batchSize,
-        workers)
+        [sampleTokens, queryTokens], [sampleEmbeds, queryEmbeds], batchSize, workers
+    )
 
     print("Finished embedding.")
 
@@ -94,7 +83,7 @@ def embedAfterTransform(
 def embedSets(refGenome, bedFiles, embedPaths, seqMinLen, seqMaxLen):
     conf = snakemake.config.batchInference
     batchSize = conf.batchSize
-    workers = conf.workes
+    workers = conf.works
     bufferSize = conf.bufferSize
     inputsInMemory = conf.inputsInMemory
 
@@ -109,14 +98,9 @@ def embedSets(refGenome, bedFiles, embedPaths, seqMinLen, seqMaxLen):
         dataset = TokenizedDataset(
             FastaDataset(
                 refGenome,
-                BedDataset(
-                    bedFile,
-                    inputsInMemory,
-                    bufferSize=bufferSize,
-                    maxLen=seqMaxLen
-                )
+                BedDataset(bedFile, inputsInMemory, bufferSize=bufferSize, maxLen=seqMaxLen),
             ),
-            padToLength=seqMaxLen
+            padToLength=seqMaxLen,
         )
 
         sourceDatasets.append(dataset)
@@ -138,7 +122,7 @@ def embedSets(refGenome, bedFiles, embedPaths, seqMinLen, seqMaxLen):
 #     def transformBed(self, bedPaths: list[str], embedDir: str, transforms=BasicTransforms(), embedFileSuffix=""):
 #         conf = self.inferConf
 #         batchSize = conf.batchSize
-#         workers = conf.workes
+#         workers = conf.works
 #         bufferSize = conf.bufferSize
 #         inputsInMemory = conf.inputsInMemory
 #         rowsLimit = conf.rowsLimit

@@ -6,15 +6,14 @@ There are 8 datasets to choose from.
 
 """
 
-import torch
-
-from random import random
-import numpy as np
 from pathlib import Path
-from torch.utils.data import DataLoader
+from random import random
 
-from genomic_benchmarks.loc2seq import download_dataset
+import numpy as np
+import torch
 from genomic_benchmarks.data_check import is_downloaded
+from genomic_benchmarks.loc2seq import download_dataset
+from torch.utils.data import DataLoader
 
 
 # helper functions
@@ -26,13 +25,21 @@ def coin_flip():
     return random() > 0.5
 
 
-string_complement_map = {'A': 'T', 'C': 'G', 'G': 'C',
-                         'T': 'A', 'a': 't', 'c': 'g', 'g': 'c', 't': 'a'}
+string_complement_map = {
+    "A": "T",
+    "C": "G",
+    "G": "C",
+    "T": "A",
+    "a": "t",
+    "c": "g",
+    "g": "c",
+    "t": "a",
+}
 # augmentation
 
 
 def string_reverse_complement(seq):
-    rev_comp = ''
+    rev_comp = ""
     for base in seq[::-1]:
         if base in string_complement_map:
             rev_comp += string_complement_map[base]
@@ -43,8 +50,7 @@ def string_reverse_complement(seq):
 
 
 class GenomicBenchmarkDataset(torch.utils.data.Dataset):
-
-    '''
+    """
     Loop thru bed file, retrieve (chr, start, end), query fasta file for sequence.
     Returns a generator that retrieves the sequence.
 
@@ -52,13 +58,13 @@ class GenomicBenchmarkDataset(torch.utils.data.Dataset):
     https://github.com/ML-Bioinfo-CEITEC/genomic_benchmarks
 
 
-    '''
+    """
 
     def __init__(
         self,
         split,
         max_length,
-        dataset_name='human_enhancers_cohn',
+        dataset_name="human_enhancers_cohn",
         d_output=2,  # default binary classification
         dest_path="./content",  # default for colab
         tokenizer=None,
@@ -113,12 +119,13 @@ class GenomicBenchmarkDataset(torch.utils.data.Dataset):
         if self.rc_aug and coin_flip():
             x = string_reverse_complement(x)
 
-        seq = self.tokenizer(x,
-                             add_special_tokens=False,
-                             padding="max_length" if self.use_padding else None,
-                             max_length=self.max_length,
-                             truncation=True,
-                             )  # add cls and eos token (+2)
+        seq = self.tokenizer(
+            x,
+            add_special_tokens=False,
+            padding="max_length" if self.use_padding else None,
+            max_length=self.max_length,
+            truncation=True,
+        )  # add cls and eos token (+2)
         seq = seq["input_ids"]  # get input_ids
 
         # need to handle eos here
