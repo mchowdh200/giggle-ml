@@ -1,11 +1,11 @@
+# system
 __pycache__
-checkpoints
-venv/
-conda/gml
-
-data
-checkpoints
-content
-
+.venv
 .direnv
 .idea
+.snakemake
+
+# big data
+data/*
+# generated fastx indices
+*.fxi

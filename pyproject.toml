@@ -1,2 +1,41 @@
+[project]
+name="GiggleML"
+description="Giggle, based on embeddings"
+authors = [{name = "Simon Walker", email = "simon@simonwalker.tech"}]
+readme = "README.md"
+version = "0.1.0"
+requires-python = ">=3.12"
+# TODO: geniml integration: geniml <- ncls not building on fiji
+dependencies = [
+    "accelerate>=1.6.0",
+    "numpy>=2.2.5",
+    "pyfastx>=2.2.0",
+    "pytest>=8.3.5",
+    "snakemake>=9.3.2",
+    "statistics>=1.0.3.5",
+    "torch==2.6",
+    "transformers>=4.51.3",
+]
+
+[tool.black]
+line-length = 99
+
 [tool.pytest.ini_options]
-pythonpath = "src"
+python_files = [ "tests/test*.py" ]
+pythonpath = [ "src" ]
+
+[tool.pyright]
+reportExplicitAny = false
+reportAny = false
+reportImplicitStringConcatenation = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnusedCallResult = false
+reportMissingTypeArgument = false
+# executionEnvironments = [
+  # { root = "src" },
+  # { root = "tests", extraPaths = ["src"] }
+# ]
+# include = [ "src", "tests" ]
+# exclude = [ "*.bed", "*.fa", "*.fxi" ]

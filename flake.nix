@@ -13,9 +13,7 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            git-lfs
             htslib
-            snakemake
           ];
         };
       }
