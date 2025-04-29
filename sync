@@ -1,20 +1,16 @@
 #!/bin/bash
 
-sync="rsync -iva . fijicluster:projects/giggle-ml \
-    --exclude conda/gml \
-    --exclude data \
-    --exclude src/checkpoints \
-    --exclude checkpoints \
-    --exclude src/content \
-    --exclude content \
-    --exclude .git \
-    --exclude .direnv \
-    --exclude venv \
-    --exclude src/__pycache__ \
-    --exclude src/gpu_embeds/__pycache__ \
-    --exclude src/statistical_tests/__pycache__ \
-    --exclude '**/__pycache__' \
-"
+function sync_remote {
+    rsync -iva --delete . fijicluster:projects/giggle-ml \
+        --filter='- data/' \
+        --filter='- .data/' \
+        --filter='- .git/' \
+        --filter='- .direnv/' \
+        --filter='- .venv/' \
+        --filter='- */__pycache__/' \
+        --prune-empty-dirs
+}
 
-$sync
-fswatch -ro . | xargs -n1 -I{} $sync
+sync_remote
+export -f sync_remote
+fswatch -ro . | xargs -n1 -I{} bash -c 'sync_remote > /dev/null && echo "synced ($(date +%T))"'
