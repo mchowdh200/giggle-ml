@@ -4,10 +4,10 @@ from typing import final
 
 import numpy as np
 
-from dataWrangling.intervalDataset import BedDataset
-from dataWrangling.listDataset import ListDataset
-from intervalTransformer import ChunkMax, IntervalTransformer
-from utils.types import GenomicInterval
+from giggleml.dataWrangling.intervalDataset import BedDataset
+from giggleml.dataWrangling.listDataset import ListDataset
+from giggleml.intervalTransformer import ChunkMax, IntervalTransformer
+from giggleml.utils.types import GenomicInterval
 
 
 @final

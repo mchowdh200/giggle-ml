@@ -1,12 +1,12 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, overload
 
 import pyfastx
 
-from dataWrangling.intervalDataset import IntervalDataset
-from dataWrangling.listDataset import ListDataset
-from utils.types import GenomicInterval
+from ..utils.types import GenomicInterval
+from .intervalDataset import IntervalDataset
+from .listDataset import ListDataset
 
 Fasta = dict[str, str]  # chromosome -> sequence map
 knownFa: dict[str, Fasta] = dict()

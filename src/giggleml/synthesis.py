@@ -2,8 +2,7 @@ import random
 from random import randint
 from time import time
 
-
-chrmSizes = [
+chrmSizesF = [
     248.96,  # Chromosome 1
     242.19,  # Chromosome 2
     198.30,  # Chromosome 3
@@ -19,20 +18,18 @@ chrmSizes = [
     114.36,  # Chromosome 13
     107.04,  # Chromosome 14
     101.99,  # Chromosome 15
-    90.34,   # Chromosome 16
-    83.26,   # Chromosome 17
-    80.37,   # Chromosome 18
-    58.62,   # Chromosome 19
-    64.44,   # Chromosome 20
-    46.71,   # Chromosome 21
-    50.82,   # Chromosome 22
+    90.34,  # Chromosome 16
+    83.26,  # Chromosome 17
+    80.37,  # Chromosome 18
+    58.62,  # Chromosome 19
+    64.44,  # Chromosome 20
+    46.71,  # Chromosome 21
+    50.82,  # Chromosome 22
     156.04,  # Chromosome X
-    57.23    # Chromosome Y
+    57.23,  # Chromosome Y
 ]
 
-chrmSizes = list(map(lambda x: x * 1e6, chrmSizes))  # In Mbp
-chrmSizes = list(map(round, chrmSizes))
-
+chrmSizes: list[int] = list(map(lambda x: round(x * 1e6), chrmSizesF))  # In Mbp
 chrmNames = [f"chr{i+1}" for i, _ in enumerate(chrmSizes)]
 chrmNames[22] = "chrX"
 chrmNames[23] = "chrY"
@@ -64,7 +61,7 @@ class Chromosome:
             self.fill_block(blockId)
 
     def block_as_seq(self, blockId):
-        literals = 'ACGT'
+        literals = "ACGT"
         block = self.blocks[blockId]
         return list(map(lambda x: literals[x], block))
 
@@ -115,7 +112,7 @@ def synthesize(fastaOut, outFiles, seqLenMin, seqLenMax, seqPerUniverse, seed):
             if regId % 1000 == 0:
                 dt = time() - t0
                 eta = (dt / (regId + 1)) * (seqPerUniverse - regId)
-                eta = round(eta/60, 1)
+                eta = round(eta / 60, 1)
                 print(f"- region {regId},\tETA: {eta} min")
 
             chrm = blocks[chrmId]
@@ -140,3 +137,4 @@ def synthesize(fastaOut, outFiles, seqLenMin, seqLenMax, seqPerUniverse, seed):
             out.append(chrm.fasta_format(chrmName))
             out.append("\n")
         f.write("".join(out))
+

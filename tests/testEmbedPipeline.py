@@ -3,14 +3,15 @@ import os
 
 import numpy as np
 
-from dataWrangling.intervalDataset import BedDataset
-from embedGen.embedPipeline import EmbedPipeline
-from embedModel import CountACGT
+from giggleml.dataWrangling.intervalDataset import BedDataset
+from giggleml.embedGen.embedModel import CountACGT
+from giggleml.embedGen.embedPipeline import EmbedPipeline
 
 
 def testPipeline():
     with contextlib.suppress(FileNotFoundError):
         os.remove("tests/test_out.tmp.npy")
+
     assert CountACGT().maxSeqLen == 10  # to keep tests consistent
 
     pipeline = EmbedPipeline(embedModel=CountACGT(), batchSize=2, workerCount=2)
@@ -45,3 +46,4 @@ def testPipeline():
 
     with contextlib.suppress(FileNotFoundError):
         os.remove("tests/test_out.tmp.npy")
+        os.remove("tests/test_out.tmp.npy.meta")

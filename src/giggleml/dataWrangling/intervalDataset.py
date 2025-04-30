@@ -6,7 +6,7 @@ from typing import Callable
 from torch.utils.data import Dataset
 from typing_extensions import override
 
-from utils.types import GenomicInterval, lazy
+from ..utils.types import GenomicInterval, lazy
 
 
 class IntervalDataset(Dataset[GenomicInterval], ABC):

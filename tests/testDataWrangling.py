@@ -1,6 +1,6 @@
-from dataWrangling import fasta
-from dataWrangling.intervalDataset import BedDataset
-from dataWrangling.slidingWindowDataset import SlidingWindowDataset
+from giggleml.dataWrangling import fasta
+from giggleml.dataWrangling.intervalDataset import BedDataset
+from giggleml.dataWrangling.slidingWindowDataset import SlidingWindowDataset
 
 
 def testBedFastaParsing():

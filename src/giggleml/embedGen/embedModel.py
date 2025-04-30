@@ -10,7 +10,7 @@ from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.models.auto.modeling_auto import AutoModel
 from typing_extensions import override
 
-from utils.types import GenomicInterval
+from ..utils.types import GenomicInterval
 
 # INFO: !! Currently all modules assume "embedding vectors" are float32.
 

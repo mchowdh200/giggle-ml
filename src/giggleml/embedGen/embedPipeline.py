@@ -1,18 +1,15 @@
-import os
 from collections.abc import Iterable, Sequence
-from os.path import exists, isfile
-from re import sub
+from os.path import isfile
 from typing import final, overload
 
 import numpy as np
-import pyfastx
-from dataWrangling import fasta
-from dataWrangling.intervalDataset import IntervalDataset
-from embedGen import embedIO
-from embedGen.embedIO import Embed, EmbedMeta
-from embedModel import EmbedModel
-from intervalTransformer import ChunkMax, IntervalTransformer
 
+from ..dataWrangling import fasta
+from ..dataWrangling.intervalDataset import IntervalDataset
+from ..intervalTransformer import ChunkMax, IntervalTransformer
+from . import embedIO
+from .embedIO import Embed, EmbedMeta
+from .embedModel import EmbedModel
 from .gpuMaster import GpuMaster
 
 

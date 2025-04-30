@@ -1,14 +1,12 @@
 import os
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import cached_property
-from typing import Any, Protocol, TypeVar, final
+from typing import Protocol, final
 
 import numpy as np
-from numpy.typing import ArrayLike
-from torch import Tensor, tensor
 
-from dataWrangling.intervalDataset import IntervalDataset, LateIntervalDataset
-from utils.types import GenomicInterval, lazy
+from .dataWrangling.intervalDataset import IntervalDataset, LateIntervalDataset
+from .utils.types import GenomicInterval, lazy
 
 ########################################
 #     Transforms

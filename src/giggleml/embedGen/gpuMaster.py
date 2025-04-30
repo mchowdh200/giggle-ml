@@ -6,15 +6,14 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from torch import multiprocessing as mp
-from torch.cuda import is_available
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
-from dataWrangling import fasta
-from dataWrangling.intervalDataset import IntervalDataset
-from embedGen.blockDistributedSampler import BlockDistributedSampler
-from embedModel import EmbedModel
-from utils.guessDevice import guessDevice
-from utils.types import MmapF32, SizedDataset
+from ..dataWrangling import fasta
+from ..dataWrangling.intervalDataset import IntervalDataset
+from ..utils.guessDevice import guessDevice
+from ..utils.types import MmapF32, SizedDataset
+from .blockDistributedSampler import BlockDistributedSampler
+from .embedModel import EmbedModel
 
 
 @final

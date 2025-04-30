@@ -1,6 +1,6 @@
-from dataWrangling.slidingWindowDataset import SlidingWindowDataset
-from dataWrangling.truncatedDataset import TruncatedDataset
-from dataWrangling.seqDatasets import TokenizedDataset
+from giggleml.dataWrangling.slidingWindowDataset import SlidingWindowDataset
+from giggleml.dataWrangling.truncatedDataset import TruncatedDataset
+from giggleml.dataWrangling.seqDatasets import TokenizedDataset
 import numpy as np
 from matplotlib import pyplot as plt
 

@@ -5,7 +5,7 @@ from typing import cast, final
 import numpy as np
 from numpy.typing import DTypeLike
 
-from utils.pathPickle import pickle, unpickle
+from ..utils.pathPickle import pickle, unpickle
 
 
 @dataclass

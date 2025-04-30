@@ -10,8 +10,8 @@ from os.path import basename, dirname
 
 import torch
 
-from embedGen import embedIO
-from utils.pathPickle import pickle, unpickle
+from ..embedGen import embedIO
+from ..utils.pathPickle import pickle, unpickle
 
 EmbedDict = dict[str, embedIO.Embed]
 
