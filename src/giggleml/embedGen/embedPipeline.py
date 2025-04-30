@@ -7,6 +7,7 @@ import numpy as np
 from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
 from ..intervalTransformer import ChunkMax, IntervalTransformer
+from ..utils.types import MmapF32
 from . import embedIO
 from .embedIO import Embed, EmbedMeta
 from .embedModel import EmbedModel
