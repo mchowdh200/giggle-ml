@@ -11,9 +11,18 @@ from torch.utils.data import DataLoader
 from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
 from ..utils.guessDevice import guessDevice
-from ..utils.types import MmapF32, SizedDataset
+from ..utils.types import GenomicInterval, MmapF32, SizedDataset
 from .blockDistributedSampler import BlockDistributedSampler
 from .embedModel import EmbedModel
+
+
+@final
+class FastaCollate:
+    def __init__(self, fasta: str):
+        self.fasta = fasta
+
+    def __call__(self, batch: Sequence[GenomicInterval]):
+        return fasta.map(batch, self.fasta)
 
 
 @final
@@ -77,23 +86,24 @@ class GpuMaster:
         model.to(device)
         wantsSeq = self.model.wants == "sequences"
 
-        for i, dataset, outPath in zip(range(len(datasets)), datasets, outPaths):
+        for i, dataset, outTotal in zip(range(len(datasets)), datasets, outPaths):
+            if os.path.exists(outTotal):
+                print(f"Skipping {outTotal}")
+                continue
+
+            # "outTotal" being the final output produced after all ranks finish
+            outPath = outTotal + "." + str(rank)  # each rank only operates on its own data
+
             if os.path.exists(outPath):
+                print(f"Skipping {outPath}")
                 continue
 
             if wantsSeq:
-                # seqMap is dependent on the dataset's associatedFastaPath
-                def seqMap(intervals):
-                    fa = dataset.associatedFastaPath
-                    if fa is None:
-                        raise ValueError(
-                            "Unable to map to sequences because a dataset has a None associatedFastaPath"
-                        )
-                    return fasta.map(intervals, fa)
-
-                collate_fn = seqMap
+                if dataset.associatedFastaPath is None:
+                    raise ValueError("Unable to map to fasta; missing associatedFastaPath")
+                collate = FastaCollate(dataset.associatedFastaPath)
             else:
-                collate_fn = None
+                collate = None
 
             sampler = BlockDistributedSampler(dataset, num_replicas=self.workerCount, rank=rank)
             dataLoader = DataLoader(
@@ -103,10 +113,9 @@ class GpuMaster:
                 shuffle=False,
                 pin_memory=True,
                 num_workers=self.subWorkerCount,
-                collate_fn=collate_fn,
+                collate_fn=collate,
             )
 
-            outPath += "." + str(rank)
             self._inferLoop(rank, dataLoader, outPath + "__")
             # it is now finished, rename x__ -> x
             os.rename(outPath + "__", outPath)
