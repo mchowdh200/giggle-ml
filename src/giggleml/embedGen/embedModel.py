@@ -14,9 +14,9 @@ from ..utils.types import GenomicInterval
 
 # INFO: !! Currently all modules assume "embedding vectors" are float32.
 
-##########################
+# ===================
 #    EmbedModel
-##########################
+# ===================
 
 
 class EmbedModel(ABC):
@@ -31,9 +31,9 @@ class EmbedModel(ABC):
     def to(self, device: Device) -> Self: ...
 
 
-##########################
+# ===================
 #    HyenaDNA
-##########################
+# ===================
 
 
 @final
@@ -148,9 +148,9 @@ class HyenaDNA(EmbedModel):
         return hidden  # pyright: ignore[reportReturnType]
 
 
-##########################
+# ===================
 #    Region2Vec
-##########################
+# ===================
 
 
 # @final
@@ -192,9 +192,9 @@ class HyenaDNA(EmbedModel):
 #         return self._model(batch)
 
 
-##########################
+# ===================
 #    CountACGT
-##########################
+# ===================
 
 
 @final

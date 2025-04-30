@@ -7,10 +7,13 @@ function sync_remote {
         --filter='- .git/' \
         --filter='- .direnv/' \
         --filter='- .venv/' \
+        --filter='- .snakemake/' \
+        --filter='- .pytest_cache/' \
         --filter='- */__pycache__/' \
         --prune-empty-dirs
 }
 
 sync_remote
 export -f sync_remote
-fswatch -ro . | xargs -n1 -I{} bash -c 'sync_remote > /dev/null && echo "synced ($(date +%T))"'
+fswatch -ro . | xargs -n1 -I{} bash -c 'sync_remote >> /dev/null && echo "synced ($(date +%T))"'
+echo "...watching"

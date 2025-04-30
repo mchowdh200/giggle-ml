@@ -8,9 +8,9 @@ import numpy as np
 from .dataWrangling.intervalDataset import IntervalDataset, LateIntervalDataset
 from .utils.types import GenomicInterval, lazy
 
-########################################
-#     Transforms
-########################################
+# =================================
+#          Transforms
+# =================================
 
 
 class IntervalTransform(Protocol):
@@ -29,9 +29,9 @@ class ChunkMax:
             yield ((interval[0], interval[1] + start, interval[1] + end))
 
 
-########################################
+# =================================
 #     Interval Transformer
-########################################
+# =================================
 
 
 @final

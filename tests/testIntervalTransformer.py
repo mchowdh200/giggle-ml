@@ -55,9 +55,9 @@ def testBasicBackward():
     os.remove("tests/test.tmp.memmap")
 
 
-########################################
-#     Specific Transforms
-########################################
+# ======================================
+#       Specific Transforms
+# ======================================
 
 
 def testChunkMax():
