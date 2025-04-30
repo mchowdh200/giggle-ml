@@ -50,19 +50,16 @@ class EmbedPipeline:
         if isinstance(out, str):
             out = [out]
 
-        # filtering for outputs that do not yet exist
+        for outPath in out:
+            if isfile(outPath):
+                # TODO:EmbedPipeline does not yet support continuing interrupted jobs.
+                #  Issue:
+                #    There are critical zones that when interrupted leave the files in an ambiguous state.
+                #      1. GpuMaster when interrupted leaves lots of out.npy.0 files instead of completed items.
+                #      2. There's ambiguity between .npy at worker aggregation step .npy.(.0 .1 .2...) -> .npy
+                #         and dechunking step .npy (len N) -> .npy (len < N)
+                raise ValueError(f"Output already exists ({outPath})")
 
-        taskCount = len(out)
-        intervals, out = zip(
-            *[(item, out) for item, out in zip(intervals, out) if not isfile(out)]
-        )
-
-        if len(out) != taskCount:
-            print(f"Skipping {taskCount - len(out)} already complete outputs")
-        if len(out) == 0:
-            return list()
-
-        del taskCount  # we won't be using this again
         maxSeqLen = self.model.maxSeqLen
 
         if maxSeqLen is None:
