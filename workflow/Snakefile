@@ -1,12 +1,10 @@
-sys.path.append(os.path.abspath("src"))
-
 import random
 import numpy as np
 
-from embedGen.embedPipeline import EmbedPipeline
-from embedGen import meanEmbedDict
-from embedModel import HyenaDNA
-from dataWrangling.intervalDataset import BedDataset
+from giggleml.embedGen.embedPipeline import EmbedPipeline
+from giggleml.embedGen import meanEmbedDict
+from giggleml.embedGen.embedModel import HyenaDNA
+from giggleml.dataWrangling.intervalDataset import BedDataset
 
 
 configfile: "config.yaml"
@@ -46,13 +44,13 @@ HG = config['hg']
 #         runTests(input.intervals, input.emebds, params.limit, output.swtFig)
 
 
-roadmapEpigBedPattern = DATA + "/roadmap_epigenomics/beds/{id}.bed.gz"
+roadmapEpigBedPattern = DATA + "/roadmap_epigenomics/beds/{id}.bed"
 roadmapEpigBedNames, = glob_wildcards(roadmapEpigBedPattern)
 
 rule roadmapEpigenomicsEmbeds:
     # TODO: roadmap epi workflow should automatically start fiji job
     input:
-        refGenome = HG + "/hg19.fa.gz",
+        refGenome = HG + "/hg19.fa",
         bedFiles = expand(roadmapEpigBedPattern, id=roadmapEpigBedNames),
     output:
         embeds = expand(DATA + "/roadmap_epigenomics/embeds/{id}.npy",
@@ -62,9 +60,12 @@ rule roadmapEpigenomicsEmbeds:
                       id=roadmapEpigBedNames),
         # the region set collection also produces a "master" mean embed dict
         master = DATA + "/roadmap_epigenomics/embeds/master.pickle"
+    params:
+        model = HyenaDNA("32k")
     run:
         batchSize = 64
         workerCount = 4
+        subWorkerCount = 8
 
         inputData = [
           BedDataset(bed, associatedFastaPath=input.refGenome)
@@ -72,7 +73,7 @@ rule roadmapEpigenomicsEmbeds:
         ]
 
         # big job
-        EmbedPipeline(HyenaDNA("32k"), batchSize, workerCount) \
+        EmbedPipeline(params.model, batchSize, workerCount, subWorkerCount) \
           .embed(intervals=inputData, out=output.embeds)
         # little job (produce $master)
         meanEmbedDict.build(output.embeds, output.master)

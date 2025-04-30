@@ -9,5 +9,5 @@ trap on_exit EXIT
 
 clear
 echo -e ">\n" > giggleML-sbatch.out
-sbatch giggleML.sbatch
+sbatch job.sbatch
 tail -f giggleML-sbatch.out

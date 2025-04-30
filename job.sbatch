@@ -10,7 +10,7 @@
 
 #SBATCH --job-name=giggleML
 #SBATCH --output=giggleML-sbatch.out
-#SBATCH --time=12:00:00
+#   #SBATCH --time=12:00:00
 
 clear
 echo Starting job.
