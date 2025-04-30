@@ -19,10 +19,21 @@ from utils.types import MmapF32, SizedDataset
 
 @final
 class GpuMaster:
-    def __init__(self, model: EmbedModel, batchSize: int, workerCount: int):
+    def __init__(self, model: EmbedModel, batchSize: int, workerCount: int, subWorkerCount: int):
+        """
+        @param workerCount: should be <= gpu count
+        @param subWorkerCount: corresponds to pytorch::DataLoader::num_worker
+        argument -- used to prepare subprocesses for batch construction. Can be
+        zero.
+        """
+
+        if workerCount == 0:
+            raise ValueError("No workers; no work.")
+
         self.model = model
         self.batchSize = batchSize
         self.workerCount = workerCount
+        self.subWorkerCount = subWorkerCount
         self.embedDim = model.embedDim
 
     def _inferLoop(self, rank, dataLoader, outPath):
@@ -43,7 +54,9 @@ class GpuMaster:
             outputs = self.model.embed(batch).cpu()
             outFile[nextIdx : nextIdx + len(outputs)] = outputs.numpy()
             nextIdx += len(outputs)
-            rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
+
+            if i % 100 == 0:
+                rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
 
         # "close" the memmap
         outFile.flush()
@@ -63,12 +76,25 @@ class GpuMaster:
         device = guessDevice(rank)
         model = self.model.to(device)
         model.to(device)
+        wantsSeq = self.model.wants == "sequences"
 
         for i, dataset, outPath in zip(range(len(datasets)), datasets, outPaths):
             if os.path.exists(outPath):
                 continue
-            if self.model.wants == "sequences":
-                dataset = fasta.map(dataset)
+
+            if wantsSeq:
+                # seqMap is dependent on the dataset's associatedFastaPath
+                def seqMap(intervals):
+                    fa = dataset.associatedFastaPath
+                    if fa is None:
+                        raise ValueError(
+                            "Unable to map to sequences because a dataset has a None associatedFastaPath"
+                        )
+                    return fasta.map(intervals, fa)
+
+                collate_fn = seqMap
+            else:
+                collate_fn = None
 
             sampler = BlockDistributedSampler(dataset, num_replicas=self.workerCount, rank=rank)
             dataLoader = DataLoader(
@@ -77,7 +103,8 @@ class GpuMaster:
                 sampler=sampler,
                 shuffle=False,
                 pin_memory=True,
-                num_workers=0,
+                num_workers=self.subWorkerCount,
+                collate_fn=collate_fn,
             )
 
             outPath += "." + str(rank)

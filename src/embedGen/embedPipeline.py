@@ -1,27 +1,35 @@
 import os
 from collections.abc import Iterable, Sequence
 from os.path import exists, isfile
+from re import sub
 from typing import final, overload
 
 import numpy as np
 import pyfastx
-
 from dataWrangling import fasta
 from dataWrangling.intervalDataset import IntervalDataset
 from embedGen import embedIO
 from embedGen.embedIO import Embed, EmbedMeta
-from embedGen.gpuMaster import GpuMaster
 from embedModel import EmbedModel
 from intervalTransformer import ChunkMax, IntervalTransformer
-from utils.types import MmapF32
+
+from .gpuMaster import GpuMaster
 
 
 @final
 class EmbedPipeline:
-    def __init__(self, embedModel: EmbedModel, batchSize: int, workerCount: int):
+    def __init__(
+        self, embedModel: EmbedModel, batchSize: int, workerCount: int, subWorkerCount: int = 0
+    ):
+        """
+        @param workerCount: should be <= gpu count
+        @param subWorkerCount: corresponds to pytorch::DataLoader::num_worker
+        argument -- used to prepare subprocesses for batch construction.
+        zero
+        """
         self.model: EmbedModel = embedModel
         self.batchSize: int = batchSize
-        self.gpuMaster = GpuMaster(embedModel, batchSize, workerCount)
+        self.gpuMaster = GpuMaster(embedModel, batchSize, workerCount, subWorkerCount)
 
     @overload
     def embed(self, intervals: IntervalDataset, out: str) -> Embed: ...

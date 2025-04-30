@@ -7,7 +7,7 @@ from utils.guessDevice import guessDevice
 def testHyenaDNA():
     model = HyenaDNA("1k")
     model.to(guessDevice())
-    results = model.embed(["ACGTTGCA", "ACT"])
+    results = model.embed(["ACGTTGCA", "ACT"]).cpu()
 
     assert len(results) == 2
 

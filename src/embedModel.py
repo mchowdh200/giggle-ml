@@ -1,7 +1,7 @@
 from abc import ABC
 from collections.abc import Sequence
 from functools import cached_property
-from typing import Any, ClassVar, Protocol, Self, final
+from typing import Any, ClassVar, Protocol, Self, cast, final
 
 import torch
 from torch.types import Device
@@ -76,13 +76,17 @@ class HyenaDNA(EmbedModel):
 
     @cached_property
     def _model(self):
-        model = AutoModel.from_pretrained(
+        model: Any = AutoModel.from_pretrained(
             self.checkpoint,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
         )
-        model.to(self._device)
         model.eval()
+        # WARN: HyenaDNA cannot be torch.compile(.)ed because the Hyena layers
+        # use FFT which is fundamentally based on complex numbers. TorchInductor
+        # does not support complex operators (4/30/2025)
+        # model = torch.compile(model)
+        model.to(self._device)
         return model
 
     @cached_property
@@ -141,7 +145,7 @@ class HyenaDNA(EmbedModel):
         hidden = torch.sum(hidden, dim=1)
         # clamp ensures no divide by zero issue
         hidden /= torch.clamp(seqLens, min=1e-9)
-        return hidden.to("cpu")  # pyright: ignore[reportReturnType]
+        return hidden  # pyright: ignore[reportReturnType]
 
 
 ##########################
