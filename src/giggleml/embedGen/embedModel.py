@@ -114,7 +114,7 @@ class HyenaDNA(EmbedModel):
             )
 
             dev = self._device
-            inputs = {k: v.to(dev) for k, v in tokenized.items()}
+            inputs = {k: v.to(dev, non_blocking=True) for k, v in tokenized.items()}
             # INFO: 2. inference
             outputs = self._model(**inputs, output_hidden_states=True).hidden_states
 
@@ -207,8 +207,8 @@ class CountACGT(EmbedModel):
 
     wants = "sequences"
 
-    def __init__(self):
-        self.maxSeqLen = 10
+    def __init__(self, maxSeqLen: int = 10):
+        self.maxSeqLen = maxSeqLen
         self.embedDim = 4
 
     @override
@@ -237,3 +237,30 @@ class CountACGT(EmbedModel):
                     counts[3] += 1
             results.append(counts)
         return torch.FloatTensor(results)
+
+
+@final
+class TrivialModel(EmbedModel):
+    wants = "intervals"
+
+    def __init__(self, maxSeqLen: int = 10):
+        self.maxSeqLen = maxSeqLen
+        self.embedDim = 1
+
+    @override
+    def to(self, device: Device):
+        # CPU only
+        return self
+
+    @override
+    def embed(self, batch: Sequence[GenomicInterval]) -> torch.FloatTensor:
+        results = list()
+
+        for item in batch:
+            if self.maxSeqLen is not None and len(item) > self.maxSeqLen:
+                raise ValueError("Sequence exceeds max length; refusing to truncate.")
+
+            _, start, end = item
+            results.append(end - start)
+
+        return cast(torch.FloatTensor, torch.FloatTensor(results).unsqueeze(-1))

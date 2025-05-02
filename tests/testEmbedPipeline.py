@@ -11,8 +11,9 @@ from giggleml.embedGen.embedPipeline import EmbedPipeline
 def testPipeline():
     with contextlib.suppress(FileNotFoundError):
         os.remove("tests/test_out.tmp.npy")
+        os.remove("tests/test_out.tmp.npy.meta")
 
-    assert CountACGT().maxSeqLen == 10  # to keep tests consistent
+    assert CountACGT(10).maxSeqLen == 10  # to keep tests consistent
 
     pipeline = EmbedPipeline(embedModel=CountACGT(), batchSize=2, workerCount=2)
     bed = BedDataset("tests/test.bed", "tests/test.fa")

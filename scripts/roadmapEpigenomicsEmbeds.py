@@ -16,7 +16,7 @@ from os.path import basename
 
 from giggleml.dataWrangling.intervalDataset import BedDataset
 from giggleml.embedGen import meanEmbedDict
-from giggleml.embedGen.embedModel import HyenaDNA
+from giggleml.embedGen.embedModel import HyenaDNA, TrivialModel
 from giggleml.embedGen.embedPipeline import EmbedPipeline
 
 
@@ -36,19 +36,21 @@ def build(roadmapDir: str, hg19: str):
     outPaths = [f"{roadmapDir}/embeds/{name}.npy" for name in names]
 
     # INFO: inferene parameters
-    batchSize = 6
+    batchSize = 64
     workerCount = 4
-    subWorkerCount = 0
-    hyenaSize = "1k"
+    subWorkerCount = 2
+    model = HyenaDNA("32k")
+    # model = TrivialModel(32768)
 
     # big job
     inputData = [BedDataset(bed, associatedFastaPath=hg19) for bed in beds]
-    EmbedPipeline(HyenaDNA(hyenaSize), batchSize, workerCount, subWorkerCount).embed(
+    EmbedPipeline(model, batchSize, workerCount, subWorkerCount).embed(
         intervals=inputData, out=outPaths
     )
 
     # little job (produce $master)
     meanEmbedDict.build(outPaths, f"{roadmapDir}/embeds/master.pickle")
+    print("Complete.")
 
 
 def main():
