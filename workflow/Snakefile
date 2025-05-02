@@ -3,7 +3,7 @@ import numpy as np
 
 from giggleml.embedGen.embedPipeline import EmbedPipeline
 from giggleml.embedGen import meanEmbedDict
-from giggleml.embedGen.embedModel import HyenaDNA
+from giggleml.embedGen.embedModel import HyenaDNA, CountACGT, TrivialModel
 from giggleml.dataWrangling.intervalDataset import BedDataset
 
 
@@ -65,7 +65,7 @@ rule roadmapEpigenomicsEmbeds:
     run:
         batchSize = 64
         workerCount = 4
-        subWorkerCount = 8
+        subWorkerCount = 0  # the overhead is well not worth it
 
         inputData = [
           BedDataset(bed, associatedFastaPath=input.refGenome)
@@ -77,3 +77,4 @@ rule roadmapEpigenomicsEmbeds:
           .embed(intervals=inputData, out=output.embeds)
         # little job (produce $master)
         meanEmbedDict.build(output.embeds, output.master)
+        print("Complete.")
