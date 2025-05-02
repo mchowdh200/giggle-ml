@@ -22,3 +22,7 @@ Total valid intervals found: 55605005
   Stdev Intervals/File: 29804.55
 ------------------------```
 (`src/scripts/bedStats.py`)
+
+After chunking intervals to max length of 32,768
+there are 60,821,687 intervals.
+~10% increase.
