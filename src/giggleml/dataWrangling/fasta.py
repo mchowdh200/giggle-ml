@@ -54,6 +54,7 @@ def map(
     seqs = ensureFa(fastaPath)
     results: list[Any] = [None] * len(data)
 
+    # can't use enumerate here because Datasets aren't always __iter__able
     for i in range(len(data)):
         name, start, end = data[i]
 

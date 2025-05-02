@@ -1,3 +1,4 @@
+import sys
 from collections.abc import Iterable, Sequence
 from os.path import isfile
 from typing import final, overload
@@ -6,7 +7,7 @@ import numpy as np
 
 from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
-from ..intervalTransformer import ChunkMax, IntervalTransformer
+from ..intervalTransformer import ChunkMax, IntervalTransformer, Nothing
 from ..utils.types import MmapF32
 from . import embedIO
 from .embedIO import Embed, EmbedMeta
@@ -33,20 +34,19 @@ class EmbedPipeline:
     def embed(self, intervals: IntervalDataset, out: str) -> Embed: ...
 
     @overload
-    def embed(
-        self, intervals: Sequence[IntervalDataset], out: Sequence[str]
-    ) -> Iterable[Embed]: ...
+    # this returns None because for large jobs, the OS may not be able to handle
+    # the amount of memmaps we would be returning.
+    def embed(self, intervals: Sequence[IntervalDataset], out: Sequence[str]) -> None: ...
 
     def embed(
         self,
         intervals: Sequence[IntervalDataset] | IntervalDataset,
         out: Sequence[str] | str,
-    ) -> Embed | Iterable[Embed]:
+    ) -> Embed | None:
         if isinstance(intervals, IntervalDataset) != isinstance(out, str):
             raise ValueError("Expecting either both or neither of data & out to be sequences")
         if isinstance(intervals, IntervalDataset):
             intervals = [intervals]
-        expectSingle = isinstance(out, str)  # simple input; simple output
         if isinstance(out, str):
             out = [out]
 
@@ -58,37 +58,48 @@ class EmbedPipeline:
                 #      1. GpuMaster when interrupted leaves lots of out.npy.0 files instead of completed items.
                 #      2. There's ambiguity between .npy at worker aggregation step .npy.(.0 .1 .2...) -> .npy
                 #         and dechunking step .npy (len N) -> .npy (len < N)
-                raise ValueError(f"Output already exists ({outPath})")
+                print(f"Output already exists ({outPath})", file=sys.stderr)
 
         maxSeqLen = self.model.maxSeqLen
+        eDim = self.model.embedDim
 
-        if maxSeqLen is None:
-            # as intervals cannot exceed model input size, they are not chunked,
-            # so processing is simple.
-            mmaps = self.gpuMaster.batch(intervals, out)
-        else:
-            if self.model.wants == "sequences":
-                for datum in intervals:
-                    faPath = datum.associatedFastaPath
+        # if maxSeqLen is None:
+        #     # as intervals cannot exceed model input size, they are not chunked,
+        #     # so processing is simple.
+        #     self.gpuMaster.batch(intervals, out)
+        # else:
 
-                    if faPath is not None:
-                        fasta.ensureFa(faPath)
+        if self.model.wants == "sequences":
+            for datum in intervals:
+                faPath = datum.associatedFastaPath
 
-            transformers = [IntervalTransformer(item, ChunkMax(maxSeqLen)) for item in intervals]
-            chunked = [transformer.newDataset for transformer in transformers]
-            results = self.gpuMaster.batch(chunked, out)
-            # dechunked
-            mmaps: Iterable[MmapF32] = [
-                transformer.backwardTransform(result, self._defaultAggregator)
-                for transformer, result in zip(transformers, results)
-            ]
+                if faPath is not None:
+                    fasta.ensureFa(faPath)
 
+        transforms = ChunkMax(maxSeqLen) if maxSeqLen is not None else Nothing()
+        transformers = [IntervalTransformer(item, transforms) for item in intervals]
+
+        newData = [transformer.newDataset for transformer in transformers]
         meta = EmbedMeta(self.model.embedDim, np.float32)
-        embeds = [embedIO.writeMeta(mmap, meta) for mmap in mmaps]
+        post = [DeChunk(transformer, meta) for transformer in transformers]
+        self.gpuMaster.batch(newData, out, post)
 
-        if expectSingle:
-            return embeds[0]
-        return embeds
+        # only the overload for single input, output returns a value
+        if len(out) == 1:
+            size = len(intervals[0])
+            data = np.memmap(out[0], np.float32, "r", shape=(size, eDim))
+            return embedIO.Embed(data, meta)
+
+
+@final
+class DeChunk:
+    def __init__(self, transformer: IntervalTransformer, meta: EmbedMeta):
+        self.transformer = transformer
+        self.meta = meta
 
     def _defaultAggregator(self, slice: np.ndarray) -> np.ndarray:
         return np.mean(slice, axis=0)
+
+    def __call__(self, item: np.memmap):
+        self.transformer.backwardTransform(item, self._defaultAggregator)
+        embedIO.writeMeta(item, self.meta)

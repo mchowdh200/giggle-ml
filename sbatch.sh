@@ -8,6 +8,6 @@ on_exit() {
 trap on_exit EXIT
 
 clear
-echo -e ">\n" > giggleML-sbatch.out
+echo -e "..." > jobOutput
 sbatch job.sbatch
-tail -f giggleML-sbatch.out
+tail -f jobOutput

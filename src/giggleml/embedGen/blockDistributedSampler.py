@@ -18,8 +18,7 @@ class BlockDistributedSampler(Sampler):
             raise ValueError("num_replicas should be a positive integer")
         if not isinstance(rank, int) or rank < 0 or rank >= num_replicas:
             raise ValueError(
-                f"Invalid rank {rank}, rank should be in the range"
-                f" [0, {num_replicas - 1}]"
+                f"Invalid rank {rank}, rank should be in the range" f" [0, {num_replicas - 1}]"
             )
 
         self.dataset = dataset
@@ -28,10 +27,10 @@ class BlockDistributedSampler(Sampler):
         self.totalSize = len(self.dataset)
 
         if self.totalSize == 0:
-            self.numSamples = 0
+            self.lower = 0
+            self.upper = 0
         elif self.totalSize < self.numReplicas:
             # Assign first totalSize ranks one sample each, others get zero
-            self.numSamples = 1 if self.rank < self.totalSize else 0
             self.lower = self.rank if self.rank < self.totalSize else self.totalSize
             self.upper = self.rank + 1 if self.rank < self.totalSize else self.totalSize
         else:
@@ -40,11 +39,8 @@ class BlockDistributedSampler(Sampler):
             self.lower = small * self.rank
             # The last rank takes the remainder
             self.upper = (
-                self.totalSize
-                if self.rank == self.numReplicas - 1
-                else small * (self.rank + 1)
+                self.totalSize if self.rank == self.numReplicas - 1 else small * (self.rank + 1)
             )
-            self.numSamples = self.upper - self.lower
 
     @override
     def __iter__(self):
@@ -53,7 +49,7 @@ class BlockDistributedSampler(Sampler):
 
     def __len__(self):
         # Return pre-calculated number of samples for this rank
-        return self.numSamples
+        return self.upper - self.lower
 
 
 # Testig purposes

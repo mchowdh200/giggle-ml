@@ -1,6 +1,6 @@
 import os
 from collections.abc import Iterable, Sequence
-from typing import final
+from typing import Callable, final
 
 import numpy as np
 import torch
@@ -8,10 +8,12 @@ import torch.distributed as dist
 from torch import multiprocessing as mp
 from torch.utils.data import DataLoader
 
+from giggleml.dataWrangling.unifiedDataset import UnifiedDataset
+
 from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
 from ..utils.guessDevice import guessDevice
-from ..utils.types import GenomicInterval, MmapF32, SizedDataset
+from ..utils.types import GenomicInterval, ListLike
 from .blockDistributedSampler import BlockDistributedSampler
 from .embedModel import EmbedModel
 
@@ -23,6 +25,10 @@ class FastaCollate:
 
     def __call__(self, batch: Sequence[GenomicInterval]):
         return fasta.map(batch, self.fasta)
+
+
+def passCollate(batch: Sequence[GenomicInterval]):
+    return batch
 
 
 @final
@@ -44,33 +50,38 @@ class GpuMaster:
         self.subWorkerCount = subWorkerCount
         self.embedDim = model.embedDim
 
-    def _inferLoop(self, rank, dataLoader, outPath):
+    def _inferLoop(self, rank: int, dataLoader: DataLoader, outFile: np.memmap):
         """inference loop."""
-        sampleCount = len(dataLoader.sampler)
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
-        # remove outFile if exists
-        if os.path.exists(outPath):
-            os.remove(outPath)
-
-        outFile = np.memmap(
-            outPath, dtype="float32", mode="w+", shape=(sampleCount, self.embedDim)
-        )
         nextIdx = 0
 
         for i, batch in enumerate(dataLoader):
-            outputs = self.model.embed(batch).cpu()
-            outFile[nextIdx : nextIdx + len(outputs)] = outputs.numpy()
+            outputs = self.model.embed(batch).to("cpu", non_blocking=True)
+            finalIdx = nextIdx + len(outputs)
+
+            assert finalIdx <= len(outFile)
+
+            if i >= 4:
+                break
+
+            outFile[nextIdx:finalIdx] = outputs.numpy()
             nextIdx += len(outputs)
 
-            if i % 100 == 0:
+            if i % 50 == 0:
                 rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
 
         # "close" the memmap
         outFile.flush()
         del outFile
 
-    def _worker(self, rank: int, datasets: Sequence[IntervalDataset], outPaths: Sequence[str]):
+    def _worker(
+        self,
+        rank: int,
+        datasets: Sequence[IntervalDataset],
+        outPaths: Sequence[str],
+        post: Sequence[Callable[[np.memmap], None]] | None,
+    ):
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "12356"
         backendType = "nccl" if torch.cuda.is_available() else "gloo"
@@ -78,86 +89,90 @@ class GpuMaster:
 
         if not dist.is_initialized():
             raise RuntimeError("Process group could not initialized")
-        if not torch.accelerator.is_available():
-            raise RuntimeError("Hardware acceleration not available")
+
+        if rank == 0:
+            print("Starting inference.")
+
+        rprint = lambda *args: print(f"[{rank}]:", *args)
 
         device = guessDevice(rank)
         model = self.model.to(device)
         model.to(device)
         wantsSeq = self.model.wants == "sequences"
+        eDim = self.model.embedDim
 
-        for i, dataset, outTotal in zip(range(len(datasets)), datasets, outPaths):
-            if os.path.exists(outTotal):
-                print(f"Skipping {outTotal}")
-                continue
-
-            # "outTotal" being the final output produced after all ranks finish
-            outPath = outTotal + "." + str(rank)  # each rank only operates on its own data
-
-            if os.path.exists(outPath):
-                print(f"Skipping {outPath}")
-                continue
-
+        for i, dataset, outPath in zip(range(len(datasets)), datasets, outPaths):
             if wantsSeq:
                 if dataset.associatedFastaPath is None:
                     raise ValueError("Unable to map to fasta; missing associatedFastaPath")
                 collate = FastaCollate(dataset.associatedFastaPath)
             else:
-                collate = None
+                collate = passCollate
 
-            sampler = BlockDistributedSampler(dataset, num_replicas=self.workerCount, rank=rank)
+            blockSampler = BlockDistributedSampler(dataset, self.workerCount, rank)
+            sampleCount = len(blockSampler)
+            offset = blockSampler.lower * eDim * 4  # (4 bytes per float32)
+            outFile = np.memmap(outPath, np.float32, "r+", offset, shape=(sampleCount, eDim))
+
             dataLoader = DataLoader(
                 dataset,
                 batch_size=self.batchSize,
-                sampler=sampler,
+                sampler=blockSampler,
                 shuffle=False,
                 pin_memory=True,
                 num_workers=self.subWorkerCount,
+                persistent_workers=self.subWorkerCount != 0,  # (usually True) -- crucial
                 collate_fn=collate,
             )
 
-            self._inferLoop(rank, dataLoader, outPath + "__")
-            # it is now finished, rename x__ -> x
-            os.rename(outPath + "__", outPath)
+            self._inferLoop(
+                rank,
+                dataLoader,
+                outFile,
+            )
 
             if rank == 0:
-                print(f"\t- Finished {i+1} / {len(datasets)}")
+                rprint(f"\t- Dataset {i+1} / {len(datasets)}")
+
+        dist.barrier()  # INFO: inference complete
+
+        if rank == 0:
+            if post is not None:
+                print("Starting post-processing.")
+
+                for i, (dataset, outPath, postCall) in enumerate(zip(datasets, outPaths, post)):
+                    if (100 * i // len(outPaths)) % 10 == 0:  # roughly every 10%
+                        rprint(f"{i+1} / {len(outPaths)}")
+
+                    size = len(dataset)
+                    outFile = np.memmap(outPath, np.float32, "r", shape=(size, eDim))
+                    postCall(outFile)
+
+                rprint(f"{len(outPaths)} / {len(outPaths)}")
 
         dist.barrier()
         dist.destroy_process_group()
 
     def batch(
-        self, datasets: Sequence[SizedDataset], outPaths: Sequence[str]
-    ) -> Iterable[MmapF32]:
+        self,
+        datasets: Sequence[ListLike],
+        outPaths: Sequence[str],
+        post: Sequence[Callable[[np.memmap], None]] | None = None,
+    ):
+        """
+        @param post: Is a list of processing Callable to apply to completed memmaps after inference is completed.
+        """
+
         assert len(datasets) == len(outPaths)
 
-        # big operation
-        args = (datasets, outPaths)
-        mp.spawn(self._worker, args=args, nprocs=self.workerCount, join=True)  # spawn method
+        eDim = self.model.embedDim
 
-        # TODO: aggregation can also be parallelized
+        # necessary to initialize output space before workers map to specific regions
         for dataset, outPath in zip(datasets, outPaths):
-            outShape = (len(dataset), self.embedDim)
-
-            if os.path.exists(outPath):
-                # INFO: The overall system is designed to ignore results that
-                # have already been created.
-                yield np.memmap(outPath, dtype="float32", mode="r", shape=outShape)
-                continue
-
-            outFile = np.memmap(outPath, dtype="float32", mode="w+", shape=outShape)
-            nextIdx = 0
-
-            for rank in range(self.workerCount):
-                rankOutPath = outPath + "." + str(rank)
-
-                rankFile = np.memmap(rankOutPath, dtype="float32", mode="r")
-                rankFile = rankFile.reshape((-1, self.embedDim))
-                outFile[nextIdx : nextIdx + len(rankFile)] = rankFile
-
-                nextIdx += len(rankFile)
-                del rankFile
-                os.remove(outPath + "." + str(rank))
-
+            outFile = np.memmap(outPath, np.float32, "w+", shape=(len(dataset), eDim))
             outFile.flush()
-            yield outFile
+            del outFile
+
+        # big operation
+        args = (datasets, outPaths, post)
+        mp.spawn(self._worker, args=args, nprocs=self.workerCount, join=True)  # spawn method

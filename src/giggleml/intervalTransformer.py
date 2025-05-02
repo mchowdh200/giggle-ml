@@ -29,6 +29,11 @@ class ChunkMax:
             yield ((interval[0], interval[1] + start, interval[1] + end))
 
 
+class Nothing:
+    def __call__(self, interval: GenomicInterval) -> Iterable[GenomicInterval]:
+        yield interval
+
+
 # =================================
 #     Interval Transformer
 # =================================
@@ -145,7 +150,9 @@ class IntervalTransformer:
         dtype = memmap.dtype
         backMem = np.memmap(backPath, dtype=dtype, mode="w+", shape=backShape)
 
+        memmap.flush()
         j = 0
+
         for i in range(len(self.oldDataset)):
             frontCount = len(self.toIdx[i])
             slice = memmap[j : j + frontCount]
@@ -155,7 +162,6 @@ class IntervalTransformer:
 
         backMem.flush()
         del backMem
-        memmap.flush()
         del memmap
 
         os.remove(frontPath)
