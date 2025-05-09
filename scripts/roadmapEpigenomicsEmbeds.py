@@ -56,9 +56,11 @@ def build(roadmapDir: str, hg19: str):
 def main():
     parser = argparse.ArgumentParser(description="Generate embeddings for roadmap epigenomics")
     parser.add_argument(
-        "roadmapDir", help="Dir path; should include subdirectories beds/ and embeds/"
+        "roadmapDir",
+        help="Dir path; should include subdirectories beds/ and embeds/",
+        default="data/roadmap_epigenomics/beds",
     )
-    parser.add_argument("hg19", help="path to hg19.fa or hg19.fa.gz")
+    parser.add_argument("hg19", help="path to hg19.fa or hg19.fa.gz", default="data/hg/hg19.fa")
 
     args = parser.parse_args()
     roadDir = args.roadmapDir

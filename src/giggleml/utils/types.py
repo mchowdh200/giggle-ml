@@ -1,4 +1,4 @@
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, SupportsIndex, TypeVar
 
 import numpy as np
 
@@ -17,6 +17,9 @@ def lazy[T](cls: T) -> T:
     return cls
 
 
-class SizedDataset[T](Protocol):
-    def __getitem__(self, idx: int) -> T: ...
+T_co = TypeVar("T_co", covariant=True)
+
+
+class ListLike[T_co](Protocol):
+    def __getitem__(self, idx: int) -> T_co: ...
     def __len__(self) -> int: ...

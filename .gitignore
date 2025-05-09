@@ -10,8 +10,9 @@ __pycache__
 # ephemeral testing data
 tests/*.npy*
 
-# big data
-data/*
-.data
 # generated fastx indices
+data
+.data
 *.fxi
+
+logs

@@ -12,6 +12,7 @@ from ..utils.pathPickle import pickle, unpickle
 class EmbedMeta:
     embedDim: int
     dtype: DTypeLike
+    modelInfo: str
 
 
 @final
@@ -25,8 +26,7 @@ class Embed(EmbedMeta):
         """
         Should not be used directly: create with embedIO.writeMeta
         """
-
-        super().__init__(meta.embedDim, meta.dtype)
+        super().__init__(meta.embedDim, meta.dtype, meta.modelInfo)
         self.data = data
 
 

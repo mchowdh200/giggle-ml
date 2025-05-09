@@ -1,9 +1,9 @@
 #!/bin/bash
 
 #SBATCH --partition=nvidia-a100
-#SBATCH --nodelist=fijigpu-04
+#   #SBATCH --nodelist=fijigpu-04
 #SBATCH --gres=gpu:4
-#SBATCH --mem=420G
+#SBATCH --mem=500G
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -17,8 +17,12 @@ clear
 echo Starting job.
 source ~/rc/gpu.sh
 source .venv/bin/activate
+# mamba activate gml
 export PYTHONUNBUFFERED=1
 
-time python3 scripts/roadmapEpigenomicsEmbeds.py /cache/siwa3657/data/roadmap_epigenomics /cache/siwa3657/data/hg/hg19.fa
+#data="/cache/siwa3657/"
+data="data"
+time python3 scripts/roadmapEpigenomicsEmbeds.py $data/roadmap_epigenomics $data/hg/hg19.fa
+# time snakemake --cores 1 experiments/statTests/swtSynth.png
 
 echo Complete.

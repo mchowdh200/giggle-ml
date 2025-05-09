@@ -10,13 +10,17 @@ REMOTE_TARGET="${REMOTE_HOST}:${REMOTE_BASE_DIR}"
 declare -a EXCLUDE_PATTERNS=(
     "data/"
     ".data/"
+    "experiments/"
+    ".experiments/"
+    "jobOutput"
+    "logs"
+    # system
     ".git/"
     ".direnv/"
     ".venv/"
+    ".pytest_cache/"
     "*/__pycache__/" # Excludes any directory named __pycache__ recursively
     ".snakemake/"
-    ".pytest_cache/"
-    "jobOutput"
 )
 
 sync_remote() {
@@ -29,7 +33,7 @@ sync_remote() {
         filter_args+=("--filter=- ${pattern}")
     done
 
-    rsync_output=$(rsync -ia --delete --prune-empty-dirs "${filter_args[@]}" . "${REMOTE_TARGET}" 2>&1)
+    rsync_output=$(rsync -pia --delete --prune-empty-dirs "${filter_args[@]}" . "${REMOTE_TARGET}" 2>&1)
     rsync_exit_code=$?
 
     # Check for rsync errors first

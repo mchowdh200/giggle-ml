@@ -1,5 +1,5 @@
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from os.path import isfile
 from typing import final, overload
 
@@ -7,8 +7,7 @@ import numpy as np
 
 from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
-from ..intervalTransformer import ChunkMax, IntervalTransformer, Nothing
-from ..utils.types import MmapF32
+from ..intervalTransformer import ChunkMax, IntervalTransform, IntervalTransformer
 from . import embedIO
 from .embedIO import Embed, EmbedMeta
 from .embedModel import EmbedModel
@@ -31,17 +30,28 @@ class EmbedPipeline:
         self.gpuMaster = GpuMaster(embedModel, batchSize, workerCount, subWorkerCount)
 
     @overload
-    def embed(self, intervals: IntervalDataset, out: str) -> Embed: ...
+    def embed(
+        self,
+        intervals: IntervalDataset,
+        out: str,
+        transforms: list[IntervalTransform] | None = None,
+    ) -> Embed: ...
 
     @overload
     # this returns None because for large jobs, the OS may not be able to handle
     # the amount of memmaps we would be returning.
-    def embed(self, intervals: Sequence[IntervalDataset], out: Sequence[str]) -> None: ...
+    def embed(
+        self,
+        intervals: Sequence[IntervalDataset],
+        out: Sequence[str],
+        transforms: list[IntervalTransform] | None = None,
+    ) -> None: ...
 
     def embed(
         self,
         intervals: Sequence[IntervalDataset] | IntervalDataset,
         out: Sequence[str] | str,
+        transforms: list[IntervalTransform] | None = None,
     ) -> Embed | None:
         if isinstance(intervals, IntervalDataset) != isinstance(out, str):
             raise ValueError("Expecting either both or neither of data & out to be sequences")
@@ -63,12 +73,6 @@ class EmbedPipeline:
         maxSeqLen = self.model.maxSeqLen
         eDim = self.model.embedDim
 
-        # if maxSeqLen is None:
-        #     # as intervals cannot exceed model input size, they are not chunked,
-        #     # so processing is simple.
-        #     self.gpuMaster.batch(intervals, out)
-        # else:
-
         if self.model.wants == "sequences":
             for datum in intervals:
                 faPath = datum.associatedFastaPath
@@ -76,11 +80,15 @@ class EmbedPipeline:
                 if faPath is not None:
                     fasta.ensureFa(faPath)
 
-        transforms = ChunkMax(maxSeqLen) if maxSeqLen is not None else Nothing()
-        transformers = [IntervalTransformer(item, transforms) for item in intervals]
+        if transforms is None:
+            transforms = list()
 
+        if maxSeqLen is not None:
+            transforms.append(ChunkMax(maxSeqLen))
+
+        transformers = [IntervalTransformer(data, transforms) for data in intervals]
         newData = [transformer.newDataset for transformer in transformers]
-        meta = EmbedMeta(self.model.embedDim, np.float32)
+        meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
         post = [DeChunk(transformer, meta) for transformer in transformers]
         self.gpuMaster.batch(newData, out, post)
 

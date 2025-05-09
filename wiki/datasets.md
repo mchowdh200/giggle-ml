@@ -1,4 +1,4 @@
-# Roadmap Epigenomics Dataset
+# roadmap_epigenomics
 
 Is based on ChromHMM segmentation data from the NIH, [(1)](https://egg2.wustl.edu/roadmap/web_portal/chr_state_learning.html). The data was then processed, split and sorted in some way, by Giggle, [(2)](https://github.com/ryanlayer/giggle/blob/aeda9930454fe9a06383c8cff315caf56af11b49/examples/rme/README.md?plain=1#L25). Giggle provides this data (post-processed) [here](https://s3.amazonaws.com/layerlab/giggle/roadmap/roadmap_sort.tar.gz) which is what this library refers to as the "Roadmap Epigenomics" dataset.
 
@@ -21,8 +21,23 @@ Total valid intervals found: 55605005
   Mean Intervals/File:   29188.98
   Stdev Intervals/File: 29804.55
 ------------------------```
-(`src/scripts/bedStats.py`)
+(from `src/scripts/bedStats.py`)
 
 After chunking intervals to max length of 32,768
 there are 60,821,687 intervals.
 ~10% increase.
+
+# ENCFF478KET_small
+
+Based on [ENCFF478KET](https://www.encodeproject.org/files/ENCFF478KET/) -- pipelines:
+- Transcription factor ChIP-seq 2,
+- Histone ChIP-seq 2 (unreplicated),
+- Histone ChIP-seq 2,
+- Transcription factor ChIP-seq 2 (unreplicated)
+
+It is to be used with GRCh38.
+
+`sample.bed` and `query.bed` were produced from `ENCFF478KET.bam`.
+`sample.bed`: 100,000 intervals were sampled after filtering for chr1
+`query.bed`: First 1,000 intervals of `sample.bed`
+

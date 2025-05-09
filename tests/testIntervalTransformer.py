@@ -6,7 +6,14 @@ import numpy as np
 
 from giggleml.dataWrangling.intervalDataset import BedDataset
 from giggleml.dataWrangling.listDataset import ListDataset
-from giggleml.intervalTransformer import ChunkMax, IntervalTransformer
+from giggleml.intervalTransformer import (
+    ChunkMax,
+    IntervalTransformer,
+    Slide,
+    Split,
+    Swell,
+    Translate,
+)
 from giggleml.utils.types import GenomicInterval
 
 
@@ -23,7 +30,9 @@ class Multiply:
 def testBasicForward():
     bed = BedDataset("tests/test.bed")
     tran = IntervalTransformer(bed, Multiply(1))
+    assert len(tran.getNewIntervals()) == len(tran)
     bed2 = tran.newDataset
+    assert len(bed2) == len(tran)
 
     for i in range(len(bed)):
         assert bed[i] == bed2[i]
@@ -55,6 +64,12 @@ def testBasicBackward():
     os.remove("tests/test.tmp.memmap")
 
 
+def testLengthLimit():
+    bed = BedDataset("tests/test.bed")
+    tran = IntervalTransformer(bed, [], 3)
+    assert len(tran) == 3
+
+
 # ======================================
 #       Specific Transforms
 # ======================================
@@ -77,3 +92,64 @@ def testChunkMax():
     assert bigChunks[0] == ("", 5, 10)
     assert bigChunks[1] == ("", 10, 15)
     assert bigChunks[2] == ("", 15, 17)
+
+
+def testSlide():
+    op = Slide(4)
+    assert list(op(("chrX", 0, 10))) == [
+        ("chrX", 0, 10),
+        ("chrX", 3, 13),
+        ("chrX", 7, 17),
+        ("chrX", 10, 20),
+    ]
+
+
+def testTranslatePositiveOffset():
+    op = Translate(50)
+    assert list(op(("chr1", 100, 200))) == [("chr1", 150, 250)]
+
+
+def testTranslateNegativeOffset():
+    op = Translate(-50)
+    assert list(op(("chr2", 200, 300))) == [("chr2", 150, 250)]
+
+
+def testTranslateZeroOffset():
+    op = Translate(0)
+    interval = ("chr3", 50, 100)
+    assert list(op(interval)) == [interval]
+
+
+# Test Swell
+def testSwellShrink():
+    op = Swell(0.5)
+    assert list(op(("chr1", 100, 200))) == [("chr1", 125, 175)]
+
+
+def testSwellExpand():
+    op = Swell(2.0)
+    assert list(op(("chr2", 100, 200))) == [("chr2", 50, 250)]
+
+
+def testSwellOddSize():
+    op = Swell(1.0)
+    assert list(op(("chr3", 100, 201))) == [("chr3", 100, 201)]
+
+
+# Test Split
+def testSplitExactDivision():
+    op = Split(3)
+    intervals = list(op(("chr1", 100, 103)))
+    assert intervals == [("chr1", 100, 101), ("chr1", 101, 102), ("chr1", 102, 103)]
+
+
+def testSplitUneven():
+    op = Split(3)
+    intervals = list(op(("chr2", 100, 107)))
+    assert intervals == [("chr2", 100, 103), ("chr2", 103, 105), ("chr2", 105, 107)]
+
+
+def testSplitSmallIntervalUnchanged():
+    op = Split(3)
+    interval = ("chr3", 100, 101)
+    assert list(op(interval)) == [interval]

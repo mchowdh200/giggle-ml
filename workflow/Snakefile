@@ -1,80 +1,167 @@
 import random
+from types import SimpleNamespace
 import numpy as np
+import datetime
+from typing import cast
+from pathlib import Path
 
-from giggleml.embedGen.embedPipeline import EmbedPipeline
+from giggleml.synthesis import synthesize
+from giggleml.utils.types import MmapF32
+from giggleml.utils.printTo import printTo
 from giggleml.embedGen import meanEmbedDict
+from giggleml.embedGen.embedPipeline import EmbedPipeline
 from giggleml.embedGen.embedModel import HyenaDNA, CountACGT, TrivialModel
+from giggleml.embedGen import embedIO
+from giggleml.embedTests import tests
 from giggleml.dataWrangling.intervalDataset import BedDataset
+from giggleml.dataWrangling import fasta
+from giggleml.intervalTransformer import IntervalTransformer
 
 
 configfile: "config.yaml"
-DATA = config['data']
-HG = config['hg']
+config = SimpleNamespace(**config)
+DATA = config.data
+HG = config.hg
 
-# include: "giggleLegacyExperiments.smk"
-#
-#
-# rule synthesizeSequences:
-#     params:
-#         seqLenMin = int(1e3),
-#         seqLenMax = int(25e3),
-#         seqPerUniverse = int(2e5),
-#         seed = 31415
-#     output:
-#         outFiles = [ f"{DATA}synthetic/intervals.bed" ],
-#         fastaOut = f"{DATA}/synthetic/ref.fa"
-#     run:
-#         from src.synthesis import synthesize
-#         synthesize(output.fastaOut, output.outFiles, *params)
-#
-#
-# rule embedQualityTests:
-#     params:
-#         limit = 1000,  # some of the statistical tests are rather inefficient
-#                        # and need an input limit to bound runtime
-#         seed = 31415
-#     input:
-#         intervals = f"{DATA}/giggleBench/query.bed",
-#         emebds = f"{DATA}/giggleBench/embeds/straight/query.npy",
-#     output:
-#         swtFig = "embedAnalysis/swt.png"
-#     run:
-#         random.seed(params.seed)
-#         np.random.seed(params.seed)
-#         runTests(input.intervals, input.emebds, params.limit, output.swtFig)
+# like a partial file
+include: "giggleBenchmark.smk"
 
 
-roadmapEpigBedPattern = DATA + "/roadmap_epigenomics/beds/{id}.bed"
-roadmapEpigBedNames, = glob_wildcards(roadmapEpigBedPattern)
-
-rule roadmapEpigenomicsEmbeds:
-    # TODO: roadmap epi workflow should automatically start fiji job
+rule all:
     input:
-        refGenome = HG + "/hg19.fa",
-        bedFiles = expand(roadmapEpigBedPattern, id=roadmapEpigBedNames),
+        syntheticIntervals = f"{DATA}/synthetic_small/intervals.bed",
+        statsFile = f"{config.experimentsDir}/statTests/testResults.txt",
+        overlapPlot = expand(f"{config.experimentsDir}/giggleBench/{{expName}}/recallByOverlap.png", expName=expNames),
+        geOverlapPlot = expand(f"{config.experimentsDir}/giggleBench/{{expName}}/recallByGEOverlap.png", expName=expNames)
+
+
+rule synthesizeSequences:
     output:
-        embeds = expand(DATA + "/roadmap_epigenomics/embeds/{id}.npy",
-                        id=roadmapEpigBedNames),
-        # associated metadata should also be generated
-        meta = expand(DATA + "/roadmap_epigenomics/embeds/{id}.npy.meta",
-                      id=roadmapEpigBedNames),
-        # the region set collection also produces a "master" mean embed dict
-        master = DATA + "/roadmap_epigenomics/embeds/master.pickle"
+        intervals = f"{DATA}/synthetic_small/intervals.bed",
+        fasta = f"{DATA}/synthetic_small/ref.fa",
+        embeds = f"{DATA}/synthetic_small/embeds.npy",
+        embedsMeta = f"{DATA}/synthetic_small/embeds.npy.meta"
     params:
-        model = HyenaDNA("32k")
+        # INFO: realistic to ENCFF478KET query.bed
+        minLen = int(76),
+        maxLen = int(76),
+        total = int(2000),
+        # INFO: more realistic parameters to roadmap_epigenomics
+        # seqLenMin = int(1e3),
+        # seqLenMax = int(25e3),
+        # seqPerUniverse = int(2e5),
+        seed = 31415,
+        model = HyenaDNA('1k')
     run:
-        batchSize = 64
+        # 1. synthesize intervals & chromosomes
+        synthesize(output.fasta, [output.intervals], params.minLen,
+                   params.maxLen, params.total, params.seed)
+        # 2. generate embeddings
+        EmbedPipeline(params.model, 1024, 4)\
+          .embed(BedDataset(output.intervals, output.fasta), output.embeds)
+
+
+rule embedQualityTests:
+    input:
+        intervals = f"{DATA}/ENCFF478KET_small/query.bed",
+        embeds = f"{DATA}/ENCFF478KET_small/embeds/straight/query.npy",
+        fasta = f"{HG}/hg38.fa",
+
+        syntheticIntervals = f"{DATA}/synthetic_small/intervals.bed",
+        syntheticEmbeds = f"{DATA}/synthetic_small/embeds.npy",
+        syntheticFasta = f"{DATA}/synthetic_small/ref.fa"
+    output:
+        swtFig = f"{config.experimentsDir}/statTests/swt.png",
+        swtSynthFig = f"{config.experimentsDir}/statTests/swtSynth.png",
+        statsFile = f"{config.experimentsDir}/statTests/testResults.txt"
+    params:
+        model = HyenaDNA('1k'),
+        limit = 1000,  # some of the statistical tests are rather inefficient
+                       # and need an input limit to bound runtime
+        seed = 31415,
+        swtSteps = 11  # 11 corresponds to a 10% step
+    run:
+        random.seed(params.seed)
+        np.random.seed(params.seed)  # just in case
+
+        # 1. Sliding Window Test
+
+        # batchSize = 1
+        # workerCount = 1
+        # subWorkerCount = 0
+        batchSize = 1024
         workerCount = 4
-        subWorkerCount = 0  # the overhead is well not worth it
+        subWorkerCount = 2
+        pipeline = EmbedPipeline(params.model, batchSize, workerCount, subWorkerCount)
 
-        inputData = [
-          BedDataset(bed, associatedFastaPath=input.refGenome)
-          for bed in input.bedFiles
-        ]
+        intervals = BedDataset(input.intervals, input.fasta)
+        syntheticIntervals = BedDataset(input.syntheticIntervals, input.syntheticFasta)
+        # TODO: swt plots should be merged
+        tests.swt(pipeline, intervals, output.swtFig, params.swtSteps, params.limit)
+        tests.swt(pipeline, syntheticIntervals, output.swtSynthFig, params.swtSteps, params.limit)
 
-        # big job
-        EmbedPipeline(params.model, batchSize, workerCount, subWorkerCount) \
-          .embed(intervals=inputData, out=output.embeds)
-        # little job (produce $master)
-        meanEmbedDict.build(output.embeds, output.master)
-        print("Complete.")
+        Path(output.statsFile).parent.mkdir(parents=True, exist_ok=True)
+
+        # FIXME: fix RCT by applying geniml integration
+        # seqs = fasta.map(intervals)
+        # tests.rct(input.embeds, seqs)
+
+        with printTo(output.statsFile):
+
+          # 2. Sheffield Statistical Tests
+
+          embeds = embedIO.parse(input.embeds).data
+          print()
+          tests.ctt(embeds)
+          print()
+          tests.gdst(embeds, intervals)
+          print()
+          tests.npt(embeds, intervals)
+
+          # 3. Synthetic Baseline
+
+          print('\n\nSynthetic Data:\n')
+          embeds = embedIO.parse(input.syntheticEmbeds).data
+          print()
+          tests.ctt(embeds)
+          print()
+          tests.gdst(embeds, intervals)
+          print()
+          tests.npt(embeds, intervals)
+
+
+# roadmapEpigBedPattern = DATA + "/roadmap_epigenomics/beds/{id}.bed"
+# roadmapEpigBedNames, = glob_wildcards(roadmapEpigBedPattern)
+#
+#
+# rule roadmapEpigenomicsEmbeds:
+#     # TODO: roadmap epi workflow should automatically start fiji job
+#     input:
+#         refGenome = HG + "/hg19.fa",
+#         bedFiles = expand(roadmapEpigBedPattern, id=roadmapEpigBedNames),
+#     output:
+#         embeds = expand(DATA + "/roadmap_epigenomics/embeds/{id}.npy",
+#                         id=roadmapEpigBedNames),
+#         # associated metadata should also be generated
+#         meta = expand(DATA + "/roadmap_epigenomics/embeds/{id}.npy.meta",
+#                       id=roadmapEpigBedNames),
+#         # the region set collection also produces a "master" mean embed dict
+#         master = DATA + "/roadmap_epigenomics/embeds/master.pickle"
+#     params:
+#         model = HyenaDNA("32k")
+#     run:
+#         batchSize = 64
+#         workerCount = 4
+#         subWorkerCount = 4
+#
+#         inputData = [
+#           BedDataset(bed, associatedFastaPath=input.refGenome)
+#           for bed in input.bedFiles
+#         ]
+#
+#         # big job
+#         EmbedPipeline(params.model, batchSize, workerCount, subWorkerCount) \
+#           .embed(intervals=inputData, out=output.embeds)
+#         # little job (produce $master)
+#         meanEmbedDict.build(output.embeds, output.master)
+#         print("Complete.")

@@ -14,14 +14,24 @@ More info
    - [Benchmark against legacy Giggle (with some interval transformations to increase performance)](./experiments/giggleBench/all-thirds/recallByGEOverlap.png)
    - [HyenaDNA UMAP](./embedAnalysis/umap/umap.png)
 
-## Usage
+## Quickstart
+
+```bash
+# 1. get the repo
+git clone https://github.com/mchowdh200/giggle-ml.git
+cd giggle-ml
+# 2.
+uv sync
+source .venv/bin/activate
+uv pip install -e .
+# 3. Make sure you have some data to play with!
+# 4. Run a snakemake workflow, such as,
+snakemake --cores 1 all  # cores=1 to prevent GPU clobbering
+```
 
 ### Prerequisites
 
-Windows is not supported.
-
-1. [Conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html)
-2. [Snakemake](https://snakemake.readthedocs.io/en/stable/getting_started/installation.html)
+1. `UV` or `conda`
 3. [Legacy Giggle](https://github.com/ryanlayer/giggle) dependencies $\to$ **IF** you intend to perform a benchmark
    against legacy Giggle. Acquiring results for comparison will require running
    legacy Giggle.
@@ -44,7 +54,7 @@ Workflow parameters are included in snakemake files and in the [./config.yaml](.
 
 Embeds a large series of bed files.
 
-`snakemake RoadmapEpigenomicsEmbeddings`  
+`snakemake RoadmapEpigenomicsEmbeddings`
 Note that this rule can be configured to embed any collection of interval sets
 (not just roadmap epigenomics).
 
@@ -56,7 +66,7 @@ This executes the 4 [statistical tests](./wiki/sheffieldEmbedQualityTests.md) an
 
 ### Legacy Giggle benchmark
 
-1. Prepare the datasets  
+1. Prepare the datasets
 This assumes two interval datasets, `query` and `sample`. The query dataset is used
 to perform queries (searches) on the samples. The `sample` dataset should be much larger
 than the `query` dataset.
@@ -65,8 +75,8 @@ on `sample` and searched using `query`.
 You will need to use the `-v -o` flags during search.
 
 
-To benchmark against all interval transformation experiments,  
-`snakemake giggleBenchmark_*` or  
+To benchmark against all interval transformation experiments,
+`snakemake giggleBenchmark_*` or
 `snakemake giggleBenchmark_straight` for no transformation.
 
 ### Sequence synthesis
@@ -78,9 +88,9 @@ the amount of `outFiles`. It will always create a single fasta file.
 
 ### Transformed interval embeddings
 
-To run all interval transformation experiments,  
+To run all interval transformation experiments,
 `snakemake embedsAfterTransform_*`
 
-Transformed interval experiments were done primarily for the giggle benchmark.  
+Transformed interval experiments were done primarily for the giggle benchmark.
 Embedding without transformation is possible with
 `snakemake embedsAfterTransform_straight`.
