@@ -10,6 +10,7 @@ from .listDataset import ListDataset
 
 Fasta = dict[str, str]  # chromosome -> sequence map
 knownFa: dict[str, Fasta] = dict()
+cache: tuple[str, Fasta] = ("", dict())
 
 
 def ensureFa(fastaPath: str) -> Fasta:
@@ -19,15 +20,23 @@ def ensureFa(fastaPath: str) -> Fasta:
     2) fastx idx
     3) parses the fasta file (with fastx & caches)
     """
+    global cache
 
-    fastaPath = str(Path(fastaPath).resolve())  # normalization
+    # attempt to skip the str(Path(.).resolve()) & dict call.
+    # makes duplicate calls free
+    if fastaPath == cache[0]:
+        return cache[1]
 
-    if fastaPath not in knownFa:
-        idx = pyfastx.Fasta(fastaPath)
+    fastaPathNormalized = str(Path(fastaPath).resolve())  # normalization
+
+    if fastaPathNormalized not in knownFa:
+        idx = pyfastx.Fasta(fastaPathNormalized)
         seqs: Fasta = {seq.name: seq.seq for seq in idx}
-        knownFa[fastaPath] = seqs
+        knownFa[fastaPathNormalized] = seqs
 
-    return knownFa[fastaPath]
+    result = knownFa[fastaPathNormalized]
+    cache = (fastaPath, result)
+    return result
 
 
 @overload
