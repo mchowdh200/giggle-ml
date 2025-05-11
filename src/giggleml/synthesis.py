@@ -34,8 +34,6 @@ chrmNames = [f"chr{i+1}" for i, _ in enumerate(chrmSizes)]
 chrmNames[22] = "chrX"
 chrmNames[23] = "chrY"
 
-print("Using chromosome structure:", list(zip(chrmNames, chrmSizes)))
-
 
 class Chromosome:
     def __init__(self, blockSize):
@@ -83,11 +81,12 @@ class Chromosome:
 
 def synthesize(fastaOut, outFiles, seqLenMin, seqLenMax, seqPerUniverse, seed):
     random.seed(seed)
+    print("Using chromosome structure:", list(zip(chrmNames, chrmSizes)))
 
     # ---------------- Synthesize intervals ----------------
     print("Synthesizing intervals...")
     universes = []
-    for _ in range(outFiles):
+    for _ in range(len(outFiles)):
         univ = []
 
         for _ in range(seqPerUniverse):
@@ -109,6 +108,11 @@ def synthesize(fastaOut, outFiles, seqLenMin, seqLenMax, seqPerUniverse, seed):
         print("Building universe", univId)
 
         for regId, (chrmId, start, end) in enumerate(univ):
+            # extra padding
+            size = end - start
+            start = max(0, start - size)
+            end = min(chrmSizes[chrmId], end + size)
+
             if regId % 1000 == 0:
                 dt = time() - t0
                 eta = (dt / (regId + 1)) * (seqPerUniverse - regId)
@@ -137,4 +141,3 @@ def synthesize(fastaOut, outFiles, seqLenMin, seqLenMax, seqPerUniverse, seed):
             out.append(chrm.fasta_format(chrmName))
             out.append("\n")
         f.write("".join(out))
-

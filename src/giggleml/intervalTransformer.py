@@ -1,7 +1,8 @@
+import math
 import os
 from collections.abc import Callable, Iterable, Sequence
 from functools import cached_property
-from typing import Protocol, final
+from typing import Protocol, final, override
 
 import numpy as np
 
@@ -17,6 +18,7 @@ class IntervalTransform(Protocol):
     def __call__(self, interval: GenomicInterval) -> Iterable[GenomicInterval]: ...
 
 
+@final
 class ChunkMax:
     def __init__(self, maxLen: int):
         self.maxLen: int = maxLen
@@ -29,9 +31,92 @@ class ChunkMax:
             yield ((interval[0], interval[1] + start, interval[1] + end))
 
 
-class Nothing:
-    def __call__(self, interval: GenomicInterval) -> Iterable[GenomicInterval]:
-        yield interval
+@final
+class Translate(IntervalTransform):
+    def __init__(self, offset: int = 0):
+        super().__init__()
+        self.offset = offset
+
+    @override
+    def __call__(self, item: GenomicInterval) -> Iterable[GenomicInterval]:
+        chrm, start, end = item
+        yield (chrm, start + self.offset, end + self.offset)
+
+
+@final
+class Swell(IntervalTransform):
+    def __init__(self, swellFactor: float = 0.5):
+        super().__init__()
+        self.swellFactor = swellFactor
+
+    @override
+    def __call__(self, item: GenomicInterval) -> Iterable[GenomicInterval]:
+        chrm, start0, end0 = item
+        size0 = end0 - start0
+        size = round(self.swellFactor * size0)
+        start = round((start0 + end0) / 2 - size / 2)
+        yield chrm, start, start + size
+
+
+@final
+class Split(IntervalTransform):
+    def __init__(self, factor: int = 3):
+        super().__init__()
+        if factor < 1:
+            raise ValueError("Split factor must be at least 1")
+        self.factor = factor
+
+    @override
+    def __call__(self, item: GenomicInterval) -> Iterable[GenomicInterval]:
+        chrm, start, end = item
+        size = end - start
+
+        if size < self.factor:
+            yield item
+            return
+
+        base, remainder = divmod(size, self.factor)
+        start2 = start
+
+        for i in range(self.factor):
+            size2 = base + 1 if i < remainder else base
+            end2 = start2 + size2
+            yield (chrm, start2, end2)
+            start2 = end2
+
+
+@final
+class Slide(IntervalTransform):
+    """
+    Eg,
+
+    steps = 4,
+    original interval:  |-------|
+    yields:             |-------|
+                          |-------|
+                             |-------|
+                                |-------|
+                        33%  ^--^
+
+    where the first interval has an overlap of 1,
+    the last interval has an overlap of 0,
+    and the spacing between intervals is (original size) / (steps-1)
+    """
+
+    def __init__(self, steps: int = 11):
+        super().__init__()
+        self.steps = steps
+
+    @override
+    def __call__(self, item: GenomicInterval) -> Iterable[GenomicInterval]:
+        chrm, start, end = item
+        size = end - start
+        stride = size / (self.steps - 1)
+
+        for i in range(self.steps):
+            start2 = round(start + i * stride)
+            end2 = round(end + i * stride)
+            yield chrm, start2, end2
 
 
 # =================================
@@ -48,17 +133,22 @@ class IntervalTransformer:
     IntervalDataset. The Transform(s) from an old interval can create new
     intervals or delete intervals, but not merge intervals. Thus each element in
     the new dataset maps to exactly one base element.
+
+    @param lengthLimit: can be used to instill an arbitrary length limit to the
+    oldDataset
     """
 
     def __init__(
         self,
         oldDataset: IntervalDataset,
         transforms: Sequence[IntervalTransform] | IntervalTransform,
+        lengthLimit: int | None = None,
     ):
         if not isinstance(transforms, Sequence):
             transforms = [transforms]
         self.transforms = transforms
         self.oldDataset = oldDataset
+        self._oldLength = lengthLimit or len(oldDataset)
 
         self._built: bool = False
         self._newIntervals: list[GenomicInterval]
@@ -79,10 +169,10 @@ class IntervalTransformer:
             return
 
         results = list()
-        toMap: list[list[int]] = [list()] * len(self.oldDataset)
+        toMap: list[list[int]] = [list()] * self._oldLength
         fromMap: list[int] = list()
 
-        for i in range(len(self.oldDataset)):
+        for i in range(self._oldLength):
             oldInterval = self.oldDataset[i]
             newIntervals = list(self.transform(oldInterval))
             j = len(results)
@@ -94,6 +184,25 @@ class IntervalTransformer:
         self._toIdx = toMap
         self._fromIdx = fromMap
         self._built = True
+
+    @cached_property
+    def _length(self):
+        total = 0
+
+        for i in range(self._oldLength):
+            interval = self.oldDataset[i]
+            growth = len(list(self.transform(interval)))
+            total += growth
+
+        return total
+
+    def __len__(self):
+        """
+        The length of the newDataset. Can be used to compute it's length in a
+        slightly less expensive way than outright calling build(.) or
+        len(.newDataset)
+        """
+        return self._length
 
     def getNewIntervals(self):
         """
@@ -107,17 +216,23 @@ class IntervalTransformer:
 
     @cached_property
     def newDataset(self) -> LateIntervalDataset:
-        return LateIntervalDataset(self.getNewIntervals, self.oldDataset.associatedFastaPath)
+        return LateIntervalDataset(
+            self.getNewIntervals, self.__len__, self.oldDataset.associatedFastaPath
+        )
 
-    @cached_property
-    def toIdx(self):
+    def forwardIdx(self, oldIdx: int):
+        """
+        Convert an oldDataset index forward to the newDataset
+        """
         self.build()
-        return self._toIdx
+        return self._toIdx[oldIdx]
 
-    @cached_property
-    def fromIdx(self):
+    def backwardIdx(self, newIdx: int):
+        """
+        Convert a newDataset index backward to the oldDataset
+        """
         self.build()
-        return self._fromIdx
+        return self._fromIdx[newIdx]
 
     def backwardTransform(
         self, memmap: np.memmap, aggregator: Callable[[np.ndarray], np.ndarray]
@@ -146,15 +261,18 @@ class IntervalTransformer:
 
         backPath = frontPath + ".temp"
         backShape = memmap.shape
-        backShape = (len(self.oldDataset), backShape[1])
+        backShape = (self._oldLength, backShape[1])
         dtype = memmap.dtype
         backMem = np.memmap(backPath, dtype=dtype, mode="w+", shape=backShape)
 
         memmap.flush()
         j = 0
 
-        for i in range(len(self.oldDataset)):
-            frontCount = len(self.toIdx[i])
+        # we are about to access _toIdx
+        self.build()
+
+        for i in range(self._oldLength):
+            frontCount = len(self._toIdx[i])
             slice = memmap[j : j + frontCount]
             aggregate = aggregator(slice)
             j += frontCount

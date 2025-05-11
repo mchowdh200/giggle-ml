@@ -15,6 +15,8 @@ def testPipeline():
 
     assert CountACGT(10).maxSeqLen == 10  # to keep tests consistent
 
+    # TODO: needs way more testing examples
+
     pipeline = EmbedPipeline(embedModel=CountACGT(), batchSize=2, workerCount=2)
     bed = BedDataset("tests/test.bed", "tests/test.fa")
     results = pipeline.embed(bed, "tests/test_out.tmp.npy").data

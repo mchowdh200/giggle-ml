@@ -3,7 +3,6 @@ import numpy as np
 from giggleml.dataWrangling import fasta
 from giggleml.dataWrangling.intervalDataset import BedDataset
 from giggleml.dataWrangling.listDataset import ListDataset
-from giggleml.dataWrangling.slidingWindowDataset import SlidingWindowDataset
 from giggleml.dataWrangling.unifiedDataset import UnifiedDataset
 
 
