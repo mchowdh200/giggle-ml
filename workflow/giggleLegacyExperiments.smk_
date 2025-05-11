@@ -116,7 +116,7 @@ experiments = [
 
 for exp in experiments:
     # TODO: repeatedly passing these parameters is
-    #  cumbersome: consolidate information into 
+    #  cumbersome: consolidate information into
     #  a serialized dataset(s)?
     expName = exp['name']
     k = exp['k']
@@ -128,10 +128,10 @@ for exp in experiments:
     queryTranslation = exp['queryTranslation']
 
     dataDir = config["dataDir"]
-    
+
     rule:
         name:
-            # Note that this is NOT a wildcard!
+            # Note that this is NOT a wildcard
             f"embedsAfterTransform_{expName}"
         input:
             queryIntervals = f"{dataDir}/giggleBench/query.bed",
@@ -156,7 +156,7 @@ for exp in experiments:
                 sampleChunkAmnt,
                 queryTranslation
             )
-            
+
     rule:
         name:
             f"giggleBenchmark_{expName}"
@@ -185,5 +185,5 @@ for exp in experiments:
                 sampleChunkAmnt,
                 queryTranslation
             )
-            
-            
+
+
