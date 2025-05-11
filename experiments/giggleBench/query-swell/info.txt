@@ -1,0 +1,5 @@
+date: 2025-05-08 06:04:10.074999
+experiment: {'name': 'query-swell', 'k': 200, 'querySwellFactor': 2, 'queryChunkAmnt': 1, 'sampleSwellFactor': 1, 'sampleChunkAmnt': 1, 'queryTranslation': 0}
+model: HyenaDNA(1k)
+hitCount: 269
+groundTruth: 6215
