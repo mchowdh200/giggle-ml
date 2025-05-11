@@ -1,5 +1,7 @@
 import os
+import time
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Callable, final
 
 import numpy as np
@@ -57,19 +59,18 @@ class GpuMaster:
         nextIdx = 0
 
         for i, batch in enumerate(dataLoader):
-            outputs = self.model.embed(batch).to("cpu", non_blocking=True)
+            outputs = self.model.embed(batch).to("cpu")
             finalIdx = nextIdx + len(outputs)
 
             assert finalIdx <= len(outFile)
-
-            if i >= 4:
-                break
 
             outFile[nextIdx:finalIdx] = outputs.numpy()
             nextIdx += len(outputs)
 
             if i % 50 == 0:
                 rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
+
+        rprint(f"Batch: {len(dataLoader)}\t/ {len(dataLoader)}")
 
         # "close" the memmap
         outFile.flush()
@@ -85,71 +86,133 @@ class GpuMaster:
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "12356"
         backendType = "nccl" if torch.cuda.is_available() else "gloo"
-        dist.init_process_group(backendType, rank=rank, world_size=self.workerCount)
+        device = guessDevice(rank)
+        dist.init_process_group(
+            backendType,
+            rank=rank,
+            world_size=self.workerCount,
+            device_id=(device if device.type == "cuda" else None),
+        )
 
         if not dist.is_initialized():
             raise RuntimeError("Process group could not initialized")
+
+        dist.barrier()
 
         if rank == 0:
             print("Starting inference.")
 
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
-        device = guessDevice(rank)
+        fasta: str | None = None
+
+        for dataset in datasets:
+            datasetFasta = dataset.associatedFastaPath
+            if fasta is None:
+                fasta = datasetFasta
+            elif fasta != datasetFasta:
+                # TODO: this constraint could be avoided
+                raise ValueError("Expecting all datasets to have same fasta path")
+
+        masterDataset = UnifiedDataset[GenomicInterval](datasets)
+
         model = self.model.to(device)
         model.to(device)
         wantsSeq = self.model.wants == "sequences"
         eDim = self.model.embedDim
 
-        for i, dataset, outPath in zip(range(len(datasets)), datasets, outPaths):
-            if wantsSeq:
-                if dataset.associatedFastaPath is None:
-                    raise ValueError("Unable to map to fasta; missing associatedFastaPath")
-                collate = FastaCollate(dataset.associatedFastaPath)
-            else:
-                collate = passCollate
+        if wantsSeq:
+            if fasta is None:
+                raise ValueError("Unable to map to fasta; missing associatedFastaPath")
+            collate = FastaCollate(fasta)
+        else:
+            collate = passCollate
 
-            blockSampler = BlockDistributedSampler(dataset, self.workerCount, rank)
-            sampleCount = len(blockSampler)
-            offset = blockSampler.lower * eDim * 4  # (4 bytes per float32)
-            outFile = np.memmap(outPath, np.float32, "r+", offset, shape=(sampleCount, eDim))
+        # with torch.profiler.profile(
+        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        #     on_trace_ready=torch.profiler.tensorboard_trace_handler(f"logs/rank_{rank}"),
+        #     record_shapes=True,
+        #     profile_memory=True,
+        #     with_stack=True,
+        #     with_flops=True,
+        #     with_modules=True,
+        # ) as prof:
+        blockSampler = BlockDistributedSampler(masterDataset, self.workerCount, rank)
+        sampleCount = len(blockSampler)
+        offset = blockSampler.lower * eDim * 4  # (4 bytes per float32)
+        masterOutPath = Path(outPaths[0]).parent / "wip.tmp.npy"
+        masterOutFile = np.memmap(
+            masterOutPath, np.float32, "r+", offset, shape=(sampleCount, eDim)
+        )
 
-            dataLoader = DataLoader(
-                dataset,
-                batch_size=self.batchSize,
-                sampler=blockSampler,
-                shuffle=False,
-                pin_memory=True,
-                num_workers=self.subWorkerCount,
-                persistent_workers=self.subWorkerCount != 0,  # (usually True) -- crucial
-                collate_fn=collate,
-            )
+        dataLoader = DataLoader(
+            masterDataset,
+            batch_size=self.batchSize,
+            sampler=blockSampler,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=self.subWorkerCount,
+            persistent_workers=self.subWorkerCount != 0,  # (usually True) -- crucial
+            collate_fn=collate,
+        )
 
-            self._inferLoop(
-                rank,
-                dataLoader,
-                outFile,
-            )
+        self._inferLoop(
+            rank,
+            dataLoader,
+            masterOutFile,
+        )
+
+        dist.barrier()  # INFO: inference complete.
+        #                 now beginning separation of outputs
+        if rank == 0:
+            print("Starting post-processing.")
+
+        # we are splitting up embeds from masterOutFile into separate memmaps
+        # based on the distribution of datasets. Each worker is responsible for
+        # the datasets they implicitly completed.
+
+        setIdxStart = masterDataset.listIdxOf(blockSampler.lower)
+        setIdxEnd = masterDataset.listIdxOf(blockSampler.upper)
+
+        #                                     (1)     (2)     (3)
+        # for datasets full of intervals,   [----] [-------] [---]
+        # the sampler can split datasets:   |==========|=========|
+        # so memmap init works like:        (rank1)(    rank2    )
+
+        # since sometimes a rank might need to write some intervals preparred by
+        # rank-1, we need to remap masterOutFile
+        masterOutFile.flush()
+        del masterOutFile
+        masterSize = masterDataset.sums[setIdxEnd] - masterDataset.sums[setIdxStart]
+        masterOutFile = np.memmap(
+            masterOutPath,
+            np.float32,
+            "r",
+            offset=masterDataset.sums[setIdxStart] * eDim * 4,
+            shape=(masterSize, eDim),
+        )
+
+        for setIdx in range(setIdxStart, setIdxEnd):
+            size = len(datasets[setIdx])
+            outPath = outPaths[setIdx]
+
+            # reorganize data
+            i = masterDataset.sums[setIdx] - masterDataset.sums[setIdxStart]
+            content = masterOutFile[i : i + size]
+            mmap = np.memmap(outPath, np.float32, "w+", shape=(size, eDim))
+            mmap[:] = content
+            mmap.flush()
+
+            if post is not None:
+                # post processing
+                postCall = post[setIdx]
+                postCall(mmap)
 
             if rank == 0:
-                rprint(f"\t- Dataset {i+1} / {len(datasets)}")
+                if (100 * setIdx // len(outPaths)) % 10 == 0:  # roughly every 10%
+                    rprint(f"{setIdx+1} / {len(outPaths)}")
 
-        dist.barrier()  # INFO: inference complete
-
-        if rank == 0:
-            if post is not None:
-                print("Starting post-processing.")
-
-                for i, (dataset, outPath, postCall) in enumerate(zip(datasets, outPaths, post)):
-                    if (100 * i // len(outPaths)) % 10 == 0:  # roughly every 10%
-                        rprint(f"{i+1} / {len(outPaths)}")
-
-                    size = len(dataset)
-                    outFile = np.memmap(outPath, np.float32, "r", shape=(size, eDim))
-                    postCall(outFile)
-
-                rprint(f"{len(outPaths)} / {len(outPaths)}")
-
+        rprint(f"{len(outPaths)} / {len(outPaths)}")
         dist.barrier()
         dist.destroy_process_group()
 
@@ -166,13 +229,16 @@ class GpuMaster:
         assert len(datasets) == len(outPaths)
 
         eDim = self.model.embedDim
-
-        # necessary to initialize output space before workers map to specific regions
-        for dataset, outPath in zip(datasets, outPaths):
-            outFile = np.memmap(outPath, np.float32, "w+", shape=(len(dataset), eDim))
-            outFile.flush()
-            del outFile
+        totalLen = sum([len(dataset) for dataset in datasets])
+        masterOut = Path(outPaths[0]).parent / "wip.tmp.npy"
+        mmTotal = np.memmap(masterOut, np.float32, "w+", shape=(totalLen, eDim))
+        mmTotal[:] = 0
+        mmTotal.flush()
+        del mmTotal
 
         # big operation
         args = (datasets, outPaths, post)
         mp.spawn(self._worker, args=args, nprocs=self.workerCount, join=True)  # spawn method
+
+        # working file space
+        os.remove(masterOut)
