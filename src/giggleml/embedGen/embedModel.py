@@ -1,4 +1,4 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from functools import cached_property
 from typing import Any, ClassVar, Protocol, Self, cast, final
@@ -30,6 +30,10 @@ class EmbedModel(ABC):
 
     def to(self, device: Device) -> Self: ...
 
+    @abstractmethod
+    @override
+    def __repr__(self) -> str: ...
+
 
 # ===================
 #    HyenaDNA
@@ -51,11 +55,12 @@ class HyenaDNA(EmbedModel):
         """
 
         details = {
-            "1k": (1024, "LongSafari/hyenadna-tiny-1k-seqlen-hf", 128),
-            "32k": (32768, "LongSafari/hyenadna-small-32k-seqlen-hf", 256),
-            "160k": (160000, "LongSafari/hyenadna-medium-160k-seqlen-hf", 256),
-            "450k": (450000, "LongSafari/hyenadna-medium-450k-seqlen-hf", 256),
-            "1m": (1_000_000, "LongSafari/hyenadna-large-1m-seqlen-hf", 256),
+            "1k": (1024, "LongSafari/hyenadna-tiny-1k-seqlen-hf", 128, "e8c1eff"),
+            "16k": (16386, "LongSafari/hyenadna-tiny-16k-seqlen-d128-hf", 128, "d79fa37"),
+            "32k": (32768, "LongSafari/hyenadna-small-32k-seqlen-hf", 256, "8fe770c"),
+            "160k": (160000, "LongSafari/hyenadna-medium-160k-seqlen-hf", 256, "7ebf717"),
+            "450k": (450000, "LongSafari/hyenadna-medium-450k-seqlen-hf", 256, "42dedd4"),
+            "1m": (1_000_000, "LongSafari/hyenadna-large-1m-seqlen-hf", 256, "0a629ab"),
         }
 
         if size not in details:
@@ -63,10 +68,13 @@ class HyenaDNA(EmbedModel):
                 f"Unsupported size {size}." f"Supported sizes are {list(details.keys())}"
             )
 
-        maxSeqLen, name, eDim = details[size]
+        maxSeqLen, name, eDim, rev = details[size]
+
+        self.rev = rev
         self.maxSeqLen = maxSeqLen
         self.checkpoint = name
         self.embedDim: int = eDim
+        self.sizeType = size  # used for __repr__ only
         self._device: Device = None
 
     @override
@@ -80,6 +88,7 @@ class HyenaDNA(EmbedModel):
             self.checkpoint,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
+            code_revision=self.rev,
         )
         model.eval()
         # WARN: HyenaDNA cannot be torch.compile(.)ed because the Hyena layers
@@ -101,6 +110,8 @@ class HyenaDNA(EmbedModel):
         for item in batch:
             if len(item) > self.maxSeqLen:
                 raise ValueError("Sequence exceeds max length; refusing to truncate.")
+
+        batch = [item.upper() for item in batch]
 
         with torch.no_grad():
             # INFO: 1. tokenization
@@ -128,24 +139,30 @@ class HyenaDNA(EmbedModel):
 
         # INFO: 3. mean pooling
 
-        # [ 1, 2, 3 ]
-        seqLens = torch.Tensor([len(item) for item in batch]).to(dev)
-        # -> [ [1], [2], [3] ]
-        seqLens = seqLens.unsqueeze(dim=1)
-        # [ 0 1 2 3 4 ... maxLen ]
-        indices = torch.arange(maxSeqLen, device=dev)
-        # [ [10000...], [11000...], [11100...] ]
-        mask = (indices < seqLens).float()
-        # to match the hidden dimension along the sequence length
-        mask = mask.unsqueeze(-1).expand(hidden.shape)
+        # # [ 1, 2, 3 ]
+        # seqLens = torch.Tensor([len(item) for item in batch]).to(dev)
+        # # -> [ [1], [2], [3] ]
+        # seqLens = seqLens.unsqueeze(dim=1)
+        # # [ 0 1 2 3 4 ... maxLen ]
+        # indices = torch.arange(maxSeqLen, device=dev)
+        # # [ [10000...], [11000...], [11100...] ]
+        # mask = (indices < seqLens).float()
+        # # to match the hidden dimension along the sequence length
+        # mask = mask.unsqueeze(-1).expand(hidden.shape)
+        #
+        # # zero values corresponding to padded regions
+        # hidden = hidden * mask
+        # # mean aggregation, removes seqMax dimension
+        # hidden = torch.sum(hidden, dim=1)
+        # # clamp ensures no divide by zero issue
+        # hidden /= torch.clamp(seqLens, min=1e-9)
 
-        # zero values corresponding to padded regions
-        hidden = hidden * mask
-        # mean aggregation, removes seqMax dimension
-        hidden = torch.sum(hidden, dim=1)
-        # clamp ensures no divide by zero issue
-        hidden /= torch.clamp(seqLens, min=1e-9)
+        hidden = torch.mean(hidden.float(), dim=1)
         return hidden  # pyright: ignore[reportReturnType]
+
+    @override
+    def __repr__(self):
+        return f"HyenaDNA({self.sizeType})"
 
 
 # ===================
@@ -238,6 +255,10 @@ class CountACGT(EmbedModel):
             results.append(counts)
         return torch.FloatTensor(results)
 
+    @override
+    def __repr__(self):
+        return f"CountACGT({self.maxSeqLen})"
+
 
 @final
 class TrivialModel(EmbedModel):
@@ -264,3 +285,7 @@ class TrivialModel(EmbedModel):
             results.append(end - start)
 
         return cast(torch.FloatTensor, torch.FloatTensor(results).unsqueeze(-1))
+
+    @override
+    def __repr__(self):
+        return f"TrivialModel({self.maxSeqLen})"
