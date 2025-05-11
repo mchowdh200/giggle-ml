@@ -131,11 +131,7 @@ class GpuMaster:
         # with torch.profiler.profile(
         #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
         #     on_trace_ready=torch.profiler.tensorboard_trace_handler(f"logs/rank_{rank}"),
-        #     record_shapes=True,
-        #     profile_memory=True,
         #     with_stack=True,
-        #     with_flops=True,
-        #     with_modules=True,
         # ) as prof:
         blockSampler = BlockDistributedSampler(masterDataset, self.workerCount, rank)
         sampleCount = len(blockSampler)
@@ -230,6 +226,7 @@ class GpuMaster:
 
         eDim = self.model.embedDim
         totalLen = sum([len(dataset) for dataset in datasets])
+        masterOut = Path(outPaths[0]).parent.mkdir(parents=True, exist_ok=True)
         masterOut = Path(outPaths[0]).parent / "wip.tmp.npy"
         mmTotal = np.memmap(masterOut, np.float32, "w+", shape=(totalLen, eDim))
         mmTotal[:] = 0

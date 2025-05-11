@@ -4,6 +4,7 @@ from os.path import isfile
 from typing import final, overload
 
 import numpy as np
+import torch
 
 from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
@@ -17,17 +18,22 @@ from .gpuMaster import GpuMaster
 @final
 class EmbedPipeline:
     def __init__(
-        self, embedModel: EmbedModel, batchSize: int, workerCount: int, subWorkerCount: int = 0
+        self,
+        embedModel: EmbedModel,
+        batchSize: int,
+        workerCount: int | None = None,
+        subWorkers: int = 0,
     ):
         """
-        @param workerCount: should be <= gpu count
+        @param workerCount: should be <= gpu count. None implies torch.accelerator.device_count()
         @param subWorkerCount: corresponds to pytorch::DataLoader::num_worker
         argument -- used to prepare subprocesses for batch construction.
         zero
         """
         self.model: EmbedModel = embedModel
         self.batchSize: int = batchSize
-        self.gpuMaster = GpuMaster(embedModel, batchSize, workerCount, subWorkerCount)
+        workerCount = workerCount or torch.accelerator.device_count()
+        self.gpuMaster = GpuMaster(embedModel, batchSize, workerCount, subWorkers)
 
     @overload
     def embed(

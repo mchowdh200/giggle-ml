@@ -57,7 +57,7 @@ rule synthesizeSequences:
         synthesize(output.fasta, [output.intervals], params.minLen,
                    params.maxLen, params.total, params.seed)
         # 2. generate embeddings
-        EmbedPipeline(params.model, 1024, 4)\
+        EmbedPipeline(params.model, 1024)\
           .embed(BedDataset(output.intervals, output.fasta), output.embeds)
 
 
@@ -90,9 +90,8 @@ rule embedQualityTests:
         # workerCount = 1
         # subWorkerCount = 0
         batchSize = 1024
-        workerCount = 4
         subWorkerCount = 2
-        pipeline = EmbedPipeline(params.model, batchSize, workerCount, subWorkerCount)
+        pipeline = EmbedPipeline(params.model, batchSize, subWorkers=subWorkerCount)
 
         intervals = BedDataset(input.intervals, input.fasta)
         syntheticIntervals = BedDataset(input.syntheticIntervals, input.syntheticFasta)
@@ -151,7 +150,6 @@ rule embedQualityTests:
 #         model = HyenaDNA("32k")
 #     run:
 #         batchSize = 64
-#         workerCount = 4
 #         subWorkerCount = 4
 #
 #         inputData = [
@@ -160,7 +158,7 @@ rule embedQualityTests:
 #         ]
 #
 #         # big job
-#         EmbedPipeline(params.model, batchSize, workerCount, subWorkerCount) \
+#         EmbedPipeline(params.model, batchSize, subWorkers=subWorkerCount) \
 #           .embed(intervals=inputData, out=output.embeds)
 #         # little job (produce $master)
 #         meanEmbedDict.build(output.embeds, output.master)

@@ -36,15 +36,14 @@ def build(roadmapDir: str, hg19: str):
     outPaths = [f"{roadmapDir}/embeds/{name}.npy" for name in names]
 
     # INFO: inferene parameters
-    batchSize = 64
-    workerCount = 4
-    subWorkerCount = 2
+    batchSize = 256
+    subWorkerCount = 4
     model = HyenaDNA("32k")
     # model = TrivialModel(32768)
 
     # big job
     inputData = [BedDataset(bed, associatedFastaPath=hg19) for bed in beds]
-    EmbedPipeline(model, batchSize, workerCount, subWorkerCount).embed(
+    EmbedPipeline(model, batchSize, subWorkers=subWorkerCount).embed(
         intervals=inputData, out=outPaths
     )
 
