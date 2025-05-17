@@ -6,19 +6,13 @@ import numpy as np
 
 from giggleml.dataWrangling.intervalDataset import BedDataset
 from giggleml.dataWrangling.listDataset import ListDataset
-from giggleml.intervalTransformer import (
-    ChunkMax,
-    IntervalTransformer,
-    Slide,
-    Split,
-    Swell,
-    Translate,
-)
+from giggleml.intervalTransformer import IntervalTransformer
+from giggleml.intervalTransforms import ChunkMax, IntervalTransform, Slide, Split, Swell, Translate
 from giggleml.utils.types import GenomicInterval
 
 
 @final
-class Multiply:
+class Multiply(IntervalTransform):
     def __init__(self, count: int):
         self.count = count
 

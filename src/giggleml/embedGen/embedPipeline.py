@@ -8,7 +8,8 @@ import torch
 
 from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
-from ..intervalTransformer import ChunkMax, IntervalTransform, IntervalTransformer
+from ..intervalTransformer import IntervalTransformer
+from ..intervalTransforms import ChunkMax, IntervalTransform
 from . import embedIO
 from .embedIO import Embed, EmbedMeta
 from .embedModel import EmbedModel

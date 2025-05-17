@@ -11,7 +11,8 @@ from matplotlib.ticker import MultipleLocator
 from analysis.utils import confInt95
 from giggleml.dataWrangling.intervalDataset import IntervalDataset
 from giggleml.embedGen.embedPipeline import EmbedPipeline
-from giggleml.intervalTransformer import IntervalTransformer, Slide
+from giggleml.intervalTransformer import IntervalTransformer
+from giggleml.intervalTransforms import Slide
 from giggleml.utils.types import MmapF32
 
 
