@@ -97,21 +97,32 @@ class Slide(IntervalTransform):
                              |-------|
                                 |-------|
                         33%  ^--^
+    33% corresponds to strideNumber=3 as in 1/strideNumber overlap% each step
 
     where the first interval has an overlap of 1,
     the last interval has an overlap of 0,
     and the spacing between intervals is (original size) / (steps-1)
+
+    The direction to slide: originalInterval.start % 2 == 0 --> right
     """
 
-    def __init__(self, steps: int = 11):
+    def __init__(self, steps: int = 11, strideNumber: int | None = None):
+        """
+        @param strideNumber: defaults to (steps-1)
+        """
+
         super().__init__()
         self.steps = steps
+        self.strideNumber = strideNumber or (steps - 1)
 
     @override
     def __call__(self, item: GenomicInterval) -> Iterable[GenomicInterval]:
         chrm, start, end = item
         size = end - start
-        stride = size / (self.steps - 1)
+        stride = size / self.strideNumber
+
+        if start % 2 == 1:
+            stride *= -1
 
         for i in range(self.steps):
             start2 = round(start + i * stride)
@@ -148,7 +159,10 @@ class IntervalTransformer:
             transforms = [transforms]
         self.transforms = transforms
         self.oldDataset = oldDataset
-        self._oldLength = lengthLimit or len(oldDataset)
+
+        self._oldLength = (
+            min(lengthLimit, len(oldDataset)) if lengthLimit is not None else len(oldDataset)
+        )
 
         self._built: bool = False
         self._newIntervals: list[GenomicInterval]

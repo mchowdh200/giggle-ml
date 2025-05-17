@@ -5,6 +5,7 @@ import datetime
 from typing import cast
 from pathlib import Path
 
+from analysis.meanSubsampling import meanSubsamplingTest
 from giggleml.synthesis import synthesize
 from giggleml.utils.types import MmapF32
 from giggleml.utils.printTo import printTo
@@ -33,6 +34,29 @@ rule all:
         statsFile = f"{config.experimentsDir}/statTests/testResults.txt",
         overlapPlot = expand(f"{config.experimentsDir}/giggleBench/{{expName}}/recallByOverlap.png", expName=expNames),
         geOverlapPlot = expand(f"{config.experimentsDir}/giggleBench/{{expName}}/recallByGEOverlap.png", expName=expNames)
+        meanSubsampling = f"{config.experimentsDir}/statTests/meanSubsampling.png"
+
+
+rmeSmallPattern = f"{DATA}/rme_small/beds/{id}.bed"
+rmeSmallNames, = glob_wildcards(rmeSmallPattern)
+
+
+rule meanSubsamplingTest:
+    input:
+        beds = expand(rmeSmallPattern, id=rmeSmallNames),
+        fasta = f"{HG}/hg19.fa"
+    output:
+        fig = f"{config.experimentsDir}/statTests/meanSubsampling.png",
+    params:
+        model = HyenaDNA('32k'),
+        seed = 31415,
+    run:
+        batchSize = 64
+        pipeline = EmbedPipeline(params.model, batchSize)
+        fig = meanSubsamplingTest(pipeline, input.beds)
+        fig.show()
+        Path(output.fig).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output.fig, dpi=300)
 
 
 rule synthesizeSequences:
