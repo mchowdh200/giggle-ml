@@ -22,7 +22,7 @@ export PYTHONUNBUFFERED=1
 
 data="/cache/siwa3657/data"
 # data="data"
-time python3 scripts/roadmapEpigenomicsEmbeds.py $data/roadmap_epigenomics $data/hg/hg19.fa
-# time snakemake --cores 1 experiments/statTests/swtSynth.png
+# time python3 scripts/roadmapEpigenomicsEmbeds.py $data/roadmap_epigenomics $data/hg/hg19.fa
+time snakemake --cores 1 all
 
 echo Complete.
