@@ -51,14 +51,14 @@ class EmbedPipeline:
         intervals: Sequence[IntervalDataset],
         out: Sequence[str],
         transforms: list[IntervalTransform] | None = None,
-    ) -> None: ...
+    ) -> Sequence[Embed]: ...
 
     def embed(
         self,
         intervals: Sequence[IntervalDataset] | IntervalDataset,
         out: Sequence[str] | str,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Embed | None:
+    ) -> Sequence[Embed] | Embed:
         if isinstance(intervals, IntervalDataset) != isinstance(out, str):
             raise ValueError("Expecting either both or neither of data & out to be sequences")
         if isinstance(intervals, IntervalDataset):
@@ -98,11 +98,13 @@ class EmbedPipeline:
         post = [DeChunk(transformer, meta) for transformer in transformers]
         self.gpuMaster.batch(newData, out, post)
 
-        # only the overload for single input, output returns a value
+        # all Embeds were already embed.IO.writeMeta(.) due to DeChunk
+        # so we need references and can avoid parsing because their meta is known
+        outEmbeds = [embedIO.Embed(path, meta) for path in out]
+
         if len(out) == 1:
-            size = len(intervals[0])
-            data = np.memmap(out[0], np.float32, "r", shape=(size, eDim))
-            return embedIO.Embed(data, meta)
+            return outEmbeds[0]
+        return outEmbeds
 
 
 @final

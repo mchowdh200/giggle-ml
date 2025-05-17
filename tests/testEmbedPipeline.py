@@ -19,9 +19,9 @@ def testPipeline():
 
     pipeline = EmbedPipeline(embedModel=CountACGT(), batchSize=2, workerCount=2)
     bed = BedDataset("tests/test.bed", "tests/test.fa")
-    results = pipeline.embed(bed, "tests/test_out.tmp.npy").data
+    embed = pipeline.embed(bed, "tests/test_out.tmp.npy")
 
-    assert len(results) == len(bed)
+    assert len(embed.data) == len(bed)
     # the second item 0-40 should have been split into
     #   [0-10), [10-20), [20-30), [30-40)
     #   that's
@@ -44,9 +44,7 @@ def testPipeline():
         [0.0, 0.0, 0.0, 5.0],
     ]
 
-    for result, expect in zip(results, expecting):
+    for result, expect in zip(embed.data, expecting):
         assert np.array_equal(result, np.array(expect))
 
-    with contextlib.suppress(FileNotFoundError):
-        os.remove("tests/test_out.tmp.npy")
-        os.remove("tests/test_out.tmp.npy.meta")
+    embed.delete()
