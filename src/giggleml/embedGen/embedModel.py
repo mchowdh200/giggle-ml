@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from functools import cached_property
 from typing import Any, ClassVar, Protocol, Self, cast, final
 
+import numpy as np
 import torch
 from torch.types import Device
 from transformers import AutoTokenizer
@@ -137,27 +138,28 @@ class HyenaDNA(EmbedModel):
         assert maxSeqLen == self.maxSeqLen
         assert hiddenDim == self.embedDim
 
-        # INFO: 3. mean pooling
+        # INFO: 3. masked mean pooling
 
-        # # [ 1, 2, 3 ]
-        # seqLens = torch.Tensor([len(item) for item in batch]).to(dev)
-        # # -> [ [1], [2], [3] ]
-        # seqLens = seqLens.unsqueeze(dim=1)
-        # # [ 0 1 2 3 4 ... maxLen ]
-        # indices = torch.arange(maxSeqLen, device=dev)
-        # # [ [10000...], [11000...], [11100...] ]
-        # mask = (indices < seqLens).float()
-        # # to match the hidden dimension along the sequence length
-        # mask = mask.unsqueeze(-1).expand(hidden.shape)
-        #
-        # # zero values corresponding to padded regions
-        # hidden = hidden * mask
-        # # mean aggregation, removes seqMax dimension
-        # hidden = torch.sum(hidden, dim=1)
-        # # clamp ensures no divide by zero issue
-        # hidden /= torch.clamp(seqLens, min=1e-9)
+        # [ 1, 2, 3 ]
+        seqLens = torch.Tensor([len(item) for item in batch]).to(dev)
+        # -> [ [1], [2], [3] ]
+        seqLens = seqLens.unsqueeze(dim=1)
+        # [ 0 1 2 3 4 ... maxLen ]
+        indices = torch.arange(maxSeqLen, device=dev)
+        # [ [10000...], [11000...], [11100...] ]
+        mask = (indices < seqLens).float()
+        # to match the hidden dimension along the sequence length
+        mask = mask.unsqueeze(-1).expand(hidden.shape)
+        mask = mask.flip(dims=[1])  # because HyenaDNA pre-pads
 
-        hidden = torch.mean(hidden.float(), dim=1)
+        # zero values corresponding to padded regions
+        hidden = hidden * mask
+        # mean aggregation, removes seqMax dimension
+        hidden = torch.sum(hidden, dim=1)
+        # clamp ensures no divide by zero issue
+        hidden /= torch.clamp(seqLens, min=1e-9)
+
+        # hidden = torch.mean(hidden.float(), dim=1)
         return hidden  # pyright: ignore[reportReturnType]
 
     @override
