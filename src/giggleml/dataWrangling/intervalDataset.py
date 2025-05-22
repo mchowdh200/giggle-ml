@@ -1,34 +1,25 @@
 import gzip
-from abc import ABC, abstractmethod
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from functools import cached_property
-from typing import Callable, final, override
-
-from torch.utils.data import Dataset
-from typing_extensions import override
+from typing import Callable, Protocol, final, override
 
 from ..utils.types import GenomicInterval, lazy
+from .kindDataset import KindDataset
 
 
-class IntervalDataset(Dataset[GenomicInterval], ABC):
-    associatedFastaPath: str | None
+class IntervalDataset(Protocol):
+    @property
+    def associatedFastaPath(self) -> str | None: ...
 
-    # bizzarely, __len__ is actually not defined in Dataset
-    @abstractmethod
     def __len__(self) -> int: ...
 
-    @override
-    @abstractmethod
     def __getitem__(self, idx: int) -> GenomicInterval: ...
 
-    def __iter__(self) -> Iterator[GenomicInterval]:
-        for i in range(len(self)):
-            yield self[i]
+    def __iter__(self) -> Iterator[GenomicInterval]: ...
 
 
 @lazy
-@final
-class LateIntervalDataset(IntervalDataset):
+class LateIntervalDataset(KindDataset[GenomicInterval]):
     """
     An IntervalDataset that treats the backing intervals with a lazy getter
     function. This enables it to be passed to other processes without incurring
@@ -43,8 +34,8 @@ class LateIntervalDataset(IntervalDataset):
         lazyLength: Callable[[], int] | int | None,
         associatedFastaPath: str | None,
     ):
-        self.lazyGetter = lazyGetter
-        self.lazyLength = lazyLength
+        self.lazyGetter: Callable[[], list[GenomicInterval]] = lazyGetter
+        self.lazyLength: Callable[[], int] | int | None = lazyLength
         self.associatedFastaPath: str | None = associatedFastaPath
 
     @cached_property
@@ -70,7 +61,7 @@ class LateIntervalDataset(IntervalDataset):
 
 
 @final
-class MemoryIntervalDataset(IntervalDataset):
+class MemoryIntervalDataset(KindDataset[GenomicInterval]):
     def __init__(
         self, intervals: Sequence[GenomicInterval], associatedFastaPath: str | None = None
     ):

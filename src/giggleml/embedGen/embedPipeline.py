@@ -60,9 +60,9 @@ class EmbedPipeline:
         out: Sequence[str] | str,
         transforms: list[IntervalTransform] | None = None,
     ) -> Sequence[Embed] | Embed:
-        if isinstance(intervals, IntervalDataset) != isinstance(out, str):
+        if isinstance(intervals, Sequence) == isinstance(out, str):
             raise ValueError("Expecting either both or neither of data & out to be sequences")
-        if isinstance(intervals, IntervalDataset):
+        if not isinstance(intervals, Sequence):
             intervals = [intervals]
         if isinstance(out, str):
             out = [out]
