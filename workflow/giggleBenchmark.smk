@@ -157,7 +157,7 @@ rule giggleBenchmark:
     # 2. create embeddings
     batchSize = 4096
     subWorkerCount = 2
-    pipeline = EmbedPipeline(params.model, batchSize, subWorkers=subWorkerCount)
+    pipeline = DirectPipeline(params.model, batchSize, subWorkers=subWorkerCount)
     queryEmbeds: MmapF32 = pipeline.embed(queryIT.newDataset, output.queryEmbeds).data
     sampleEmbeds: MmapF32 = pipeline.embed(sampleIT.newDataset, output.sampleEmbeds).data
 

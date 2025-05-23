@@ -26,7 +26,8 @@ rule roadmapEpigenomicsEmbeds:
         ]
 
         # big job
-        EmbedPipeline(params.model, batchSize, subWorkers=subWorkerCount) \
+        # TODO: update to TileIndex
+        DirectPipeline(params.model, batchSize, subWorkers=subWorkerCount) \
           .embed(intervals=inputData, out=output.embeds)
         # little job (produce $master)
         meanEmbedDict.build(output.embeds, output.master)

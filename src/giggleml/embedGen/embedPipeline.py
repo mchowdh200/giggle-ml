@@ -1,7 +1,8 @@
 import sys
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from os.path import isfile
-from typing import final, overload
+from typing import final, overload, override
 
 import numpy as np
 import torch
@@ -16,8 +17,33 @@ from .embedModel import EmbedModel
 from .gpuMaster import GpuMaster
 
 
-@final
-class EmbedPipeline:
+class EmbedPipeline(ABC):
+    @overload
+    def embed(
+        self,
+        intervals: IntervalDataset,
+        out: str,
+        transforms: list[IntervalTransform] | None = None,
+    ) -> Embed: ...
+
+    @overload
+    def embed(
+        self,
+        intervals: Sequence[IntervalDataset],
+        out: Sequence[str],
+        transforms: list[IntervalTransform] | None = None,
+    ) -> Sequence[Embed]: ...
+
+    @abstractmethod
+    def embed(
+        self,
+        intervals: Sequence[IntervalDataset] | IntervalDataset,
+        out: Sequence[str] | str,
+        transforms: list[IntervalTransform] | None = None,
+    ) -> Sequence[Embed] | Embed: ...
+
+
+class DirectPipeline(EmbedPipeline):
     def __init__(
         self,
         embedModel: EmbedModel,
@@ -34,7 +60,7 @@ class EmbedPipeline:
         self.model: EmbedModel = embedModel
         self.batchSize: int = batchSize
         workerCount = workerCount or torch.accelerator.device_count()
-        self.gpuMaster = GpuMaster(embedModel, batchSize, workerCount, subWorkers)
+        self.gpuMaster: GpuMaster = GpuMaster(embedModel, batchSize, workerCount, subWorkers)
 
     @overload
     def embed(
@@ -45,8 +71,6 @@ class EmbedPipeline:
     ) -> Embed: ...
 
     @overload
-    # this returns None because for large jobs, the OS may not be able to handle
-    # the amount of memmaps we would be returning.
     def embed(
         self,
         intervals: Sequence[IntervalDataset],
@@ -54,12 +78,14 @@ class EmbedPipeline:
         transforms: list[IntervalTransform] | None = None,
     ) -> Sequence[Embed]: ...
 
+    @override
     def embed(
         self,
         intervals: Sequence[IntervalDataset] | IntervalDataset,
         out: Sequence[str] | str,
         transforms: list[IntervalTransform] | None = None,
     ) -> Sequence[Embed] | Embed:
+
         if isinstance(intervals, Sequence) == isinstance(out, str):
             raise ValueError("Expecting either both or neither of data & out to be sequences")
         if not isinstance(intervals, Sequence):

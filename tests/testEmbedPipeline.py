@@ -5,7 +5,7 @@ import numpy as np
 
 from giggleml.dataWrangling.intervalDataset import BedDataset
 from giggleml.embedGen.embedModel import CountACGT
-from giggleml.embedGen.embedPipeline import EmbedPipeline
+from giggleml.embedGen.embedPipeline import DirectPipeline
 
 
 def testPipeline():
@@ -17,7 +17,7 @@ def testPipeline():
 
     # TODO: needs way more testing examples
 
-    pipeline = EmbedPipeline(embedModel=CountACGT(), batchSize=2, workerCount=2)
+    pipeline = DirectPipeline(embedModel=CountACGT(), batchSize=2, workerCount=2)
     bed = BedDataset("tests/test.bed", "tests/test.fa")
     embed = pipeline.embed(bed, "tests/test_out.tmp.npy")
 

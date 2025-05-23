@@ -17,7 +17,7 @@ from os.path import basename
 from giggleml.dataWrangling.intervalDataset import BedDataset
 from giggleml.embedGen import meanEmbedDict
 from giggleml.embedGen.embedModel import HyenaDNA
-from giggleml.embedGen.embedPipeline import EmbedPipeline
+from giggleml.embedGen.embedPipeline import DirectPipeline
 
 
 def build(roadmapDir: str, hg19: str):
@@ -43,7 +43,7 @@ def build(roadmapDir: str, hg19: str):
 
     # big job
     inputData = [BedDataset(bed, associatedFastaPath=hg19) for bed in beds]
-    EmbedPipeline(model, batchSize, subWorkers=subWorkerCount).embed(
+    DirectPipeline(model, batchSize, subWorkers=subWorkerCount).embed(
         intervals=inputData, out=outPaths
     )
 

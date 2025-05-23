@@ -11,7 +11,7 @@ from giggleml.synthesis import synthesize
 from giggleml.utils.types import MmapF32
 from giggleml.utils.printTo import printTo
 from giggleml.embedGen import meanEmbedDict
-from giggleml.embedGen.embedPipeline import EmbedPipeline
+from giggleml.embedGen.embedPipeline import DirectPipeline
 from giggleml.embedGen.embedModel import HyenaDNA, CountACGT, TrivialModel
 from giggleml.embedGen import embedIO
 from giggleml.dataWrangling.intervalDataset import BedDataset
@@ -51,10 +51,9 @@ rule meanSubsamplingTest:
         fig = f"{config.experimentsDir}/statTests/meanSubsampling.png",
     params:
         model = HyenaDNA('32k'),
-        seed = 31415,
     run:
         batchSize = 64
-        pipeline = EmbedPipeline(params.model, batchSize)
+        pipeline = DirectPipeline(params.model, batchSize)
         fig = meanSubsamplingTest(pipeline, input.beds)
         fig.show()
         Path(output.fig).parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +82,7 @@ rule synthesizeSequences:
         synthesize(output.fasta, [output.intervals], params.minLen,
                    params.maxLen, params.total, params.seed)
         # 2. generate embeddings
-        EmbedPipeline(params.model, 1024)\
+        DirectPipeline(params.model, 1024)\
           .embed(BedDataset(output.intervals, output.fasta), output.embeds)
 
 
@@ -116,7 +115,7 @@ rule embedQualityTests:
         # subWorkerCount = 0
         batchSize = 1024
         subWorkerCount = 2
-        pipeline = EmbedPipeline(params.model, batchSize, subWorkers=subWorkerCount)
+        pipeline = DirectPipeline(params.model, batchSize, subWorkers=subWorkerCount)
 
         intervals = BedDataset(input.intervals, input.fasta)
         syntheticIntervals = BedDataset(input.syntheticIntervals, input.syntheticFasta)
