@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from giggleml.intervalTransformer import IntervalTransformer
+from giggleml.utils.intervalArithmetic import intersect
 from giggleml.utils.types import GenomicInterval, MmapF32
 
 
@@ -51,28 +52,12 @@ class SimpleKNN:
         return None, knn_indices
 
 
-def intersection(x: GenomicInterval, y: GenomicInterval) -> GenomicInterval | None:
-    ch1, start1, end1 = x
-    ch2, start2, end2 = y
-
-    if ch1 != ch2:
-        return None
-
-    start = max(start1, start2)
-    end = min(end1, end2)
-
-    if start >= end:
-        return None
-
-    return (ch1, start, end)
-
-
 def overlapDegree(x: GenomicInterval, y: GenomicInterval) -> float:
     """
     100% (1) means the smaller interval is fully contained in the larger interval.
     """
 
-    z = intersection(x, y)
+    z = intersect(x, y)
 
     if z is None:
         return 0

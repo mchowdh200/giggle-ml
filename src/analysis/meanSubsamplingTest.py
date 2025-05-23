@@ -19,6 +19,8 @@ from giggleml.embedGen.embedPipeline import EmbedPipeline
 
 
 def meanSubsamplingTest(pipeline: EmbedPipeline, beds: Sequence[IntervalDataset]) -> Figure:
+    np.random.seed(3.14)
+
     fig, ax = plt.subplots()
     baseEmbeds = list()
 
@@ -75,5 +77,5 @@ def meanSubsamplingTest(pipeline: EmbedPipeline, beds: Sequence[IntervalDataset]
 
     ax.set_title("subsampling error")
     ax.set_ylabel("L2 distance from original")
-    ax.set_label("sampling percentage")
+    ax.set_xlabel("sampling percentage")
     return fig

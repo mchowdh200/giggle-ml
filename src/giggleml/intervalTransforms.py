@@ -1,6 +1,10 @@
 from abc import ABC
 from collections.abc import Iterable
-from typing import final, override
+from typing import Any, final, override
+
+import numpy as np
+
+from giggleml.utils.intervalArithmetic import intersect
 
 from .utils.types import GenomicInterval
 
@@ -120,3 +124,45 @@ class Slide(IntervalTransform):
             start2 = round(start + i * stride)
             end2 = round(end + i * stride)
             yield chrm, start2, end2
+
+
+@final
+class Tiling(IntervalTransform):
+    """
+    Simulates a tiling. Implemented for a new embedding procedure where intervals
+    are broken down into representative tiles that would have been pre-embedded.
+    """
+
+    def __init__(self, tileSize: int):
+        self.tileSize = tileSize
+
+    @override
+    def __call__(self, interval: GenomicInterval) -> Iterable[GenomicInterval]:
+        startTile = interval[1] // self.tileSize
+        endTile = interval[2] // self.tileSize
+
+        for tileIdx in range(startTile, endTile):
+            start = tileIdx * self.tileSize
+            yield (interval[0], start, start + self.tileSize)
+
+    def weights(
+        self, intervals: Iterable[GenomicInterval]
+    ) -> np.ndarray[Any, np.dtype[np.float32]]:
+        weights = list()
+
+        for base in intervals:
+            terms = self(base)
+            chunk = list()
+            chunkWeight = 0
+
+            for term in terms:
+                overlap = intersect(term, base)
+                assert overlap is not None
+                amnt = overlap[2] - overlap[1]
+                chunkWeight += amnt
+                chunk.append(amnt)
+
+            slice = np.array(chunk, np.float32) / chunkWeight
+            weights.append(slice)
+
+        return np.array(weights, np.float32).reshape(-1)

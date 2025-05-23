@@ -41,14 +41,21 @@ class Embed(EmbedMeta):
             np.memmap(self.dataPath, dtype=self.dtype, mode="r").reshape(-1, self.embedDim),
         )
 
+    def unload(self):
+        """
+        Unloads self.data (memmap) from memory.
+        Accessing the data field after unload() is fine and would trigger reparsing.
+        """
+        self.data.flush()  # probably unnecessary
+        del self.data
+
     def delete(self):
         """
         Deletes the associated files of this Embed.
         This instance should not be used after delete()
         """
+        self.unload()
         delete(self.dataPath)
-        self.data.flush()
-        del self.data
 
 
 def writeMeta(mmap: np.memmap | str, meta: EmbedMeta) -> Embed:

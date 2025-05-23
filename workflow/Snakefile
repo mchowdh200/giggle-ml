@@ -36,11 +36,29 @@ rule all:
         statsFile = f"{config.experimentsDir}/statTests/testResults.txt",
         overlapPlot = expand(f"{config.experimentsDir}/giggleBench/{{expName}}/recallByOverlap.png", expName=expNames),
         geOverlapPlot = expand(f"{config.experimentsDir}/giggleBench/{{expName}}/recallByGEOverlap.png", expName=expNames),
-        meanSubsampling = f"{config.experimentsDir}/statTests/meanSubsampling.png"
+        meanSubsampling = f"{config.experimentsDir}/statTests/meanSubsampling.png",
+        tilingTest = f"{config.experimentsDir}/statTests/tilingTest.png"
 
 
 rmeSmallPattern = f"{DATA}/rme_small/beds/{id}.bed"
 rmeSmallNames, = glob_wildcards(rmeSmallPattern)
+
+
+rule tilingTest:
+    input:
+        beds = expand(rmeSmallPattern, id=rmeSmallNames),
+        fasta = f"{HG}/hg19.fa"
+    output:
+        fig = f"{config.experimentsDir}/statTests/tilingTest.png",
+    params:
+        model = HyenaDNA('32k'),
+    run:
+        batchSize = 64
+        pipeline = DirectPipeline(params.model, batchSize)
+        fig = tilingTest(pipeline, input.beds)
+        fig.show()
+        Path(output.fig).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output.fig, dpi=300)
 
 
 rule meanSubsamplingTest:
