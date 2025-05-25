@@ -167,8 +167,16 @@ class GpuMaster:
         # based on the distribution of datasets. Each worker is responsible for
         # the datasets they implicitly completed.
 
-        setIdxStart = masterDataset.listIdxOf(blockSampler.lower)
-        setIdxEnd = masterDataset.listIdxOf(blockSampler.upper)
+        setIdxStart = (
+            masterDataset.listIdxOf(blockSampler.lower)
+            if blockSampler.lower < len(masterDataset)
+            else len(masterDataset.lists)
+        )
+        setIdxEnd = (
+            masterDataset.listIdxOf(blockSampler.upper)
+            if blockSampler.upper < len(masterDataset)
+            else len(masterDataset.lists)
+        )
 
         #                                     (1)     (2)     (3)
         # for datasets full of intervals,   [----] [-------] [---]
@@ -221,7 +229,6 @@ class GpuMaster:
         """
         @param post: Is a list of processing Callable to apply to completed memmaps after inference is completed.
         """
-
         assert len(datasets) == len(outPaths)
 
         eDim = self.model.embedDim

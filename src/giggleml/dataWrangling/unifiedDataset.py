@@ -15,23 +15,26 @@ class UnifiedDataset[T](Dataset):
     def __init__(self, lists: Sequence[ListLike[T]]):
         self.lists = lists
         self.sizes = [len(item) for item in lists]
-        self.len = sum(self.sizes)
 
         self.sums = list[int]()
         runningTotal = 0
 
         for item in lists:
-            size = len(item)
             self.sums.append(runningTotal)
+            size = len(item)
             runningTotal += size
 
         self.sums.append(runningTotal)
+        self.len = self.sums[-1]
         self.previousSpecialIdx: int = 0
 
     def __len__(self):
         return self.len
 
     def listIdxOf(self, idx: int):
+        if idx >= len(self):
+            raise ValueError("idx exceeds length")
+
         def binarySearch():
             l, r = 0, len(self.sizes)
 
@@ -50,7 +53,7 @@ class UnifiedDataset[T](Dataset):
         # optimization for case of repeat calls with increasing idx
         if self.sums[prev] <= idx:
             offset = idx - self.sums[prev]
-            prevLen = len(self.lists[prev])
+            prevLen = self.sizes[prev]
 
             if offset < prevLen:
                 l = prev
