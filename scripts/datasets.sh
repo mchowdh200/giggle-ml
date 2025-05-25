@@ -1,7 +1,7 @@
 #!/bin/bash
 
 cd "$(dirname "$0")"
-data=../../data
+data=../data
 
 if [ ! -d $data ]; then
   echo "Expected a folder at project root, 'data'"
@@ -53,7 +53,11 @@ else
     rme=roadmap_epigenomics/beds
     ls $rme | head -n 56 | xargs -I{} cp $rme/{} rme_small/beds
     cd rme_small/beds
-    gunzip *.gz
+
+    if (ls *.gz > /dev/null 2>&1); then
+      gunzip *.gz;
+    fi
+
     beds=$(ls *bed)
     echo "$beds" | xargs -I{} bash -c "head -n 1000 {} > {}_"
     echo "$beds" | xargs -I{} mv {}_ {}
