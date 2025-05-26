@@ -1,7 +1,3 @@
-roadmapEpigBedPattern = DATA + "/roadmap_epigenomics/beds/{id}.bed"
-roadmapEpigBedNames, = glob_wildcards(roadmapEpigBedPattern)
-
-
 rule roadmapEpigenomicsEmbeds:
     input:
         refGenome = HG + "/hg19.fa",

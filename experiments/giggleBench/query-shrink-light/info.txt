@@ -1,5 +1,5 @@
-date: 2025-05-08 06:00:37.049826
+date: 2025-05-13 19:00:32.275217
 experiment: {'name': 'query-shrink-light', 'k': 90, 'querySwellFactor': 0.9, 'queryChunkAmnt': 1, 'sampleSwellFactor': 1, 'sampleChunkAmnt': 1, 'queryTranslation': 0}
 model: HyenaDNA(1k)
-hitCount: 1498
+hitCount: 2344
 groundTruth: 6215

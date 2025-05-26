@@ -139,9 +139,9 @@ class Tiling(IntervalTransform):
     @override
     def __call__(self, interval: GenomicInterval) -> Iterable[GenomicInterval]:
         startTile = interval[1] // self.tileSize
-        endTile = interval[2] // self.tileSize
+        endTile = (interval[2] - 1) // self.tileSize
 
-        for tileIdx in range(startTile, endTile):
+        for tileIdx in range(startTile, endTile + 1):
             start = tileIdx * self.tileSize
             yield (interval[0], start, start + self.tileSize)
 

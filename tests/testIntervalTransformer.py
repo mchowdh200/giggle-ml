@@ -7,7 +7,15 @@ import numpy as np
 from giggleml.dataWrangling.intervalDataset import BedDataset
 from giggleml.dataWrangling.listDataset import ListDataset
 from giggleml.intervalTransformer import IntervalTransformer
-from giggleml.intervalTransforms import ChunkMax, IntervalTransform, Slide, Split, Swell, Translate
+from giggleml.intervalTransforms import (
+    ChunkMax,
+    IntervalTransform,
+    Slide,
+    Split,
+    Swell,
+    Tiling,
+    Translate,
+)
 from giggleml.utils.types import GenomicInterval
 
 
@@ -67,6 +75,12 @@ def testLengthLimit():
 # ======================================
 #       Specific Transforms
 # ======================================
+
+
+def testTiling():
+    ti = Tiling(3)
+    assert list(ti(("", 0, 10))) == [("", 0, 3), ("", 3, 6), ("", 6, 9), ("", 9, 12)]
+    assert np.all(list(ti.weights([("", 0, 4)])) == np.array([0.75, 0.25]))
 
 
 def testChunkMax():

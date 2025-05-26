@@ -1,13 +1,13 @@
 
-CTT: 0.8627739559442487
+CTT: 0.8629143750815415
 
 Considering 250250 random comparisons for 1000 points.
-GDST Score (slope): 0.000722
-Correlation: 0.297947
+GDST Score (slope): 0.009733
+Correlation: 0.297991
 
-NPR: 0.1794
-Random NPR: 0.1017
-SNPR: 0.2465
+NPR: 0.1790
+Random NPR: 0.1090
+SNPR: 0.2154
 
 
 Synthetic Data:

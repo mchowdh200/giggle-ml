@@ -6,7 +6,8 @@ from typing import cast
 from pathlib import Path
 
 from analysis.embedTests import tests
-from analysis.meanSubsampling import meanSubsamplingTest
+from analysis.meanSubsamplingTest import meanSubsamplingTest
+from analysis.tilingTest import tilingTest
 from giggleml.synthesis import synthesize
 from giggleml.utils.types import MmapF32
 from giggleml.utils.printTo import printTo
@@ -40,40 +41,44 @@ rule all:
         tilingTest = f"{config.experimentsDir}/statTests/tilingTest.png"
 
 
-rmeSmallPattern = f"{DATA}/rme_small/beds/{id}.bed"
+roadmapPattern = f"{DATA}/roadmap_epigenomics/beds/{{id}}.bed"
+roadmapNames, = glob_wildcards(roadmapPattern)
+rmeSmallPattern = f"{DATA}/rme_small/beds/{{id}}.bed"
 rmeSmallNames, = glob_wildcards(rmeSmallPattern)
 
 
 rule tilingTest:
     input:
-        beds = expand(rmeSmallPattern, id=rmeSmallNames),
+        beds = expand(rmeSmallPattern, id=rmeSmallNames)[:3],
         fasta = f"{HG}/hg19.fa"
     output:
         fig = f"{config.experimentsDir}/statTests/tilingTest.png",
     params:
         model = HyenaDNA('32k'),
+        intervalLimit = 1000 # small limit to speed up test
     run:
         batchSize = 64
         pipeline = DirectPipeline(params.model, batchSize)
-        fig = tilingTest(pipeline, input.beds)
-        fig.show()
+        beds = [ BedDataset(bed, input.fasta, params.intervalLimit) for bed in input.beds ]
+        fig = tilingTest(pipeline, beds)
         Path(output.fig).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output.fig, dpi=300)
 
 
 rule meanSubsamplingTest:
     input:
-        beds = expand(rmeSmallPattern, id=rmeSmallNames),
+        beds = expand(roadmapPattern, id=roadmapNames)[:2],
         fasta = f"{HG}/hg19.fa"
     output:
         fig = f"{config.experimentsDir}/statTests/meanSubsampling.png",
     params:
         model = HyenaDNA('32k'),
+        intervalLimit = None
     run:
         batchSize = 64
         pipeline = DirectPipeline(params.model, batchSize)
-        fig = meanSubsamplingTest(pipeline, input.beds)
-        fig.show()
+        beds = [ BedDataset(bed, input.fasta, params.intervalLimit) for bed in input.beds ]
+        fig = meanSubsamplingTest(pipeline, beds)
         Path(output.fig).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output.fig, dpi=300)
 

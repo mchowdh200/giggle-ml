@@ -81,9 +81,7 @@ class MemoryIntervalDataset(KindDataset[GenomicInterval]):
 @lazy
 class BedDataset(LateIntervalDataset):
     def __init__(
-        self,
-        path: str,
-        associatedFastaPath: str | None = None,
+        self, path: str, associatedFastaPath: str | None = None, limit: int | None = None
     ):
         """
         Bed files are parsed lazily (so this passes pickling barrier).
@@ -91,7 +89,7 @@ class BedDataset(LateIntervalDataset):
         """
         self.path: str = path
         super().__init__(
-            lazyGetter=self._load, lazyLength=None, associatedFastaPath=associatedFastaPath
+            lazyGetter=self._load, lazyLength=limit, associatedFastaPath=associatedFastaPath
         )
 
     def _load(self):

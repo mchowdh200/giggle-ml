@@ -1,5 +1,5 @@
-date: 2025-05-08 06:22:18.152658
+date: 2025-05-13 18:40:39.906161
 experiment: {'name': 'query-swell-light', 'k': 110, 'querySwellFactor': 1.1, 'queryChunkAmnt': 1, 'sampleSwellFactor': 1, 'sampleChunkAmnt': 1, 'queryTranslation': 0}
 model: HyenaDNA(1k)
-hitCount: 1842
+hitCount: 2467
 groundTruth: 6215

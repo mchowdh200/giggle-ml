@@ -1,5 +1,5 @@
-date: 2025-05-08 06:36:44.515126
+date: 2025-05-13 18:20:34.232959
 experiment: {'name': 'translate', 'k': 100, 'querySwellFactor': 1, 'queryChunkAmnt': 1, 'sampleSwellFactor': 1, 'sampleChunkAmnt': 1, 'queryTranslation': 10}
 model: HyenaDNA(1k)
-hitCount: 2296
+hitCount: 2335
 groundTruth: 6215
