@@ -55,12 +55,13 @@ rule tilingTest:
         fig = f"{config.experimentsDir}/statTests/tilingTest.png",
     params:
         model = HyenaDNA('32k'),
-        intervalLimit = 1000 # small limit to speed up test
+        intervalLimit = 1000, # small limit to speed up test
+        octaves = 5
     run:
         batchSize = 64
         pipeline = DirectPipeline(params.model, batchSize)
         beds = [ BedDataset(bed, input.fasta, params.intervalLimit) for bed in input.beds ]
-        fig = tilingTest(pipeline, beds)
+        fig = tilingTest(pipeline, beds, params.octaves)
         Path(output.fig).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output.fig, dpi=300)
 

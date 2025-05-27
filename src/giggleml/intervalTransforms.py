@@ -1,3 +1,4 @@
+import math
 from abc import ABC
 from collections.abc import Iterable
 from typing import Any, final, override
@@ -133,17 +134,68 @@ class Tiling(IntervalTransform):
     are broken down into representative tiles that would have been pre-embedded.
     """
 
-    def __init__(self, tileSize: int):
-        self.tileSize = tileSize
+    def __init__(self, tileSize: int, octaves: int = 1):
+        """
+        @param octaves: the second octave is twice the size as the fundamental
+        """
+
+        if octaves < 1:
+            raise ValueError(f"Expecting octaves ({octaves}) >= 1")
+
+        self.octaveAmnt = octaves
+        self.tileSizes = [tileSize * int(2**i) for i in range(octaves)]
+
+    def tile(self, interval: GenomicInterval, level: int | None = None) -> Iterable[list[int]]:
+        chrm, start, end = interval
+
+        level = self.octaveAmnt - 1 if level is None else level
+        assert level < self.octaveAmnt
+
+        if end - start == 0:
+            yield from [list() for _ in range(level + 1)]
+            return
+
+        if level > 0:
+            # --- case 1)  greedily take biggest tiles -within- the target
+            octaveSize = self.tileSizes[level]
+            # round start/end to fundamental to give larger octaves more opportunity,
+            #  but don't round start/end in general so that the final layer can
+            #  interpolate properly
+            roundStart = round(start / self.tileSizes[0]) * self.tileSizes[0]
+            roundEnd = round(end / self.tileSizes[0]) * self.tileSizes[0]
+            startIdx = math.ceil(roundStart / octaveSize)
+            endIdx = math.floor(roundEnd / octaveSize)
+
+            if startIdx >= endIdx:
+                yield from self.tile(interval, level - 1)
+                yield list()
+                return
+
+            # attempt to tile the tips with smaller tiles
+            for list1, list2 in zip(
+                self.tile((chrm, start, startIdx * octaveSize), level - 1),
+                self.tile((chrm, endIdx * octaveSize, end), level - 1),
+            ):
+                yield list1 + list2
+
+            yield list(range(startIdx, endIdx))
+        else:
+            # --- case 2)  force fill the remainder with smallest tiles
+            octaveSize = self.tileSizes[level]
+            startIdx = start // octaveSize
+            endIdx = (end - 1) // octaveSize
+            yield list(range(startIdx, endIdx + 1))
 
     @override
     def __call__(self, interval: GenomicInterval) -> Iterable[GenomicInterval]:
-        startTile = interval[1] // self.tileSize
-        endTile = (interval[2] - 1) // self.tileSize
+        chrm, _, _ = interval
 
-        for tileIdx in range(startTile, endTile + 1):
-            start = tileIdx * self.tileSize
-            yield (interval[0], start, start + self.tileSize)
+        for i, chunks in enumerate(self.tile(interval)):
+            octaveSize = self.tileSizes[i]
+
+            for tileIdx in chunks:
+                tileStart = tileIdx * octaveSize
+                yield (chrm, tileStart, tileStart + octaveSize)
 
     def weights(
         self, intervals: Iterable[GenomicInterval]

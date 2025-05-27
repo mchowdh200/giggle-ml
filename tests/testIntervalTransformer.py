@@ -81,6 +81,13 @@ def testTiling():
     ti = Tiling(3)
     assert list(ti(("", 0, 10))) == [("", 0, 3), ("", 3, 6), ("", 6, 9), ("", 9, 12)]
     assert np.all(list(ti.weights([("", 0, 4)])) == np.array([0.75, 0.25]))
+    ti = Tiling(3, 3)
+    assert list(ti.tile(("", 5, 18))) == [[1], [1, 2], []]
+    assert list(ti.tile(("", 7, 19))) == [[6], [1, 2], []]
+    assert list(ti.tile(("", 7, 39))) == [[12], [1], [1, 2]]
+    assert list(ti.tile(("", 6, 12))) == [[], [1], []]
+    ti = Tiling(340, 5)
+    assert list(ti.tile(("", 6800, 8160))) == [[], [], [5], [], []]
 
 
 def testChunkMax():
