@@ -1,6 +1,8 @@
 import gzip
+import random
 from collections.abc import Iterator, Sequence
 from functools import cached_property
+from random import Random
 from typing import Callable, Protocol, final, override
 
 from ..utils.types import GenomicInterval, lazy
@@ -81,25 +83,37 @@ class MemoryIntervalDataset(KindDataset[GenomicInterval]):
 @lazy
 class BedDataset(LateIntervalDataset):
     def __init__(
-        self, path: str, associatedFastaPath: str | None = None, limit: int | None = None
+        self,
+        path: str,
+        associatedFastaPath: str | None = None,
+        limit: int | None = None,
+        samplingRate: float = 1,
     ):
         """
         Bed files are parsed lazily (so this passes pickling barrier).
         @param path: can be either a .bed or .bed.gz file.
+        @param samplingRate: should be 0-1, 1 indicates guaranteed full reads. Seed is fixed.
         """
         self.path: str = path
+        assert samplingRate >= 0 and samplingRate <= 1
+        self.samplingRate: float = samplingRate
         super().__init__(
             lazyGetter=self._load, lazyLength=limit, associatedFastaPath=associatedFastaPath
         )
 
     def _load(self):
+        random.seed(42)
+
         def parse(file):
             intervals = list[GenomicInterval]()
 
             for line in file:
-
                 if line.startswith("#"):
                     continue
+
+                if self.samplingRate != 1:
+                    if random.random() > self.samplingRate:
+                        continue
 
                 name, start, stop = line.split("\t")[:3]
                 intervals.append((name, int(start), int(stop)))

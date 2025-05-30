@@ -1,7 +1,8 @@
 import os
-import time
 from collections.abc import Iterable, Sequence
+from datetime import datetime, timedelta
 from pathlib import Path
+from time import time
 from typing import Callable, final
 
 import numpy as np
@@ -10,6 +11,7 @@ import torch.distributed as dist
 from torch import multiprocessing as mp
 from torch.utils.data import DataLoader
 
+from giggleml.dataWrangling import unifiedDataset
 from giggleml.dataWrangling.unifiedDataset import UnifiedDataset
 
 from ..dataWrangling import fasta
@@ -56,6 +58,7 @@ class GpuMaster:
         """inference loop."""
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
+        time0 = time()
         nextIdx = 0
 
         for i, batch in enumerate(dataLoader):
@@ -69,6 +72,11 @@ class GpuMaster:
 
             if i % 50 == 0:
                 rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
+            if i % 150 == 1 and rank == 0:
+                elapsed = time() - time0
+                eta = timedelta(seconds=((elapsed / (i + 1)) * len(dataLoader)) - elapsed)
+                elapsedDt = timedelta(seconds=elapsed)
+                rprint(f"== {str(elapsedDt)}, ETA: {str(eta)}")
 
         rprint(f"Batch: {len(dataLoader)}\t/ {len(dataLoader)}")
 
@@ -83,21 +91,7 @@ class GpuMaster:
         outPaths: Sequence[str],
         post: Sequence[Callable[[np.memmap], None]] | None,
     ):
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "12356"
-        backendType = "nccl" if torch.cuda.is_available() else "gloo"
         device = guessDevice(rank)
-        dist.init_process_group(
-            backendType,
-            rank=rank,
-            world_size=self.workerCount,
-            device_id=(device if device.type == "cuda" else None),
-        )
-
-        if not dist.is_initialized():
-            raise RuntimeError("Process group could not initialized")
-
-        dist.barrier()
 
         if rank == 0:
             print("Starting inference.")
@@ -151,6 +145,26 @@ class GpuMaster:
             persistent_workers=self.subWorkerCount != 0,  # (usually True) -- crucial
             collate_fn=collate,
         )
+
+        # INFO: init process group
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "12356"
+        dist.init_process_group(
+            backend="nccl" if torch.cuda.is_available() else "gloo",
+            rank=rank,
+            world_size=self.workerCount,
+            # it seems to be about 1.2 seconds per batch 5/27/2025
+            timeout=timedelta(seconds=len(masterDataset) / self.workerCount * 0.5),
+            device_id=(device if device.type == "cuda" else None),
+        )
+
+        if not dist.is_initialized():
+            raise RuntimeError("Process group could not initialized")
+
+        dist.barrier()
+
+        # INFO: big step
 
         self._inferLoop(
             rank,

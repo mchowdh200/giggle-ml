@@ -8,12 +8,13 @@ import sys
 from collections.abc import Sequence
 from os.path import basename, dirname
 
+import numpy as np
 import torch
 
 from ..embedGen import embedIO
 from ..utils.pathPickle import pickle, unpickle
 
-EmbedDict = dict[str, embedIO.Embed]
+EmbedDict = dict[str, np.ndarray]
 
 
 def build(embedPaths: Sequence[str], outPath: str | None = None) -> EmbedDict:
@@ -40,7 +41,7 @@ def build(embedPaths: Sequence[str], outPath: str | None = None) -> EmbedDict:
                 )
         outPath = dirname(embedPaths[0]) + "/master.pickle"
 
-    meanEmbeds = list()
+    meanEmbeds: list[np.ndarray] = list()
 
     for path in embedPaths:
         embed = embedIO.parse(path).data

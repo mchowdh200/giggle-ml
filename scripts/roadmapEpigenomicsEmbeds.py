@@ -36,13 +36,18 @@ def build(roadmapDir: str, hg19: str):
     outPaths = [f"{roadmapDir}/embeds/{name}.npy" for name in names]
 
     # INFO: inferene parameters
-    batchSize = 256
+    batchSize = 64
     subWorkerCount = 4
     model = HyenaDNA("32k")
     # model = TrivialModel(32768)
 
     # big job
-    inputData = [BedDataset(bed, associatedFastaPath=hg19) for bed in beds]
+    sr = 0.1
+
+    if sr != 1:
+        print(f"Applying a {sr*100}% subsampling rate")
+
+    inputData = [BedDataset(bed, associatedFastaPath=hg19, samplingRate=sr) for bed in beds]
     DirectPipeline(model, batchSize, subWorkers=subWorkerCount).embed(
         intervals=inputData, out=outPaths
     )
