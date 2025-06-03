@@ -7,6 +7,7 @@ from math import log
 from pathlib import Path
 
 import numpy as np
+import scipy.stats
 
 from analysis.advHeatmap import plot_heatmap_with_averages
 from giggleml.embedGen import meanEmbedDict
@@ -427,13 +428,78 @@ def keywordScore(base: str, others: Sequence[str]):
     return dcg / idcg
 
 
+def kendallSig(reference: Sequence[str], observed: Sequence[str], resamples: int = 9999) -> float:
+    """
+    Performs a permutation test for Kendall's Tau between two string lists.
+    `reference` is considered the ideal order.
+    """
+
+    # 1. Preprocessing: Find common items and maintain their relative orders
+    common = set(reference) & set(observed)
+
+    if not common:
+        print("Warning: No common items between the lists.")
+        return np.nan
+
+    ref = [item for item in reference if item in common]
+    obs = [item for item in observed if item in common]
+
+    commonSize = len(ref)
+    if commonSize < 2:
+        message = (
+            f"Warning: Only {commonSize} common item(s). "
+            "Kendall's Tau requires at least 2 for a meaningful comparison."
+        )
+        print(message)
+        # Calculate Tau for completeness if possible, though p-value might not be robust
+        if commonSize == 1:  # Only one common item
+            # Tau is undefined or trivially 0, p-value is meaningless.
+            # Or, based on some conventions, tau might be 1 if we only have one element.
+            # SciPy's kendalltau will likely result in nan or error for < 2 elements.
+            # Let's return NaN for tau here for clarity.
+            return np.nan
+        # if num_common_items is 0, it's caught by the `if not common_items` above.
+
+    # 2. Map to Ranks
+    refRank = {item: i for i, item in enumerate(ref)}
+    # Observed ranks for the second list, based on the ordering defined by the first list
+    obsRank = np.array([refRank[item] for item in obs])
+
+    # 3. Define Statistic Function for permutation_test
+    def statistic_fn(permuted_subject_ranks, fixed_ideal_ranks):
+        # permuted_subject_ranks is a permutation of observed_subject_ranks
+        # fixed_ideal_ranks is ideal_ranks
+        return scipy.stats.kendalltau(permuted_subject_ranks, fixed_ideal_ranks).statistic
+
+    # 4. Perform Permutation Test
+    # scipy.stats.permutation_test will permute the first element of the `data`
+    # tuple (observed_subject_ranks) and keep the second (ideal_ranks) fixed
+    # when permutation_type='pairings'.
+    try:
+        res = scipy.stats.permutation_test(
+            (obsRank, np.array(list(range(commonSize)))),  # Data tuple
+            statistic_fn,
+            permutation_type="pairings",
+            n_resamples=resamples,
+            alternative="greater",
+            rng=42,
+        )
+        return res.pvalue
+    except ValueError as e:
+        # This can happen if, for example, all values in one array are identical after filtering,
+        # which can lead to issues with Kendall's Tau calculation (e.g. tau is nan).
+        print(
+            f"Warning: Error during permutation test (possibly due to identical ranks or too few distinct values): {e}"
+        )
+        return np.nan
+
+
 def main():
     data = "data/roadmap_epigenomics"
     exp = "experiments/roadmapEpigenomics"
 
     modernRanks = modernRank(f"{data}/embeds/master.pickle", f"{data}/ranks.pickle")
     legacyRanks = legacyRank([f"{data}/giggleRanks/{name}.tsv" for name in modernRanks.keys()])
-    keywords = set(cellTypes).union(chromatinStates)
 
     # INFO: rank comparison .tsv files
     print("Top keyword & file ranks...")
@@ -533,16 +599,18 @@ def main():
     )
     fig.savefig(path, dpi=300, bbox_inches="tight")
 
-    # INFO: keyword scores
-    print("Keyword score...")
+    # INFO: general scores
+    print("General scores...")
 
     modernKeyScores = dict[str, float]()
     legacyKeyScores = dict[str, float]()
 
-    with printTo(f"{exp}/rankAnalysis.tsv"):
-        print("name", "Embedding-based", "Giggle-legacy", sep="\t")
+    with open(f"{exp}/rankAnalysis.tsv", "w") as f:
+        print("name", "(new) nDCG", "(old) nDCG", sep="\t", file=f)
 
         for i, name in enumerate(modernRanks.keys()):
+            # keyword score
+
             modernNeighbors = [other for (other, _) in modernRanks[name]]
             modernKeyScore = keywordScore(name, modernNeighbors)
             modernKeyScores[name] = modernKeyScore
@@ -551,11 +619,20 @@ def main():
             legacyKeyScore = keywordScore(name, legacyNeighbors)
             legacyKeyScores[name] = legacyKeyScore
 
-            print(name, modernKeyScore, legacyKeyScore, sep="\t")
+            print(name, modernKeyScore, legacyKeyScore, sep="\t", file=f)
+            print(f"{i+1} / {len(modernRanks)}")
 
         modernKeyScoreAvg = np.mean(list(modernKeyScores.values()))
         legacyKeyScoreAvg = np.mean(list(legacyKeyScores.values()))
-        print("avg", modernKeyScoreAvg, legacyKeyScoreAvg, sep="\t")
+        print("avg", modernKeyScoreAvg, legacyKeyScoreAvg, sep="\t", file=f)
+
+    # INFO: kendall's tau, pvalue
+    print(f"Kendall's Tau, P-Value (using legacy-giggle as the reference rankings)")
+    legacyNeighbors = [name for (name, _) in legacyRanks[target]]
+    modernNeighbors = [name for (name, _) in modernRanks[target]]
+    # TODO: the kendall tau sig is too good; investigate
+    ktPval = kendallSig(legacyNeighbors, modernNeighbors, 99999)
+    print(f" - for {target}: {ktPval}")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-name	Embedding-based	Giggle-legacy
+name	(new) nDCG	(old) nDCG
 HeLa_S3_Cervical_Carcinoma_Strong_transcription	0.8305124934199525	0.8619233718018472
 Aorta_Repressed_PolyComb	0.5803244134036887	0.7569847600010566
 Colon_Smooth_Muscle_Enhancers	0.8412477714047953	0.8451727393934091
