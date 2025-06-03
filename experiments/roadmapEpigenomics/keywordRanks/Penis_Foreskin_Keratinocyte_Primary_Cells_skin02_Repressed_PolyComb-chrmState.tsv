@@ -1,0 +1,16 @@
+(New) Chromatin State	(Old) Chromatin State
+Repressed_PolyComb	Repressed_PolyComb
+Strong_transcription	Weak_Repressed_PolyComb
+Heterochromatin	Bivalent_Enhancer
+Active_TSS	Bivalent_Poised_TSS
+Weak_transcription	Flanking_Bivalent_TSS_Enh
+Genic_enhancers	Flanking_Active_TSS
+ZNF_genes_and_repeats	Enhancers
+Enhancers	Active_TSS
+Weak_Repressed_PolyComb	Transcr_at_gene_5_and_3
+Transcr_at_gene_5_and_3	Heterochromatin
+Bivalent_Poised_TSS	ZNF_genes_and_repeats
+Flanking_Active_TSS	Genic_enhancers
+Bivalent_Enhancer	Weak_transcription
+Flanking_Bivalent_TSS_Enh	Quiescent_Low
+Quiescent_Low	Strong_transcription

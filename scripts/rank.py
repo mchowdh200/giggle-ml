@@ -1,7 +1,10 @@
+import contextlib
 import os
 import pickle
 from collections import defaultdict
 from collections.abc import Sequence
+from math import log
+from pathlib import Path
 
 import numpy as np
 
@@ -69,40 +72,6 @@ def legacyRank(paths: Sequence[str]) -> dict[str, list[tuple[str, float]]]:
         top[baseName] = scores
 
     return top
-
-
-def keywordScore(base: str, others: Sequence[str], keywords: set[str]):
-    """
-    A normalized score based on the indices of elements in the list with matching keywords
-    to the base. That's, lists with lots of elements with matching keywords to base have a
-    higher score. The amount of keywords is not considered; binary.
-    """
-
-    selectKeywords = list()
-
-    for kw in keywords:
-        if kw in base:
-            selectKeywords.append(kw)
-
-    weight = 0
-    total = 0
-
-    for i, other in enumerate(others):
-        for kw in selectKeywords:
-            if kw in other:
-                weight += i + 1
-                total += 1
-                break
-
-    if total == 0:
-        return 0
-    if total == len(others):
-        return 1
-
-    gauss = lambda x: x * (x + 1) / 2
-    small = gauss(total)
-    big = gauss(len(others)) - gauss(len(others) - total)
-    return 1 - (weight - small) / (big - small)
 
 
 chromatinStates = [
@@ -411,7 +380,7 @@ cellCategoryInverse = {
 }
 
 
-def chrmStateCellTypeSplit(name: str) -> tuple[str, str]:
+def cellTypeChrmStateSplit(name: str) -> tuple[str, str]:
     name = name.strip()
     states = list()
 
@@ -427,30 +396,111 @@ def chrmStateCellTypeSplit(name: str) -> tuple[str, str]:
     return cellType, chrmState
 
 
+def keywordScore(base: str, others: Sequence[str]):
+    """
+    A normalized score based on the indices of elements in the list with matching keywords
+    to the base. Uses nDCG.
+    """
+
+    k = 1 * len(others)  # DCG is often calculated with only the upper subset
+    targetCT, targetCS = cellTypeChrmStateSplit(base)
+    dcg = 0
+
+    for i, other in enumerate(others[:k]):
+        ct, cs = cellTypeChrmStateSplit(other)
+        gain = 0
+
+        if ct == targetCT:
+            gain += 1
+        if cs == targetCS:
+            gain += 1
+
+        dcg += gain / log(i + 2, 2)
+
+    # ideal DCG
+
+    idcg = 2  # ideally, the first item contains both CT & CS
+
+    for i in range(len(chromatinStates) + len(cellTypes) - 1):
+        idcg += 1 / log(i + 3, 2)
+
+    return dcg / idcg
+
+
 def main():
     data = "data/roadmap_epigenomics"
     exp = "experiments/roadmapEpigenomics"
 
-    modern = modernRank(f"{data}/embeds/master.pickle", f"{data}/ranks.pickle")
-    legacy = legacyRank([f"{data}/giggleRanks/{name}.tsv" for name in modern.keys()])
+    modernRanks = modernRank(f"{data}/embeds/master.pickle", f"{data}/ranks.pickle")
+    legacyRanks = legacyRank([f"{data}/giggleRanks/{name}.tsv" for name in modernRanks.keys()])
     keywords = set(cellTypes).union(chromatinStates)
 
-    # INFO: ranks comparison .tsv file
+    # INFO: rank comparison .tsv files
+    print("Top keyword & file ranks...")
 
-    for i, name in enumerate(modern.keys()):
-        with printTo(f"{data}/compare/{name}.tsv"):
-            print("Embedding-based", "\t", "Giggle-legacy")
+    Path(f"{exp}/keywordRanks").mkdir(exist_ok=True)
+    Path(f"{exp}/fileRanks").mkdir(exist_ok=True)
 
-            for modernValue, legacyValue in zip(modern[name], legacy[name]):
-                print(modernValue[0], "\t", legacyValue[0])
+    for i, name in enumerate(modernRanks.keys()):
+        # raw rank data
 
-        print(f"{i+1} / {len(modern)}")
+        with printTo(f"{exp}/fileRanks/{name}.tsv"):
+            print("Embedding-based", "Giggle-legacy", sep="\t")
+
+            for modernValue, legacyValue in zip(modernRanks[name], legacyRanks[name]):
+                print(modernValue[0], legacyValue[0], sep="\t")
+
+        # top keyword ranks
+
+        keywordSums1 = defaultdict(lambda: 0.0)
+        keywordSums2 = defaultdict(lambda: 0.0)
+
+        for j, (modernValue, legacyValue) in list(
+            enumerate(zip(modernRanks[name], legacyRanks[name]))
+        ):
+            modern = cellTypeChrmStateSplit(modernValue[0])
+            legacy = cellTypeChrmStateSplit(legacyValue[0])
+            k = 0  # this is like a temperature
+            # (mean) reciprocal rank
+            keywordSums1[modern[0]] += 1 / (j + 1 + k)
+            keywordSums1[modern[1]] += 1 / (j + 1 + k)
+            keywordSums2[legacy[0]] += 1 / (j + 1 + k)
+            keywordSums2[legacy[1]] += 1 / (j + 1 + k)
+
+        with printTo(f"{exp}/keywordRanks/{name}-cellType.tsv"):
+            cellTypeRanks1 = sorted(cellTypes, key=lambda x: -keywordSums1[x])
+            cellTypeRanks2 = sorted(cellTypes, key=lambda x: -keywordSums2[x])
+
+            print(
+                "(New) Cell Type",
+                "(Old) Cell Type",
+                sep="\t",
+            )
+
+            for x in zip(cellTypeRanks1, cellTypeRanks2):
+                print(*x, sep="\t")
+
+        with printTo(f"{exp}/keywordRanks/{name}-chrmState.tsv"):
+            chrmStateRanks1 = sorted(chromatinStates, key=lambda x: -keywordSums1[x])
+            chrmStateRanks2 = sorted(chromatinStates, key=lambda x: -keywordSums2[x])
+
+            print(
+                "(New) Chromatin State",
+                "(Old) Chromatin State",
+                sep="\t",
+            )
+
+            for x in zip(chrmStateRanks1, chrmStateRanks2):
+                print(*x, sep="\t")
+
+        print(f"{i+1} / {len(modernRanks)}")
 
     # INFO: heatmap
+    print("Heatmap...")
 
-    target = "Penis_Foreskin_Melanocyte_Primary_Cells_skin01_Genic_enhancers"
-    modernHits = {hit: value for (hit, value) in modern[target]}
-    legacyHits = {hit: value for (hit, value) in legacy[target]}
+    target = "Brain_Hippocampus_Middle_Enhancers"
+    modernHits = {hit: value for (hit, value) in modernRanks[target]}
+    legacyHits = {hit: value for (hit, value) in legacyRanks[target]}
 
     def prepareHeatmapMatrix(sigMap):
         matrix = list()
@@ -483,28 +533,29 @@ def main():
     )
     fig.savefig(path, dpi=300, bbox_inches="tight")
 
-    # INFO: keyword rankings
+    # INFO: keyword scores
+    print("Keyword score...")
 
     modernKeyScores = dict[str, float]()
     legacyKeyScores = dict[str, float]()
 
-    with printTo(f"{exp}/rankAnalysis.txt"):
-        print("name\tEmbedding-based\tGiggle-legacy")
+    with printTo(f"{exp}/rankAnalysis.tsv"):
+        print("name", "Embedding-based", "Giggle-legacy", sep="\t")
 
-        for i, name in enumerate(modern.keys()):
-            modernNeighbors = [other for (other, _) in modern[name]]
-            modernKeyScore = keywordScore(name, modernNeighbors, keywords)
+        for i, name in enumerate(modernRanks.keys()):
+            modernNeighbors = [other for (other, _) in modernRanks[name]]
+            modernKeyScore = keywordScore(name, modernNeighbors)
             modernKeyScores[name] = modernKeyScore
 
-            legacyNeighbors = [other for (other, _) in legacy[name]]
-            legacyKeyScore = keywordScore(name, legacyNeighbors, keywords)
+            legacyNeighbors = [other for (other, _) in legacyRanks[name]]
+            legacyKeyScore = keywordScore(name, legacyNeighbors)
             legacyKeyScores[name] = legacyKeyScore
 
-            print(name, "\t", modernKeyScore, "\t", legacyKeyScore)
+            print(name, modernKeyScore, legacyKeyScore, sep="\t")
 
         modernKeyScoreAvg = np.mean(list(modernKeyScores.values()))
         legacyKeyScoreAvg = np.mean(list(legacyKeyScores.values()))
-        print("avg", "\t", modernKeyScoreAvg, "\t", legacyKeyScoreAvg)
+        print("avg", modernKeyScoreAvg, legacyKeyScoreAvg, sep="\t")
 
 
 if __name__ == "__main__":
