@@ -89,7 +89,7 @@ class HyenaDNA(EmbedModel):
             self.checkpoint,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
-            code_revision=self.rev,
+            revision=self.rev,
         )
         model.eval()
         # WARN: HyenaDNA cannot be torch.compile(.)ed because the Hyena layers
