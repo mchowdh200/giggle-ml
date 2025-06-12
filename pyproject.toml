@@ -41,4 +41,4 @@ reportMissingTypeArgument = false
   # { root = "tests", extraPaths = ["src"] }
 # ]
 # include = [ "src", "tests" ]
-# exclude = [ "*.bed", "*.fa", "*.fxi" ]
+exclude = [ "*.bed", "*.fa", "*.fxi", "data", "experiments" ]

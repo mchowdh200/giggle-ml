@@ -59,8 +59,11 @@ class DirectPipeline(EmbedPipeline):
         """
         self.model: EmbedModel = embedModel
         self.batchSize: int = batchSize
-        workerCount = workerCount or torch.accelerator.device_count()
-        self.gpuMaster: GpuMaster = GpuMaster(embedModel, batchSize, workerCount, subWorkers)
+
+        workerCount = workerCount or torch.accelerator.device_count() or 1
+        self.gpuMaster: GpuMaster = GpuMaster(
+            embedModel, batchSize, workerCount, subWorkers
+        )
 
     @overload
     def embed(
@@ -85,9 +88,10 @@ class DirectPipeline(EmbedPipeline):
         out: Sequence[str] | str,
         transforms: list[IntervalTransform] | None = None,
     ) -> Sequence[Embed] | Embed:
-
         if isinstance(intervals, Sequence) == isinstance(out, str):
-            raise ValueError("Expecting either both or neither of data & out to be sequences")
+            raise ValueError(
+                "Expecting either both or neither of data & out to be sequences"
+            )
         if not isinstance(intervals, Sequence):
             intervals = [intervals]
         if isinstance(out, str):

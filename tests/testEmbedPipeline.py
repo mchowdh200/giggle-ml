@@ -2,6 +2,7 @@ import contextlib
 import os
 
 import numpy as np
+import torch
 
 from giggleml.dataWrangling.intervalDataset import BedDataset
 from giggleml.embedGen.embedModel import CountACGT
@@ -17,7 +18,12 @@ def testPipeline():
 
     # TODO: needs way more testing examples
 
-    pipeline = DirectPipeline(embedModel=CountACGT(), batchSize=2, workerCount=2)
+    # if not cuda.is_available(), workerCount is CPU count
+    workerCount = min(2, torch.cuda.device_count()) if torch.cuda.is_available() else 2
+
+    pipeline = DirectPipeline(
+        embedModel=CountACGT(), batchSize=2, workerCount=workerCount
+    )
     bed = BedDataset("tests/test.bed", "tests/test.fa")
     embed = pipeline.embed(bed, "tests/test_out.tmp.npy")
 

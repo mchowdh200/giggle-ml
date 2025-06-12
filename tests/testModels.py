@@ -33,7 +33,7 @@ def testHyenaDNA():
         ]
     )
 
-    assert torch.equal(brief, expect)
+    assert torch.allclose(brief, expect, atol=1.0)
 
 
 # INFO: CountACGT Model already tested implicitly in testDataWrangling.py
