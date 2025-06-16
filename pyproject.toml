@@ -27,7 +27,7 @@ line-length = 99
 python_files = [ "tests/test*.py" ]
 pythonpath = [ "src" ]
 
-[tool.pyright]
+[tool.basedpyright]
 reportExplicitAny = false
 reportAny = false
 reportImplicitStringConcatenation = false
@@ -41,4 +41,4 @@ reportMissingTypeArgument = false
   # { root = "tests", extraPaths = ["src"] }
 # ]
 # include = [ "src", "tests" ]
-exclude = [ "*.bed", "*.fa", "*.fxi", "data", "experiments" ]
+exclude = [ "*.bed", "*.fa", "*.fxi", "data", "experiments", ".venv" ]
