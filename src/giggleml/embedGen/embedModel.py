@@ -34,13 +34,19 @@ class EmbedModel(ABC):
     def __repr__(self) -> str: ...
 
 
+class TrainableEmbedModel(EmbedModel, ABC):
+    @property
+    @abstractmethod
+    def trainableModel(self): ...
+
+
 # ===================
 #    HyenaDNA
 # ===================
 
 
 @final
-class HyenaDNA(EmbedModel):
+class HyenaDNA(TrainableEmbedModel):
     wants = "sequences"
 
     def __init__(self, size: str = "1k"):
@@ -95,6 +101,11 @@ class HyenaDNA(EmbedModel):
     def to(self, device: Device) -> Self:
         self._device = device
         return self._model.to(device)
+
+    @property
+    @override
+    def trainableModel(self):
+        return self._model
 
     @cached_property
     def _model(self):
