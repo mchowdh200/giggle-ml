@@ -95,11 +95,9 @@ class HyenaDNA(TrainableEmbedModel):
         self.checkpoint = name
         self.embedDim: int = eDim
         self.sizeType = size  # used for __repr__ only
-        self._device: Device = None
 
     @override
     def to(self, device: Device) -> Self:
-        self._device = device
         return self._model.to(device)
 
     @property
@@ -120,7 +118,6 @@ class HyenaDNA(TrainableEmbedModel):
         # use FFT which is fundamentally based on complex numbers. TorchInductor
         # does not support complex operators (4/30/2025)
         # model = torch.compile(model)
-        model.to(self._device)
         return model
 
     @cached_property
@@ -151,7 +148,7 @@ class HyenaDNA(TrainableEmbedModel):
                 return_tensors="pt",
             )
 
-            dev = self._device
+            dev = self._model.device
             inputs = {k: v.to(dev, non_blocking=True) for k, v in tokenized.items()}
 
             # INFO: 2. inference
