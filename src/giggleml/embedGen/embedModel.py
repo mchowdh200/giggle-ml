@@ -1,13 +1,11 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from functools import cached_property
-from typing import Any, ClassVar, Protocol, Self, cast, final
+from typing import Any, ClassVar, Self, cast, final
 
-import numpy as np
 import torch
 from torch.types import Device
 from transformers import AutoTokenizer
-from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.models.auto.modeling_auto import AutoModel
 from typing_extensions import override
 
@@ -57,16 +55,31 @@ class HyenaDNA(EmbedModel):
 
         details = {
             "1k": (1024, "LongSafari/hyenadna-tiny-1k-seqlen-hf", 128, "e8c1eff"),
-            "16k": (16386, "LongSafari/hyenadna-tiny-16k-seqlen-d128-hf", 128, "d79fa37"),
+            "16k": (
+                16386,
+                "LongSafari/hyenadna-tiny-16k-seqlen-d128-hf",
+                128,
+                "d79fa37",
+            ),
             "32k": (32768, "LongSafari/hyenadna-small-32k-seqlen-hf", 256, "8fe770c"),
-            "160k": (160000, "LongSafari/hyenadna-medium-160k-seqlen-hf", 256, "7ebf717"),
-            "450k": (450000, "LongSafari/hyenadna-medium-450k-seqlen-hf", 256, "42dedd4"),
+            "160k": (
+                160000,
+                "LongSafari/hyenadna-medium-160k-seqlen-hf",
+                256,
+                "7ebf717",
+            ),
+            "450k": (
+                450000,
+                "LongSafari/hyenadna-medium-450k-seqlen-hf",
+                256,
+                "42dedd4",
+            ),
             "1m": (1_000_000, "LongSafari/hyenadna-large-1m-seqlen-hf", 256, "0a629ab"),
         }
 
         if size not in details:
             raise ValueError(
-                f"Unsupported size {size}." f"Supported sizes are {list(details.keys())}"
+                f"Unsupported size {size}.Supported sizes are {list(details.keys())}"
             )
 
         maxSeqLen, name, eDim, rev = details[size]
@@ -116,7 +129,9 @@ class HyenaDNA(EmbedModel):
 
         with torch.no_grad():
             # INFO: 1. tokenization
-            tokenized = self.tokenizer.batch_encode_plus(
+
+            # WARN: this was a legacy method,   tokenized = self.tokenizer.batch_encode_plus(
+            tokenized = self.tokenizer(
                 batch,
                 max_length=self.maxSeqLen,
                 padding="max_length",
@@ -127,6 +142,7 @@ class HyenaDNA(EmbedModel):
 
             dev = self._device
             inputs = {k: v.to(dev, non_blocking=True) for k, v in tokenized.items()}
+
             # INFO: 2. inference
             outputs = self._model(**inputs, output_hidden_states=True).hidden_states
 
