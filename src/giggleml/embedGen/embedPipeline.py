@@ -7,6 +7,8 @@ from typing import final, overload, override
 import numpy as np
 import torch
 
+from giggleml.embedGen.batchInfer import BatchInfer
+
 from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
 from ..intervalTransformer import IntervalTransformer
@@ -14,7 +16,6 @@ from ..intervalTransforms import ChunkMax, IntervalTransform
 from . import embedIO
 from .embedIO import Embed, EmbedMeta
 from .embedModel import EmbedModel
-from .gpuMaster import GpuMaster
 
 
 class EmbedPipeline(ABC):
@@ -61,7 +62,7 @@ class DirectPipeline(EmbedPipeline):
         self.batchSize: int = batchSize
 
         workerCount = workerCount or torch.accelerator.device_count() or 1
-        self.gpuMaster: GpuMaster = GpuMaster(
+        self.infer: BatchInfer = BatchInfer(
             embedModel, batchSize, workerCount, subWorkers
         )
 
@@ -102,7 +103,7 @@ class DirectPipeline(EmbedPipeline):
                 # TODO:EmbedPipeline does not yet support continuing interrupted jobs.
                 #  Issue:
                 #    There are critical zones that when interrupted leave the files in an ambiguous state.
-                #      1. GpuMaster when interrupted leaves lots of out.npy.0 files instead of completed items.
+                #      1. BatchInfer, when interrupted leaves lots of out.npy.0 files instead of completed items.
                 #      2. There's ambiguity between .npy at worker aggregation step .npy.(.0 .1 .2...) -> .npy
                 #         and dechunking step .npy (len N) -> .npy (len < N)
                 print(f"Output already exists ({outPath})", file=sys.stderr)
@@ -127,7 +128,7 @@ class DirectPipeline(EmbedPipeline):
         newData = [transformer.newDataset for transformer in transformers]
         meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
         post = [DeChunk(transformer, meta) for transformer in transformers]
-        self.gpuMaster.batch(newData, out, post)
+        self.infer.batch(newData, out, post)
 
         # all Embeds were already embed.IO.writeMeta(.) due to DeChunk
         # so we need references and can avoid parsing because their meta is known

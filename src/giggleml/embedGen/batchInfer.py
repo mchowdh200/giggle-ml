@@ -1,6 +1,6 @@
 import os
-from collections.abc import Iterable, Sequence
-from datetime import datetime, timedelta
+from collections.abc import Sequence
+from datetime import timedelta
 from pathlib import Path
 from time import time
 from typing import Callable, final
@@ -11,10 +11,9 @@ import torch.distributed as dist
 from torch import multiprocessing as mp
 from torch.utils.data import DataLoader
 
-from giggleml.dataWrangling import unifiedDataset
+from giggleml.dataWrangling import fasta
 from giggleml.dataWrangling.unifiedDataset import UnifiedDataset
 
-from ..dataWrangling import fasta
 from ..dataWrangling.intervalDataset import IntervalDataset
 from ..utils.guessDevice import guessDevice
 from ..utils.types import GenomicInterval, ListLike
@@ -36,8 +35,10 @@ def passCollate(batch: Sequence[GenomicInterval]):
 
 
 @final
-class GpuMaster:
-    def __init__(self, model: EmbedModel, batchSize: int, workerCount: int, subWorkerCount: int):
+class BatchInfer:
+    def __init__(
+        self, model: EmbedModel, batchSize: int, workerCount: int, subWorkerCount: int
+    ):
         """
         @param workerCount: should be <= gpu count
         @param subWorkerCount: corresponds to pytorch::DataLoader::num_worker
@@ -61,22 +62,25 @@ class GpuMaster:
         time0 = time()
         nextIdx = 0
 
-        for i, batch in enumerate(dataLoader):
-            outputs = self.model.embed(batch).to("cpu")
-            finalIdx = nextIdx + len(outputs)
+        with torch.no_grad():
+            for i, batch in enumerate(dataLoader):
+                outputs = self.model.embed(batch).to("cpu")
+                finalIdx = nextIdx + len(outputs)
 
-            assert finalIdx <= len(outFile)
+                assert finalIdx <= len(outFile)
 
-            outFile[nextIdx:finalIdx] = outputs.numpy()
-            nextIdx += len(outputs)
+                outFile[nextIdx:finalIdx] = outputs.numpy()
+                nextIdx += len(outputs)
 
-            if i % 50 == 0:
-                rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
-            if i % 150 == 1 and rank == 0:
-                elapsed = time() - time0
-                eta = timedelta(seconds=((elapsed / (i + 1)) * len(dataLoader)) - elapsed)
-                elapsedDt = timedelta(seconds=elapsed)
-                rprint(f"== {str(elapsedDt)}, ETA: {str(eta)}")
+                if i % 50 == 0:
+                    rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
+                if i % 150 == 1 and rank == 0:
+                    elapsed = time() - time0
+                    eta = timedelta(
+                        seconds=((elapsed / (i + 1)) * len(dataLoader)) - elapsed
+                    )
+                    elapsedDt = timedelta(seconds=elapsed)
+                    rprint(f"== {str(elapsedDt)}, ETA: {str(eta)}")
 
         rprint(f"Batch: {len(dataLoader)}\t/ {len(dataLoader)}")
 
@@ -228,7 +232,7 @@ class GpuMaster:
 
             if rank == 0:
                 if (100 * setIdx // len(outPaths)) % 10 == 0:  # roughly every 10%
-                    rprint(f"{setIdx+1} / {len(outPaths)}")
+                    rprint(f"{setIdx + 1} / {len(outPaths)}")
 
         rprint(f"{len(outPaths)} / {len(outPaths)}")
         dist.barrier()
@@ -256,7 +260,9 @@ class GpuMaster:
 
         # big operation
         args = (datasets, outPaths, post)
-        mp.spawn(self._worker, args=args, nprocs=self.workerCount, join=True)  # spawn method
+        mp.spawn(
+            self._worker, args=args, nprocs=self.workerCount, join=True
+        )  # spawn method
 
         # working file space
         os.remove(masterOut)
