@@ -45,17 +45,17 @@ class ChunkDeChunk:
             )
 
         dev = src.device
-        self._chunkFactor.to(dev)
+        self._chunkFactor = self._chunkFactor.to(dev)
         chunkAmnt = self._chunkFactor.sum(dim=0)
 
         assert len(src.shape) == 2
         assert src.shape[0] == chunkAmnt
 
-        originIds = torch.arange(
-            0, len(self._chunkFactor), device=dev
-        ).repeat_interleave(self._chunkFactor, dim=0)
-
         originalAmnt = len(self._chunkFactor)
+        originIds = torch.arange(0, originalAmnt, device=dev).repeat_interleave(
+            self._chunkFactor, dim=0
+        )
+
         sums = torch.zeros(originalAmnt, *src.shape[1:], dtype=src.dtype, device=dev)
         sums.scatter_add_(0, originIds.unsqueeze(-1).expand_as(src), src)
         return sums / self._chunkFactor.unsqueeze(-1).expand_as(sums)
