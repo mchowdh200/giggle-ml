@@ -49,7 +49,7 @@ class TrainableEmbedModel(EmbedModel, ABC):
 class HyenaDNA(TrainableEmbedModel):
     wants = "sequences"
 
-    def __init__(self, size: str = "1k"):
+    def __init__(self, size: str = "1k", training=False):
         """
         Supported sizes: { 1k, 32k, 160k, 450k, 1m } corresponding to:
             hyenadna-tiny-1k-seqlen: 1024,
@@ -95,6 +95,7 @@ class HyenaDNA(TrainableEmbedModel):
         self.checkpoint = name
         self.embedDim: int = eDim
         self.sizeType = size  # used for __repr__ only
+        self.training = training
 
     @override
     def to(self, device: Device) -> Self:
@@ -113,7 +114,8 @@ class HyenaDNA(TrainableEmbedModel):
             trust_remote_code=True,
             revision=self.rev,
         )
-        model.eval()
+        if not self.training:
+            model.eval()
         # WARN: HyenaDNA cannot be torch.compile(.)ed because the Hyena layers
         # use FFT which is fundamentally based on complex numbers. TorchInductor
         # does not support complex operators (4/30/2025)
