@@ -9,9 +9,8 @@ REMOTE_TARGET="${REMOTE_HOST}:${REMOTE_BASE_DIR}"
 # Using an array for readability and easier modification
 declare -a EXCLUDE_PATTERNS=(
     "data/"
-    ".data/"
+    "models/"
     "experiments/"
-    ".experiments/"
     "jobOutput"
     "logs"
     # temporary files

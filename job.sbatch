@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --partition=nvidia-a100
-#   #SBATCH --nodelist=fijigpu-04
+#SBATCH --nodelist=fijigpu-04
 #SBATCH --gres=gpu:4
 #SBATCH --mem=500G
 
@@ -11,7 +11,7 @@
 
 #SBATCH --job-name=giggleML
 #SBATCH --output=jobOutput
-#SBATCH --time=2-00:00:00
+#SBATCH --time=0-01:00:00
 
 clear
 echo Starting job.
@@ -23,6 +23,7 @@ export PYTHONUNBUFFERED=1
 data="/cache/siwa3657/data"
 # data="data"
 # time python3 scripts/roadmapEpigenomicsEmbeds.py $data/roadmap_epigenomics $data/hg/hg19.fa
-time snakemake --cores 1 all
+# time snakemake --cores 1 all
+time python3 scripts/roadEpTripletFT.py $data/roadmap_epigenomics/beds $data/hg/hg19.fa
 
 echo Complete.
