@@ -303,6 +303,8 @@ cellCategory = {
     },
 }
 
+bedNames = [f"{x}_{y}" for x in cellTypes for y in chromatinStates]
+
 _cellCategoryInverse = {
     value: category for (category, values) in cellCategory.items() for value in values
 }
