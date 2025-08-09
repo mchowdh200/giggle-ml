@@ -5,13 +5,15 @@ from functools import cached_property
 from pathlib import Path
 from typing import Callable, Protocol, final, override
 
+from giggleml.utils.path_utils import as_path
+
 from ..utils.types import GenomicInterval, lazy
 from .kindDataset import KindDataset
 
 
 class IntervalDataset(Protocol):
     @property
-    def associatedFastaPath(self) -> str | None: ...
+    def associatedFastaPath(self) -> Path | None: ...
 
     def __len__(self) -> int: ...
 
@@ -34,11 +36,11 @@ class LateIntervalDataset(KindDataset[GenomicInterval]):
         self,
         lazyGetter: Callable[[], list[GenomicInterval]],
         lazyLength: Callable[[], int] | int | None,
-        associatedFastaPath: str | None,
+        associatedFastaPath: str | Path | None,
     ):
         self.lazyGetter: Callable[[], list[GenomicInterval]] = lazyGetter
         self.lazyLength: Callable[[], int] | int | None = lazyLength
-        self.associatedFastaPath: str | None = associatedFastaPath
+        self.associatedFastaPath: Path | None = as_path(associatedFastaPath)
 
     @cached_property
     def _content(self):
@@ -67,11 +69,11 @@ class MemoryIntervalDataset(KindDataset[GenomicInterval]):
     def __init__(
         self,
         intervals: Sequence[GenomicInterval],
-        associatedFastaPath: str | None = None,
+        associatedFastaPath: str | Path | None = None,
     ):
         super().__init__()
         self.intervals = intervals
-        self.associatedFastaPath = associatedFastaPath
+        self.associatedFastaPath = as_path(associatedFastaPath)
 
     @override
     def __len__(self):
@@ -87,7 +89,7 @@ class BedDataset(LateIntervalDataset):
     def __init__(
         self,
         path: str | Path,
-        associatedFastaPath: str | None = None,
+        associatedFastaPath: str | Path | None = None,
         limit: int | None = None,
         samplingRate: float = 1,
     ):
@@ -96,7 +98,7 @@ class BedDataset(LateIntervalDataset):
         @param path: can be either a .bed or .bed.gz file.
         @param samplingRate: should be 0-1, 1 indicates guaranteed full reads. Seed is fixed.
         """
-        self.path: str = str(path) if isinstance(path, Path) else path
+        self.path: Path = as_path(path)
         assert samplingRate >= 0 and samplingRate <= 1
         self.samplingRate: float = samplingRate
         super().__init__(
@@ -123,10 +125,10 @@ class BedDataset(LateIntervalDataset):
                 intervals.append((name, int(start), int(stop)))
             return intervals
 
-        if self.path.endswith(".bed.gz"):
+        if self.path.suffixes[-2:] == [".bed", ".gz"]:
             with gzip.open(self.path, "rt") as file:  # 'rt' mode for text reading
                 return parse(file)
-        elif self.path.endswith(".bed"):
+        elif self.path.suffix == ".bed":
             with open(self.path, "r") as file:
                 return parse(file)
         else:
