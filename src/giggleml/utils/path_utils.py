@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import overload
 
 
 def fix_bed_ext[T: str | Path](path: T) -> T:
@@ -35,7 +36,15 @@ def fix_bed_ext[T: str | Path](path: T) -> T:
     raise FileNotFoundError(path)
 
 
-def as_path(path: str | Path) -> Path:
+@overload
+def as_path(path: Path | None) -> Path: ...
+
+
+@overload
+def as_path(path: str | None) -> Path: ...
+
+
+def as_path(path: str | Path | None) -> Path | None:
     if isinstance(path, str):
         return Path(path)
     return path
