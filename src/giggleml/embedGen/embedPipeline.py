@@ -127,7 +127,7 @@ class DirectPipeline(EmbedPipeline):
         transformers = [IntervalTransformer(data, transforms) for data in intervals]
         newData = [transformer.newDataset for transformer in transformers]
         meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
-        post = [DeChunk(transformer, meta) for transformer in transformers]
+        post = [_DeChunk(transformer, meta) for transformer in transformers]
         self.infer.batch(newData, out, post)
 
         # all Embeds were already embed.IO.writeMeta(.) due to DeChunk
@@ -140,7 +140,7 @@ class DirectPipeline(EmbedPipeline):
 
 
 @final
-class DeChunk:
+class _DeChunk:
     def __init__(self, transformer: IntervalTransformer, meta: EmbedMeta):
         self.transformer = transformer
         self.meta = meta
