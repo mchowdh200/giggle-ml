@@ -37,7 +37,7 @@ class EmbedModel(ABC):
 class TrainableEmbedModel(EmbedModel, ABC):
     @property
     @abstractmethod
-    def trainableModel(self): ...
+    def trainableModel(self) -> Any: ...
 
 
 # ===================
