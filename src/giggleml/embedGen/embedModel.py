@@ -137,7 +137,7 @@ class HyenaDNA(TrainableEmbedModel):
 
         batch = [item.upper() for item in batch]
 
-        with torch.no_grad():
+        with torch.set_grad_enabled(self.training):
             # INFO: 1. tokenization
 
             # WARN: this was a legacy method,   tokenized = self.tokenizer.batch_encode_plus(
