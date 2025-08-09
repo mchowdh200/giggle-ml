@@ -13,6 +13,7 @@ dependencies = [
     "pandas>=2.3.1",
     "pyfastx>=2.2.0",
     "pytest>=8.3.5",
+    "pytorch-lightning>=2.5.2",
     "ruranges>=0.0.10",
     "scikit-learn>=1.6.1",
     "scipy>=1.15.2",
