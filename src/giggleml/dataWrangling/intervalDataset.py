@@ -2,7 +2,7 @@ import gzip
 import random
 from collections.abc import Iterator, Sequence
 from functools import cached_property
-from random import Random
+from pathlib import Path
 from typing import Callable, Protocol, final, override
 
 from ..utils.types import GenomicInterval, lazy
@@ -65,7 +65,9 @@ class LateIntervalDataset(KindDataset[GenomicInterval]):
 @final
 class MemoryIntervalDataset(KindDataset[GenomicInterval]):
     def __init__(
-        self, intervals: Sequence[GenomicInterval], associatedFastaPath: str | None = None
+        self,
+        intervals: Sequence[GenomicInterval],
+        associatedFastaPath: str | None = None,
     ):
         super().__init__()
         self.intervals = intervals
@@ -84,7 +86,7 @@ class MemoryIntervalDataset(KindDataset[GenomicInterval]):
 class BedDataset(LateIntervalDataset):
     def __init__(
         self,
-        path: str,
+        path: str | Path,
         associatedFastaPath: str | None = None,
         limit: int | None = None,
         samplingRate: float = 1,
@@ -94,11 +96,13 @@ class BedDataset(LateIntervalDataset):
         @param path: can be either a .bed or .bed.gz file.
         @param samplingRate: should be 0-1, 1 indicates guaranteed full reads. Seed is fixed.
         """
-        self.path: str = path
+        self.path: str = str(path) if isinstance(path, Path) else path
         assert samplingRate >= 0 and samplingRate <= 1
         self.samplingRate: float = samplingRate
         super().__init__(
-            lazyGetter=self._load, lazyLength=limit, associatedFastaPath=associatedFastaPath
+            lazyGetter=self._load,
+            lazyLength=limit,
+            associatedFastaPath=associatedFastaPath,
         )
 
     def _load(self):
