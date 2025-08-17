@@ -1,93 +1,378 @@
 import os
-import pickle
-import subprocess
+import tempfile
+from collections.abc import Callable, Iterator
+from functools import cache
+from pathlib import Path
+from random import Random
+from typing import override
+
+import numpy as np
+import torch
+from lightning_fabric import Fabric
+from lightning_fabric.loggers.tensorboard import TensorBoardLogger
+from lightning_fabric.wrappers import nn
+from numpy._typing import NDArray
+from torch import Module, Tensor, optim
+from torch.nn.modules.loss import TripletMarginLoss
+from torch.utils.data import IterableDataset
 
 import giggleml.utils.roadmapEpigenomics as rme
-from giggleml.dataWrangling.intervalDataset import BedDataset
-from giggleml.utils.misc import fix_bed_ext
+from giggleml.dataWrangling.intervalDataset import (
+    BedDataset,
+    IntervalDataset,
+    MemoryIntervalDataset,
+)
+from giggleml.embedGen.embedIO import Embed
+from giggleml.embedGen.embedModel import EmbedModel, HyenaDNA, TrainableEmbedModel
+from giggleml.embedGen.embedPipeline import DirectPipeline, EmbedPipeline
+from giggleml.utils.misc import partition_integer, partition_list
+from giggleml.utils.path_utils import as_path, fix_bed_ext
 from giggleml.utils.types import GenomicInterval
 
 
-def seqpare_raw(roadep_path: str, content: list[GenomicInterval]):
-    with open("tmp.bed", "w") as f:
-        for chr, start, end in content:
-            f.write(f"{chr}\t{start}\t{end}\n")
+class SeqpareDB:
+    """reads all seqpare form .tsv files in the directory, taking the name, without last suffix, as the label"""
 
-    seqpare = subprocess.run(
-        [
-            "seqpare",
-            roadep_path + "/*",
-            "tmp.bed",
-            "-m",
-            "1",
-            "-o",
-            "out.tmp.tsv",
-        ],  # Command and its arguments as a list
-        capture_output=True,
-        text=True,  # Decode stdout/stderr as text (UTF-8 by default)
-        check=True,  # Raise an exception if the command returns a non-zero exit code
-    )
+    def __init__(self, dir: str | Path, positive_threshold: float = 0.7) -> None:
+        """categorizes into positive & negative based on the similarity"""
+        self.dir: Path = as_path(dir)
+        self.positive_threshold: float = positive_threshold
+        self._labels: dict[str, int] = dict()
 
-    if "execution time" not in seqpare.stdout:
-        raise RuntimeError("Encountered issue executing seqpare: " + str(seqpare))
+        for file in self.dir.iterdir():
+            if file.suffix == ".tsv":
+                self._labels[file.stem] = len(self._labels)
 
-    print("seqpare: ", seqpare.stdout)
-    scores = dict[str, float]()
+    @cache
+    def _fetch_dense(self, label: str) -> NDArray[np.bool]:
+        """@returns (positives, negatives) for a label"""
 
-    with open("out.tmp.tsv", "r") as f:
-        next(f)  # skip header
+        path = self.dir / (label + ".tsv")
 
-        for line in f:
-            split = line.split("\t")
+        if not path.exists():
+            raise FileNotFoundError(path)
 
-            if len(split) != 6:
-                raise RuntimeError(
-                    "Seqpare output parsing issue; expected 5 columns in out.tmp.tsv"
+        with open(path, "r") as f:
+            next(f)
+            bits: NDArray[np.bool] = np.zeros(len(self._labels), dtype=np.bool)
+
+            for line in f:
+                terms = line.split()
+                item = terms[5]
+                item_id = self._labels[item]
+                positive = float(terms[4]) >= self.positive_threshold
+                bits[item_id] = positive
+
+            return bits
+
+    def fetch(self, label: str) -> tuple[list[str], list[str]]:
+        """@returns (positives, negatives) for a label"""
+        bits = self._fetch_dense(label)
+        positives, negatives = list(), list()
+        labels = list(self._labels.keys())
+
+        for i, bit in enumerate(bits):
+            label = labels[i]
+
+            if bit:
+                positives.append(label)
+            else:
+                negatives.append(label)
+
+        return positives, negatives
+
+
+# A cluster is a list of bed files
+Cluster = list[list[GenomicInterval]]
+
+
+# The "RME" (roadmap epigenomics) dataset is a series of bed files with known names corresponding to
+# tissues and chromatin states. Since the dataset is fixed, we iterate it by searching for known
+# items, but we still need the directory path.
+class RmeSeqpareClusters(IterableDataset):
+    """The dataset yields a series of interval clusters where only intervals within the same cluster should be considered positive."""
+
+    def __init__(
+        self,
+        road_epig_path: str | Path,
+        seqpare: SeqpareDB,
+        world_size: int,
+        rank: int,
+        clusters_amnt: int = 10,
+        cluster_size: int = 10,
+        density: int = 30,
+    ) -> None:
+        """
+        @param density: the amount of intervals per candidate
+        """
+        super().__init__()
+        self.road_epig_path: Path = as_path(road_epig_path)
+        self.seqpare_db: SeqpareDB = seqpare
+        self.world_size: int = world_size
+        self.rank: int = rank
+        self.anchors: int = clusters_amnt
+        self.cluster_size: int = cluster_size
+        self.density: int = density
+        self._rng: Random = Random(42)
+
+    @override
+    def __iter__(self) -> Iterator[list[Cluster]]:
+        # "my" -- this rank
+        my_rng: Random = Random(self.rank)
+        # an identical value across the world size
+        anchors = self._rng.choices(rme.bedNames, k=self.anchors)
+        my_anchors = partition_list(anchors, self.world_size, self.rank)
+        my_clusters = list[Cluster]()
+
+        for anchor in my_anchors:
+            neighbors, _ = self.seqpare_db.fetch(anchor)
+            # in the event that an anchor has little neighbors, this will repeatedly resample
+            # from the same labels
+            labels = my_rng.choices([anchor, *neighbors], k=self.cluster_size)
+            cluster: Cluster = list()
+
+            # map into interval list
+            for label in labels:
+                path = fix_bed_ext(self.road_epig_path / label)
+                bed = list(iter(BedDataset(path)))
+                intervals = my_rng.choices(bed, k=self.density)
+                cluster.append(intervals)
+
+            my_clusters.append(cluster)
+
+        yield my_clusters
+
+
+# TODO: where's the cross validation?
+
+
+EmbedCluster = list[Embed]
+Loss3 = Callable[[Tensor, Tensor, Tensor], Tensor]
+
+
+class IntervalClusterTripletFT(Module):
+    def __init__(
+        self, world_size: int, rank: int, model: TrainableEmbedModel, loss: Loss3
+    ):
+        super().__init__()
+        self.world_size = world_size
+        self.rank = rank
+        self.model: TrainableEmbedModel = model
+        self.loss: Loss3 = loss
+
+    def training_step(self, batch: Tensor):
+        """
+        Assumes that the batch is identical across all ranks.
+        The separation of labor happens internally.
+        @param batch: shape[cluster_amnt, cluster_size, embed_dim]
+        """
+        # basics
+        edim = self.model.embedDim
+        rank = self.rank
+        world_size = self.world_size
+
+        # online hard triplet mining:
+        # We're looking for within a category, the furthest from anchor
+        # and outside the category, the closest to the anchor
+
+        all_embeds = batch.reshape(-1, edim)
+
+        # this rank operates on a subset of the bach
+        splits = partition_integer(len(batch), world_size)
+        # "my" means this rank
+        my_start_cluster = sum(splits[:rank])
+        my_amnt_clusters = splits[rank]
+        my_embeds = batch[my_start_cluster : my_start_cluster + my_amnt_clusters].view(
+            -1, edim
+        )
+
+        # INFO:
+        # high vram cost.
+        # using L2 distance.
+        dist_matrix = torch.cdist(my_embeds, all_embeds, p=2.0)
+
+        # Create a mask to identify positive pairs (anchor and other have the same label)
+        all_labels = (
+            torch.arange(batch.shape[0], device=self.device)
+            .unsqueeze(1)
+            .expand(batch.shape[0], batch.shape[1])
+        )
+        my_labels = all_labels[my_start_cluster : my_start_cluster + my_amnt_clusters]
+        positive_mask = (my_labels.reshape(-1).unsqueeze(1)) == (
+            all_labels.reshape(-1).unsqueeze(0)
+        )
+
+        # positives with max dist
+        pos_dist = dist_matrix.clone()
+        pos_dist[~positive_mask] = -1.0
+        _, pos_indices = torch.max(pos_dist, dim=1)
+        positives = all_embeds[pos_indices]
+
+        # negatives with min dist
+        neg_dist = dist_matrix.clone()
+        neg_dist[positive_mask] = float("inf")
+        _, neg_indices = torch.min(neg_dist, dim=1)
+        negatives = all_embeds[neg_indices]
+
+        # hard triplets anchored by this rank's embeds
+        return self.loss(my_embeds, positives, negatives)
+
+
+def embed_batch(
+    pipeline: EmbedPipeline, edim: int, batch: list[Cluster], fasta: Path | str
+):
+    """
+    Embeds parallel. Meant to be called on a single process, automatically
+    distributes to workers internally.
+    """
+
+    fasta = as_path(fasta)
+    flat_input: list[IntervalDataset] = list()
+    temp_paths = list[str]()
+
+    try:
+        for cluster in batch:
+            for intervals in cluster:
+                dataset = MemoryIntervalDataset(intervals, fasta)
+                flat_input.append(dataset)
+                temp_paths.append(
+                    tempfile.NamedTemporaryFile(suffix=".npy", delete=False).name
                 )
 
-            score = float(split[4])
-            # a/b/c.d -> c
-            other = split[5].split("/")[-1].split(".")[0]
-            scores[other] = score
-
-    os.remove("out.tmp.tsv")
-    os.remove("tmp.bed")
-    return scores
+        embeds = pipeline.embed(flat_input, temp_paths)
+        embed_tensors = [embed.data for embed in embeds]
+        return Tensor(embed_tensors).reshape(len(batch), -1, edim)
+    finally:
+        for path in temp_paths:
+            os.remove(path)
 
 
-def ensure_dataset(combo_path, roadep_path):
-    cache = dict[int, list[GenomicInterval]]()
-
-    for i, name in enumerate(rme.bedNames):
-        path = fix_bed_ext(f"{roadep_path}/{name}")
-        cache[i] = list(iter(BedDataset(path)))
-
-    progress = 0
-
-    for i in range(len(rme.bedNames)):
-        for j in range(i + 1, len(rme.bedNames)):
-            print(progress)
-            progress += 1
-
-            terms = [i, j]
-            k = j
-
-            while len(cache[k]) < 100:
-                k = (k + 1) % len(rme.bedNames)
-                terms.append(k)
-
-            content: list[GenomicInterval] = [
-                interval for i in terms for interval in cache[i]
-            ]
-
-            scores = seqpare_raw(roadep_path, content)
-            combo_name = "-".join([rme.bedNames[i] for i in terms])
-            pickle.dump(scores, open(f"{combo_path}/{combo_name}.pickle", "wb"))
+# ---------------------------------
+#     Main Training Function
+# ---------------------------------
 
 
 def main():
-    combo_path = "data/roadep_combo"
-    roadep_path = "data/roadmap_epigenomics/beds"
-    fasta_path = "data/hg/hg19.fa"
-    model_path = "models/hdnaSeqpareFT"
-    ensure_dataset(combo_path, roadep_path)
+    # INFO: ---------------------------
+    #       Config
+    # ---------------------------------
+
+    # paths
+    rme_dir = Path("data/roadmap_epigenomics")
+    seqpare_dir = Path(rme_dir, "seqpareRanks")
+    training_dir = Path("models/hdna_seqpare_08092025")
+    log_dir = Path(training_dir, "logs")
+    checkpoint_dir = Path(training_dir, "checkpoints")
+    fasta = Path("data/hg/hg19.fa")
+
+    # cluster sampling
+    clusters_per_batch = 10
+    cluster_size = 10
+    centroid_size = 30
+
+    # training
+    epochs = 10
+    emodel: EmbedModel = HyenaDNA("1k", training=True)
+    optimizer = optim.AdamW(lr=1e-7, params=emodel.trainableModel.parameters())
+    loss = TripletMarginLoss(margin=3)
+
+    # the embed pipeline is used for inference
+    pipeline = DirectPipeline(emodel, 64)
+
+    # other
+    seqpare_positive_threshold = 0.7
+
+    # INFO: ----------------------------
+    #       Fabric Setup
+    # ---------------------------------
+    # Use DDP strategy for multi-GPU training.
+    # 'auto' will intelligently select the accelerator (CUDA, MPS, CPU) and devices.
+    logger = TensorBoardLogger(root_dir=log_dir)
+    fabric = Fabric(
+        accelerator="auto", strategy="ddp", devices="auto", loggers=[logger]
+    )
+    world_size = fabric.world_size
+    rank = fabric.global_rank
+    fabric.launch()  # Entry point for distributed training
+
+    # INFO: ---------------------------
+    #       Setup Model, Optimizer, and Data
+    # ---------------------------------
+
+    seqpare_db = SeqpareDB(seqpare_dir, seqpare_positive_threshold)
+    dataset = RmeSeqpareClusters(
+        rme_dir,
+        seqpare_db,
+        world_size,
+        rank,
+        clusters_per_batch,
+        cluster_size,
+        centroid_size,
+    )
+    train_step = IntervalClusterTripletFT(world_size, rank, emodel, loss)
+    # Use fabric.setup to wrap the components. This prepares them for the
+    # chosen hardware and strategy (e.g., wraps model in DDP).
+    model: nn.Module = emodel.trainableModel
+    model, optimizer = fabric.setup(model, optimizer)
+
+    # INFO: ----------------------------
+    #       Prepare for Resumption
+    # ---------------------------------
+    # Create directories and define the single checkpoint file path.
+    if fabric.is_global_zero:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = checkpoint_dir / "latest-checkpoint.pt"
+
+    start_epoch = 0
+    if fabric.is_global_zero and checkpoint_path.is_file():
+        fabric.print(f"Resuming from checkpoint: {checkpoint_path}")
+        # `fabric.load` safely loads the checkpoint ONLY on the main process
+        state = fabric.load(checkpoint_path)
+        model.load_state_dict(state["model"])
+        optimizer.load_state_dict(state["optimizer"])
+        start_epoch = state["epoch"] + 1
+
+    # Broadcast the start_epoch to all processes to ensure they are in sync
+    start_epoch = fabric.broadcast(start_epoch)
+
+    # INFO: ---------------------------
+    #       Training Loop
+    # ---------------------------------
+    data = iter(dataset)
+
+    for epoch in range(start_epoch, epochs):
+        # Training phase
+        model.train()
+        optimizer.zero_grad()
+
+        if rank == 0:
+            batch = next(data)
+            # we embed on rank zero because the Embed Pipeline internally distributes to workers and
+            # returns a series of file wrappers representing the embeddings.
+            # then, we sync all threads on the batch and each mines for hard triplets in different
+            # areas within the (same) overall batch
+            batch_tensor = embed_batch(pipeline, emodel.embedDim, batch, fasta)
+            batch_tensor = fabric.broadcast(batch_tensor)
+        else:
+            batch_tensor: Tensor = fabric.broadcast(None)  # pyright: ignore[reportAssignmentType]
+
+        loss = train_step.training_step(batch_tensor)
+        fabric.backward(loss)
+        optimizer.step()
+
+        fabric.print(f"Epoch {epoch} / {epochs} | Loss: {loss.item():.4f}")
+        fabric.log("train_loss", loss.item(), step=epoch)
+
+        # INFO: ---------------------------
+        #       Save Checkpoint
+        # ---------------------------------
+        # Fabric ensures this only happens on the main process to prevent race conditions.
+        state = {"model": model, "optimizer": optimizer, "epoch": epoch}
+        fabric.save(checkpoint_path, state)
+        fabric.print(f"Checkpoint saved at epoch {epoch} to {checkpoint_path}")
+
+    fabric.print("Training finished!")
+
+
+if __name__ == "__main__":
+    main()
