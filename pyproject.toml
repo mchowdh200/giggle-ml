@@ -19,6 +19,7 @@ dependencies = [
     "scipy>=1.15.2",
     "snakemake>=9.3.2",
     "statistics>=1.0.3.5",
+    "tensorboard>=2.20.0",
     "torch==2.6",
     "transformers>=4.51.3",
 ]
