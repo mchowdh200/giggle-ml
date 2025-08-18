@@ -12,8 +12,10 @@ from lightning_fabric import Fabric
 from lightning_fabric.loggers.tensorboard import TensorBoardLogger
 from lightning_fabric.wrappers import nn
 from numpy._typing import NDArray
-from torch import Module, Tensor, optim
+from torch import Tensor, optim
+from torch.nn import Module
 from torch.nn.modules.loss import TripletMarginLoss
+from torch.types import Device
 from torch.utils.data import IterableDataset
 
 import giggleml.utils.roadmapEpigenomics as rme
@@ -47,7 +49,7 @@ class SeqpareDB:
     def _fetch_dense(self, label: str) -> NDArray[np.bool]:
         """@returns (positives, negatives) for a label"""
 
-        path = self.dir / (label + ".tsv")
+        path = self.dir / (label + ".bed.tsv")
 
         if not path.exists():
             raise FileNotFoundError(path)
@@ -57,9 +59,12 @@ class SeqpareDB:
             bits: NDArray[np.bool] = np.zeros(len(self._labels), dtype=np.bool)
 
             for line in f:
+                # parse the seqpare tsv file
                 terms = line.split()
+                # the column that corresponds to file names
                 item = terms[5]
-                item_id = self._labels[item]
+                # these are in the form ./label.bed
+                item_id = self._labels[item[2:]]
                 positive = float(terms[4]) >= self.positive_threshold
                 bits[item_id] = positive
 
@@ -152,11 +157,17 @@ Loss3 = Callable[[Tensor, Tensor, Tensor], Tensor]
 
 class IntervalClusterTripletFT(Module):
     def __init__(
-        self, world_size: int, rank: int, model: TrainableEmbedModel, loss: Loss3
+        self,
+        world_size: int,
+        rank: int,
+        device: Device,
+        model: TrainableEmbedModel,
+        loss: Loss3,
     ):
         super().__init__()
         self.world_size = world_size
         self.rank = rank
+        self.device = device
         self.model: TrainableEmbedModel = model
         self.loss: Loss3 = loss
 
@@ -235,12 +246,13 @@ def embed_batch(
             for intervals in cluster:
                 dataset = MemoryIntervalDataset(intervals, fasta)
                 flat_input.append(dataset)
-                temp_paths.append(
-                    tempfile.NamedTemporaryFile(suffix=".npy", delete=False).name
-                )
+                temp_path = tempfile.NamedTemporaryFile(
+                    suffix=".npy", delete=False
+                ).name
+                temp_paths.append(temp_path)
 
         embeds = pipeline.embed(flat_input, temp_paths)
-        embed_tensors = [embed.data for embed in embeds]
+        embed_tensors = np.array([embed.data for embed in embeds])
         return Tensor(embed_tensors).reshape(len(batch), -1, edim)
     finally:
         for path in temp_paths:
@@ -258,8 +270,8 @@ def main():
     # ---------------------------------
 
     # paths
-    rme_dir = Path("data/roadmap_epigenomics")
-    seqpare_dir = Path(rme_dir, "seqpareRanks")
+    rme_dir = Path("data/roadmap_epigenomics/beds")
+    seqpare_dir = Path("data/roadmap_epigenomics/seqpareRanks")
     training_dir = Path("models/hdna_seqpare_08092025")
     log_dir = Path(training_dir, "logs")
     checkpoint_dir = Path(training_dir, "checkpoints")
@@ -291,9 +303,10 @@ def main():
     fabric = Fabric(
         accelerator="auto", strategy="ddp", devices="auto", loggers=[logger]
     )
+    fabric.launch()  # Entry point for distributed training
     world_size = fabric.world_size
     rank = fabric.global_rank
-    fabric.launch()  # Entry point for distributed training
+    device = fabric.device
 
     # INFO: ---------------------------
     #       Setup Model, Optimizer, and Data
@@ -309,7 +322,7 @@ def main():
         cluster_size,
         centroid_size,
     )
-    train_step = IntervalClusterTripletFT(world_size, rank, emodel, loss)
+    train_step = IntervalClusterTripletFT(world_size, rank, device, emodel, loss)
     # Use fabric.setup to wrap the components. This prepares them for the
     # chosen hardware and strategy (e.g., wraps model in DDP).
     model: nn.Module = emodel.trainableModel
