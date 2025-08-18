@@ -140,7 +140,7 @@ class HyenaDNA(TrainableEmbedModel):
         with torch.set_grad_enabled(self.training):
             # INFO: 1. tokenization
 
-            # WARN: this was a legacy method,   tokenized = self.tokenizer.batch_encode_plus(
+            # WARN: this was a legacy method:   tokenized = self.tokenizer.batch_encode_plus(
             tokenized = self.tokenizer(
                 batch,
                 max_length=self.maxSeqLen,
