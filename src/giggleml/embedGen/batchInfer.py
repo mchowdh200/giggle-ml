@@ -62,25 +62,24 @@ class BatchInfer:
         time0 = time()
         nextIdx = 0
 
-        with torch.no_grad():
-            for i, batch in enumerate(dataLoader):
-                outputs = self.model.embed(batch).to("cpu")
-                finalIdx = nextIdx + len(outputs)
+        for i, batch in enumerate(dataLoader):
+            outputs = self.model.embed(batch).to("cpu")
+            finalIdx = nextIdx + len(outputs)
 
-                assert finalIdx <= len(outFile)
+            assert finalIdx <= len(outFile)
 
-                outFile[nextIdx:finalIdx] = outputs.numpy()
-                nextIdx += len(outputs)
+            outFile[nextIdx:finalIdx] = outputs.detach().numpy()
+            nextIdx += len(outputs)
 
-                if i % 50 == 0:
-                    rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
-                if i % 150 == 1 and rank == 0:
-                    elapsed = time() - time0
-                    eta = timedelta(
-                        seconds=((elapsed / (i + 1)) * len(dataLoader)) - elapsed
-                    )
-                    elapsedDt = timedelta(seconds=elapsed)
-                    rprint(f"== {str(elapsedDt)}, ETA: {str(eta)}")
+            if i % 50 == 0:
+                rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
+            if i % 150 == 1 and rank == 0:
+                elapsed = time() - time0
+                eta = timedelta(
+                    seconds=((elapsed / (i + 1)) * len(dataLoader)) - elapsed
+                )
+                elapsedDt = timedelta(seconds=elapsed)
+                rprint(f"== {str(elapsedDt)}, ETA: {str(eta)}")
 
         rprint(f"Batch: {len(dataLoader)}\t/ {len(dataLoader)}")
 
@@ -150,93 +149,95 @@ class BatchInfer:
             collate_fn=collate,
         )
 
-        # INFO: init process group
+        try:
+            # INFO: init process group
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "12356"
-        dist.init_process_group(
-            backend="nccl" if torch.cuda.is_available() else "gloo",
-            rank=rank,
-            world_size=self.workerCount,
-            # it seems to be about 1.2 seconds per batch 5/27/2025
-            timeout=timedelta(seconds=len(masterDataset) / self.workerCount * 0.5),
-            device_id=(device if device.type == "cuda" else None),
-        )
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = "12356"
+            dist.init_process_group(
+                backend="nccl" if torch.cuda.is_available() else "gloo",
+                rank=rank,
+                world_size=self.workerCount,
+                # it seems to be about 1.2 seconds per batch 5/27/2025
+                timeout=timedelta(seconds=len(masterDataset) / self.workerCount * 0.5),
+                device_id=(device if device.type == "cuda" else None),
+            )
 
-        if not dist.is_initialized():
-            raise RuntimeError("Process group could not initialized")
+            if not dist.is_initialized():
+                raise RuntimeError("Process group could not initialized")
 
-        dist.barrier()
+            dist.barrier()
 
-        # INFO: big step
+            # INFO: big step
 
-        self._inferLoop(
-            rank,
-            dataLoader,
-            masterOutFile,
-        )
+            self._inferLoop(
+                rank,
+                dataLoader,
+                masterOutFile,
+            )
 
-        dist.barrier()  # INFO: inference complete.
-        #                 now beginning separation of outputs
-        if rank == 0:
-            print("Starting post-processing.")
-
-        # we are splitting up embeds from masterOutFile into separate memmaps
-        # based on the distribution of datasets. Each worker is responsible for
-        # the datasets they implicitly completed.
-
-        setIdxStart = (
-            masterDataset.listIdxOf(blockSampler.lower)
-            if blockSampler.lower < len(masterDataset)
-            else len(masterDataset.lists)
-        )
-        setIdxEnd = (
-            masterDataset.listIdxOf(blockSampler.upper)
-            if blockSampler.upper < len(masterDataset)
-            else len(masterDataset.lists)
-        )
-
-        #                                     (1)     (2)     (3)
-        # for datasets full of intervals,   [----] [-------] [---]
-        # the sampler can split datasets:   |==========|=========|
-        # so memmap init works like:        (rank1)(    rank2    )
-
-        # since sometimes a rank might need to write some intervals preparred by
-        # rank-1, we need to remap masterOutFile
-        masterOutFile.flush()
-        del masterOutFile
-        masterSize = masterDataset.sums[setIdxEnd] - masterDataset.sums[setIdxStart]
-        masterOutFile = np.memmap(
-            masterOutPath,
-            np.float32,
-            "r",
-            offset=masterDataset.sums[setIdxStart] * eDim * 4,
-            shape=(masterSize, eDim),
-        )
-
-        for setIdx in range(setIdxStart, setIdxEnd):
-            size = len(datasets[setIdx])
-            outPath = outPaths[setIdx]
-
-            # reorganize data
-            i = masterDataset.sums[setIdx] - masterDataset.sums[setIdxStart]
-            content = masterOutFile[i : i + size]
-            mmap = np.memmap(outPath, np.float32, "w+", shape=(size, eDim))
-            mmap[:] = content
-            mmap.flush()
-
-            if post is not None:
-                # post processing
-                postCall = post[setIdx]
-                postCall(mmap)
-
+            dist.barrier()  # INFO: inference complete.
+            #                 now beginning separation of outputs
             if rank == 0:
-                if (100 * setIdx // len(outPaths)) % 10 == 0:  # roughly every 10%
-                    rprint(f"{setIdx + 1} / {len(outPaths)}")
+                print("Starting post-processing.")
 
-        rprint(f"{len(outPaths)} / {len(outPaths)}")
-        dist.barrier()
-        dist.destroy_process_group()
+            # we are splitting up embeds from masterOutFile into separate memmaps
+            # based on the distribution of datasets. Each worker is responsible for
+            # the datasets they implicitly completed.
+
+            setIdxStart = (
+                masterDataset.listIdxOf(blockSampler.lower)
+                if blockSampler.lower < len(masterDataset)
+                else len(masterDataset.lists)
+            )
+            setIdxEnd = (
+                masterDataset.listIdxOf(blockSampler.upper)
+                if blockSampler.upper < len(masterDataset)
+                else len(masterDataset.lists)
+            )
+
+            #                                     (1)     (2)     (3)
+            # for datasets full of intervals,   [----] [-------] [---]
+            # the sampler can split datasets:   |==========|=========|
+            # so memmap init works like:        (rank1)(    rank2    )
+
+            # since sometimes a rank might need to write some intervals preparred by
+            # rank-1, we need to remap masterOutFile
+            masterOutFile.flush()
+            del masterOutFile
+            masterSize = masterDataset.sums[setIdxEnd] - masterDataset.sums[setIdxStart]
+            masterOutFile = np.memmap(
+                masterOutPath,
+                np.float32,
+                "r",
+                offset=masterDataset.sums[setIdxStart] * eDim * 4,
+                shape=(masterSize, eDim),
+            )
+
+            for setIdx in range(setIdxStart, setIdxEnd):
+                size = len(datasets[setIdx])
+                outPath = outPaths[setIdx]
+
+                # reorganize data
+                i = masterDataset.sums[setIdx] - masterDataset.sums[setIdxStart]
+                content = masterOutFile[i : i + size]
+                mmap = np.memmap(outPath, np.float32, "w+", shape=(size, eDim))
+                mmap[:] = content
+                mmap.flush()
+
+                if post is not None:
+                    # post processing
+                    postCall = post[setIdx]
+                    postCall(mmap)
+
+                if rank == 0:
+                    if (100 * setIdx // len(outPaths)) % 10 == 0:  # roughly every 10%
+                        rprint(f"{setIdx + 1} / {len(outPaths)}")
+
+            rprint(f"{len(outPaths)} / {len(outPaths)}")
+            dist.barrier()
+        finally:
+            dist.destroy_process_group()
 
     def batch(
         self,
