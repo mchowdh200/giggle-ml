@@ -1,7 +1,7 @@
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from os.path import isfile
+from os.path import getsize, isfile
 from typing import final, overload, override
 
 import numpy as np
@@ -100,13 +100,17 @@ class DirectPipeline(EmbedPipeline):
 
         for outPath in out:
             if isfile(outPath):
-                # TODO:EmbedPipeline does not yet support continuing interrupted jobs.
-                #  Issue:
-                #    There are critical zones that when interrupted leave the files in an ambiguous state.
-                #      1. BatchInfer, when interrupted leaves lots of out.npy.0 files instead of completed items.
-                #      2. There's ambiguity between .npy at worker aggregation step .npy.(.0 .1 .2...) -> .npy
-                #         and dechunking step .npy (len N) -> .npy (len < N)
-                print(f"Output already exists ({outPath})", file=sys.stderr)
+                if getsize(outPath) != 0:
+                    # TODO:EmbedPipeline does not yet support continuing interrupted jobs.
+                    #  Issue:
+                    #    There are critical zones that when interrupted leave the files in an ambiguous state.
+                    #      1. BatchInfer, when interrupted leaves lots of out.npy.0 files instead of completed items.
+                    #      2. There's ambiguity between .npy at worker aggregation step .npy.(.0 .1 .2...) -> .npy
+                    #         and dechunking step .npy (len N) -> .npy (len < N)
+                    print(
+                        f"Output already exists ({outPath}). Continuing interrupted jobs not yet supported.",
+                        file=sys.stderr,
+                    )
 
         maxSeqLen = self.model.maxSeqLen
         eDim = self.model.embedDim
