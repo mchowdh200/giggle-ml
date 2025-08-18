@@ -22,6 +22,7 @@ declare -a EXCLUDE_PATTERNS=(
     ".pytest_cache/"
     "*/__pycache__/" # Excludes any directory named __pycache__ recursively
     ".snakemake/"
+    "src/GiggleML.egg-info/*"
 )
 
 sync_remote() {
