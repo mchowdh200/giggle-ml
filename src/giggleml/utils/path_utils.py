@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import overload
+from typing import cast, overload
 
 
 def fix_bed_ext[T: str | Path](path: T) -> T:
@@ -14,26 +14,27 @@ def fix_bed_ext[T: str | Path](path: T) -> T:
     Throws if no permutation exists.
     """
 
-    wants_str = isinstance(path, str)
+    out = str(path)
 
-    if not wants_str:
-        path = str(path)
+    if not out.endswith(".bed.gz") and not out.endswith(".bed"):
+        # no extension? add
+        out += ".bed.gz"
 
-    if not path.endswith(".bed.gz") and not path.endswith(".bed"):
-        path += ".bed.gz"
+    if not os.path.isfile(out):
+        # try the other permutation
+        if out.endswith(".bed.gz"):
+            out = out[:-3]
+        elif out.endswith(".bed"):
+            out += ".gz"
 
-    if not os.path.isfile(path):
-        if path.endswith(".bed.gz"):
-            path = path[:-3]
-        elif path.endswith(".bed"):
-            path += ".gz"
+        # neither is found
+        if not os.path.isfile(out):
+            raise FileNotFoundError(out)
 
-    if os.path.isfile(path):
-        if wants_str:
-            return path
-        return Path(path)
-
-    raise FileNotFoundError(path)
+    # coherent type
+    if isinstance(path, str):
+        return cast(T, out)
+    return cast(T, Path(out))
 
 
 @overload
