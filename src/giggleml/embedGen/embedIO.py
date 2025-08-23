@@ -38,7 +38,9 @@ class Embed(EmbedMeta):
     def data(self) -> np.memmap:
         return cast(
             np.memmap,
-            np.memmap(self.dataPath, dtype=self.dtype, mode="r").reshape(-1, self.embedDim),
+            np.memmap(self.dataPath, dtype=self.dtype, mode="r").reshape(
+                -1, self.embedDim
+            ),
         )
 
     def unload(self):
@@ -55,7 +57,7 @@ class Embed(EmbedMeta):
         This instance should not be used after delete()
         """
         self.unload()
-        delete(self.dataPath)
+        _delete(self.dataPath)
 
 
 def writeMeta(mmap: np.memmap | str, meta: EmbedMeta) -> Embed:
@@ -83,7 +85,9 @@ def _checkPaths(path: str) -> str:
         raise ValueError("Expected path to be either .npy or .npy.meta")
 
     if not (os.path.isfile(f"{path}.npy") and os.path.isfile(f"{path}.npy.meta")):
-        raise ValueError("The embed data (.npy) cannot be parsed without its metadata (.npy.meta)")
+        raise ValueError(
+            "The embed data (.npy) cannot be parsed without its metadata (.npy.meta)"
+        )
 
     return path
 
@@ -99,7 +103,7 @@ def parse(path: str) -> Embed:
     return Embed(f"{path}.npy", meta)
 
 
-def delete(path: str):
+def _delete(path: str):
     """
     @param path: To either the .npy (data) or, which must exist, the .npy.meta
     (metadata) file.
