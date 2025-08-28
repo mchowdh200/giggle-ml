@@ -136,7 +136,7 @@ class DirectPipeline(EmbedPipeline):
 
         # all Embeds were already embed.IO.writeMeta(.) due to DeChunk
         # so we need references and can avoid parsing because their meta is known
-        outEmbeds = [embedIO.Embed(path, meta) for path in out]
+        outEmbeds = [embedIO.Embed(meta, dataPath=path) for path in out]
 
         if len(out) == 1:
             return outEmbeds[0]

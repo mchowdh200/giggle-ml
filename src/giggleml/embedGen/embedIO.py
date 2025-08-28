@@ -1,13 +1,10 @@
 import contextlib
 import os
 from dataclasses import dataclass
-from functools import cached_property
-from typing import cast, final
+from typing import cast, final, Optional
 
 import numpy as np
 from numpy.typing import DTypeLike
-
-from giggleml.utils.types import lazy
 
 from ..utils.pathPickle import pickle, unpickle
 
@@ -20,44 +17,79 @@ class EmbedMeta:
 
 
 @final
-@lazy
 class Embed(EmbedMeta):
     """
     Used to store single (vector) embeddings or (tensor collections of
-    embeddings.
+    embeddings. Can be file-backed (memmap) or in-memory (numpy array).
     """
 
-    def __init__(self, dataPath: str, meta: EmbedMeta):
+    def __init__(
+        self,
+        meta: EmbedMeta,
+        *,
+        data: np.ndarray | None = None,
+        dataPath: str | None = None,
+    ):
         """
-        Should not be used directly: create with embedIO.writeMeta
+        Should not be used directly: create with embedIO.writeMeta for file-backed
+        Embeds, or by passing an in-memory numpy array.
+
+        @param data: for an in-memory embedding
+        @param dataPath: for a file-backed memmap embedding
         """
         super().__init__(meta.embedDim, meta.dtype, meta.modelInfo)
-        self.dataPath: str = dataPath
 
-    @cached_property
-    def data(self) -> np.memmap:
-        return cast(
-            np.memmap,
-            np.memmap(self.dataPath, dtype=self.dtype, mode="r").reshape(
-                -1, self.embedDim
-            ),
-        )
+        if data is not None and dataPath is not None:
+            raise ValueError("Provide either `data` or `dataPath`, not both.")
+        if data is None and dataPath is None:
+            raise ValueError("Provide either `data` or `dataPath`.")
+
+        self._data: np.ndarray | None = data
+        self.dataPath: str | None = dataPath
+
+    @property
+    def data(self) -> np.ndarray:
+        """
+        Returns the embedding data as a numpy array.
+        If file-backed, this will load the data as a memmap on first access.
+        """
+        if self._data is None:
+            if self.dataPath is None:
+                # This state should be unreachable due to __init__ checks
+                raise RuntimeError("Embed is not initialized correctly.")
+
+            self._data = cast(
+                np.memmap,
+                np.memmap(self.dataPath, dtype=self.dtype, mode="r").reshape(
+                    -1, self.embedDim
+                ),
+            )
+        return self._data
 
     def unload(self):
         """
-        Unloads self.data (memmap) from memory.
-        Accessing the data field after unload() is fine and would trigger reparsing.
+        Unloads self.data from memory if it's a memmap.
+        Accessing the data field after unload() is fine and would trigger reloading.
+        For in-memory embeds, this is a no-op.
         """
-        self.data.flush()  # probably unnecessary
-        del self.data
+        if self.dataPath is not None and self._data is not None:
+            if isinstance(self._data, np.memmap):
+                self._data.flush()
+            # To allow reloading, we must clear the cached data
+            self._data = None
 
     def delete(self):
         """
-        Deletes the associated files of this Embed.
+        Deletes the associated files of this Embed if it is file-backed.
+        For in-memory embeds, it clears the data from the object.
         This instance should not be used after delete()
         """
-        self.unload()
-        _delete(self.dataPath)
+        if self.dataPath is not None:
+            # unload will set self._data to None
+            self.unload()
+            _delete(self.dataPath)
+        else:
+            self._data = None
 
 
 def writeMeta(mmap: np.memmap | str, meta: EmbedMeta) -> Embed:
@@ -69,11 +101,13 @@ def writeMeta(mmap: np.memmap | str, meta: EmbedMeta) -> Embed:
     if not isinstance(mmap, str):
         if mmap.filename is None:
             raise ValueError("mmap is expected to have a non-None filename")
-        mmap = mmap.filename
+        mmap_path = mmap.filename
+    else:
+        mmap_path = mmap
 
-    path = mmap + ".meta"
+    path = mmap_path + ".meta"
     pickle(path, meta)
-    return Embed(mmap, meta)
+    return Embed(meta=meta, dataPath=mmap_path)
 
 
 def _checkPaths(path: str) -> str:
@@ -100,7 +134,7 @@ def parse(path: str) -> Embed:
 
     path = _checkPaths(path)
     meta: EmbedMeta = unpickle(f"{path}.npy.meta")
-    return Embed(f"{path}.npy", meta)
+    return Embed(meta=meta, dataPath=f"{path}.npy")
 
 
 def _delete(path: str):
