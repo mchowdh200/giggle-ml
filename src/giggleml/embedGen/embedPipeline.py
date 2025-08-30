@@ -35,13 +35,29 @@ class EmbedPipeline(ABC):
         transforms: list[IntervalTransform] | None = None,
     ) -> Sequence[Embed]: ...
 
+    @overload
+    def embed(
+        self,
+        intervals: IntervalDataset,
+        out: None = None,
+        transforms: list[IntervalTransform] | None = None,
+    ) -> np.ndarray: ...
+
+    @overload
+    def embed(
+        self,
+        intervals: Sequence[IntervalDataset],
+        out: None = None,
+        transforms: list[IntervalTransform] | None = None,
+    ) -> Sequence[np.ndarray]: ...
+
     @abstractmethod
     def embed(
         self,
         intervals: Sequence[IntervalDataset] | IntervalDataset,
-        out: Sequence[str] | str,
+        out: Sequence[str] | str | None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[Embed] | Embed: ...
+    ) -> Sequence[Embed] | Embed | Sequence[np.ndarray] | np.ndarray: ...
 
 
 class DirectPipeline(EmbedPipeline):
@@ -82,38 +98,62 @@ class DirectPipeline(EmbedPipeline):
         transforms: list[IntervalTransform] | None = None,
     ) -> Sequence[Embed]: ...
 
+    @overload
+    def embed(
+        self,
+        intervals: IntervalDataset,
+        out: None = None,
+        transforms: list[IntervalTransform] | None = None,
+    ) -> np.ndarray: ...
+
+    @overload
+    def embed(
+        self,
+        intervals: Sequence[IntervalDataset],
+        out: None = None,
+        transforms: list[IntervalTransform] | None = None,
+    ) -> Sequence[np.ndarray]: ...
+
     @override
     def embed(
         self,
         intervals: Sequence[IntervalDataset] | IntervalDataset,
-        out: Sequence[str] | str,
+        out: Sequence[str] | str | None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[Embed] | Embed:
-        if isinstance(intervals, Sequence) == isinstance(out, str):
-            raise ValueError(
-                "Expecting either both or neither of data & out to be sequences"
-            )
+    ) -> Sequence[Embed] | Embed | Sequence[np.ndarray] | np.ndarray:
+        # Handle input validation for file-based mode
+        if out is not None:
+            if isinstance(intervals, Sequence) == isinstance(out, str):
+                raise ValueError(
+                    "Expecting either both or neither of data & out to be sequences"
+                )
+        
+        # Normalize inputs to sequences
+        single_input = not isinstance(intervals, Sequence)
+        single_output = isinstance(out, str)
+        
         if not isinstance(intervals, Sequence):
             intervals = [intervals]
         if isinstance(out, str):
             out = [out]
 
-        for outPath in out:
-            if isfile(outPath):
-                if getsize(outPath) != 0:
-                    # TODO:EmbedPipeline does not yet support continuing interrupted jobs.
-                    #  Issue:
-                    #    There are critical zones that when interrupted leave the files in an ambiguous state.
-                    #      1. BatchInfer, when interrupted leaves lots of out.npy.0 files instead of completed items.
-                    #      2. There's ambiguity between .npy at worker aggregation step .npy.(.0 .1 .2...) -> .npy
-                    #         and dechunking step .npy (len N) -> .npy (len < N)
-                    print(
-                        f"Output already exists ({outPath}). Continuing interrupted jobs not yet supported.",
-                        file=sys.stderr,
-                    )
+        # File existence check only for file-based mode
+        if out is not None:
+            for outPath in out:
+                if isfile(outPath):
+                    if getsize(outPath) != 0:
+                        # TODO:EmbedPipeline does not yet support continuing interrupted jobs.
+                        #  Issue:
+                        #    There are critical zones that when interrupted leave the files in an ambiguous state.
+                        #      1. BatchInfer, when interrupted leaves lots of out.npy.0 files instead of completed items.
+                        #      2. There's ambiguity between .npy at worker aggregation step .npy.(.0 .1 .2...) -> .npy
+                        #         and dechunking step .npy (len N) -> .npy (len < N)
+                        print(
+                            f"Output already exists ({outPath}). Continuing interrupted jobs not yet supported.",
+                            file=sys.stderr,
+                        )
 
         maxSeqLen = self.model.maxSeqLen
-        eDim = self.model.embedDim
 
         if self.model.wants == "sequences":
             for datum in intervals:
@@ -130,28 +170,53 @@ class DirectPipeline(EmbedPipeline):
 
         transformers = [IntervalTransformer(data, transforms) for data in intervals]
         newData = [transformer.newDataset for transformer in transformers]
-        meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
-        post = [_DeChunk(transformer, meta) for transformer in transformers]
-        self.infer.batch(newData, out, post)
+        
+        if out is None:
+            # In-memory mode
+            meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
+            post = [_DeChunk(transformer, meta, in_memory=True) for transformer in transformers]
+            raw_embeddings = self.infer.batch(newData, out, post)
+            
+            # Apply backward transform to get final embeddings
+            final_embeddings = []
+            for i, raw_embedding in enumerate(raw_embeddings):
+                final_embedding = post[i](raw_embedding)
+                final_embeddings.append(final_embedding)
+            
+            if single_input:
+                return final_embeddings[0]
+            return final_embeddings
+        else:
+            # File-based mode (original implementation)
+            meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
+            post = [_DeChunk(transformer, meta) for transformer in transformers]
+            self.infer.batch(newData, out, post)
 
-        # all Embeds were already embed.IO.writeMeta(.) due to DeChunk
-        # so we need references and can avoid parsing because their meta is known
-        outEmbeds = [embedIO.Embed(meta, dataPath=path) for path in out]
+            # all Embeds were already embed.IO.writeMeta(.) due to DeChunk
+            # so we need references and can avoid parsing because their meta is known
+            outEmbeds = [embedIO.Embed(meta, dataPath=path) for path in out]
 
-        if len(out) == 1:
-            return outEmbeds[0]
-        return outEmbeds
+            if single_output:
+                return outEmbeds[0]
+            return outEmbeds
 
 
 @final
 class _DeChunk:
-    def __init__(self, transformer: IntervalTransformer, meta: EmbedMeta):
+    def __init__(self, transformer: IntervalTransformer, meta: EmbedMeta, in_memory: bool = False):
         self.transformer = transformer
         self.meta = meta
+        self.in_memory = in_memory
 
     def _defaultAggregator(self, slice: np.ndarray) -> np.ndarray:
         return np.mean(slice, axis=0)
 
-    def __call__(self, item: np.memmap):
-        self.transformer.backwardTransform(item, self._defaultAggregator)
-        embedIO.writeMeta(item, self.meta)
+    def __call__(self, item: np.memmap | np.ndarray) -> np.ndarray | None:
+        if self.in_memory:
+            # In-memory mode: return the backward transformed array
+            return self.transformer.backwardTransform(item, self._defaultAggregator)
+        else:
+            # File-based mode: perform backward transform and write metadata
+            self.transformer.backwardTransform(item, self._defaultAggregator)
+            embedIO.writeMeta(item, self.meta)
+            return None
