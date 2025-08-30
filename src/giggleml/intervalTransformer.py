@@ -1,7 +1,7 @@
 import os
 from collections.abc import Callable, Iterable, Sequence
 from functools import cached_property
-from typing import final
+from typing import final, overload
 
 import numpy as np
 
@@ -37,7 +37,9 @@ class IntervalTransformer:
         self.oldDataset = oldDataset
 
         self._oldLength = (
-            min(lengthLimit, len(oldDataset)) if lengthLimit is not None else len(oldDataset)
+            min(lengthLimit, len(oldDataset))
+            if lengthLimit is not None
+            else len(oldDataset)
         )
 
         self._built: bool = False
@@ -45,7 +47,9 @@ class IntervalTransformer:
         self._toIdx: list[list[int]]
         self._fromIdx: list[int]
 
-    def transform(self, interval: GenomicInterval, i: int = 0) -> Iterable[GenomicInterval]:
+    def transform(
+        self, interval: GenomicInterval, i: int = 0
+    ) -> Iterable[GenomicInterval]:
         if i >= len(self.transforms):
             yield interval
         else:
@@ -124,55 +128,89 @@ class IntervalTransformer:
         self.build()
         return self._fromIdx[newIdx]
 
+    @overload
     def backwardTransform(
-        self, memmap: np.memmap, aggregator: Callable[[np.ndarray], np.ndarray]
-    ) -> np.memmap:
+        self, data: np.memmap, aggregator: Callable[[np.ndarray], np.ndarray]
+    ) -> np.memmap: ...
+
+    @overload
+    def backwardTransform(
+        self, data: np.ndarray, aggregator: Callable[[np.ndarray], np.ndarray]
+    ) -> np.ndarray: ...
+
+    def backwardTransform(
+        self,
+        data: np.memmap | np.ndarray,
+        aggregator: Callable[[np.ndarray], np.ndarray],
+    ) -> np.memmap | np.ndarray:
         """
-        Maps items from the memmap located at outPath back to
-        a memmap, the same length as oldDataset, using the aggregator
-        function to combine elements. This function is generic to the
-        memmap datatype. It will rebuild the file associated with the memmap
-        passed in and return a new memmap pointing to the file after completion.
+        Maps items from the data (memmap or numpy array) back to
+        a result of the same length as oldDataset, using the aggregator
+        function to combine elements.
+
+        For memmap: rebuilds the file and returns a new memmap.
+        For numpy array: operates in-memory and returns a new numpy array.
 
         This is NOT a machine learning architecture.
 
-        @param aggregator: Operates on slices from the mmap[T]. If memmap is NxD
+        @param data: Either a memmap or numpy array to transform backward
+        @param aggregator: Operates on slices from the data[T]. If data is NxD
         then for an arbitrary slice size K, the aggregator would be used in the
         form [KxD] -> [1xD]
         """
 
-        frontPath = memmap.filename
-
-        if type(frontPath) is not str:
-            raise ValueError("Unable to determine memmap filename.")
-
-        if len(memmap) != len(self.newDataset):
-            raise ValueError("Memmap must be equal in length to intervalTransformer.newDataset")
-
-        backPath = frontPath + ".temp"
-        backShape = memmap.shape
-        backShape = (self._oldLength, backShape[1])
-        dtype = memmap.dtype
-        backMem = np.memmap(backPath, dtype=dtype, mode="w+", shape=backShape)
-
-        memmap.flush()
-        j = 0
+        if len(data) != len(self.newDataset):
+            raise ValueError(
+                "Data must be equal in length to intervalTransformer.newDataset"
+            )
 
         # we are about to access _toIdx
         self.build()
 
-        for i in range(self._oldLength):
-            frontCount = len(self._toIdx[i])
-            slice = memmap[j : j + frontCount]
-            aggregate = aggregator(slice)
-            j += frontCount
-            backMem[i] = aggregate
+        if isinstance(data, np.memmap):
+            # Original memmap implementation
+            frontPath = data.filename
 
-        backMem.flush()
-        del backMem
-        del memmap
+            if type(frontPath) is not str:
+                raise ValueError("Unable to determine memmap filename.")
 
-        os.remove(frontPath)
-        os.rename(backPath, frontPath)
+            backPath = frontPath + ".temp"
+            backShape = data.shape
+            backShape = (self._oldLength, backShape[1])
+            dtype = data.dtype
+            backMem = np.memmap(backPath, dtype=dtype, mode="w+", shape=backShape)
 
-        return np.memmap(frontPath, dtype=dtype, mode="r", shape=backShape)
+            data.flush()
+            j = 0
+
+            for i in range(self._oldLength):
+                frontCount = len(self._toIdx[i])
+                slice = data[j : j + frontCount]
+                aggregate = aggregator(slice)
+                j += frontCount
+                backMem[i] = aggregate
+
+            backMem.flush()
+            del backMem
+            del data
+
+            os.remove(frontPath)
+            os.rename(backPath, frontPath)
+
+            return np.memmap(frontPath, dtype=dtype, mode="r", shape=backShape)
+
+        else:
+            # In-memory numpy array implementation
+            backShape = data.shape
+            backShape = (self._oldLength, backShape[1])
+            backArray = np.empty(backShape, dtype=data.dtype)
+
+            j = 0
+            for i in range(self._oldLength):
+                frontCount = len(self._toIdx[i])
+                slice = data[j : j + frontCount]
+                aggregate = aggregator(slice)
+                j += frontCount
+                backArray[i] = aggregate
+
+            return backArray
