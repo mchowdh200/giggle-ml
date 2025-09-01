@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 from time import time
-from typing import Callable, final
+from typing import Callable, final, overload
 
 import numpy as np
 import torch
@@ -16,7 +16,7 @@ from giggleml.dataWrangling.unifiedDataset import UnifiedDataset
 
 from ..dataWrangling.intervalDataset import IntervalDataset
 from ..utils.guessDevice import guessDevice
-from ..utils.types import GenomicInterval, ListLike
+from ..utils.types import GenomicInterval
 from .blockDistributedSampler import BlockDistributedSampler
 from .embedModel import EmbedModel
 
@@ -37,7 +37,11 @@ def passCollate(batch: Sequence[GenomicInterval]):
 @final
 class BatchInfer:
     def __init__(
-        self, model: EmbedModel, batchSize: int, workerCount: int, subWorkerCount: int
+        self,
+        model: EmbedModel,
+        batchSize: int,
+        workerCount: int,
+        subWorkerCount: int,
     ):
         """
         @param workerCount: should be <= gpu count
@@ -55,20 +59,36 @@ class BatchInfer:
         self.subWorkerCount = subWorkerCount
         self.embedDim = model.embedDim
 
-    def _inferLoop(self, rank: int, dataLoader: DataLoader, outFile: np.memmap):
+    @overload
+    def _inferLoop(self, rank: int, dataLoader: DataLoader) -> np.ndarray: ...
+
+    @overload
+    def _inferLoop(
+        self, rank: int, dataLoader: DataLoader, outFile: np.memmap
+    ) -> None: ...
+
+    def _inferLoop(
+        self, rank: int, dataLoader: DataLoader, outFile: np.memmap | None = None
+    ) -> np.ndarray | None:
         """inference loop."""
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
         time0 = time()
         nextIdx = 0
+        inMemory = outFile is None
+        inMemoryResults = []
 
         for i, batch in enumerate(dataLoader):
             outputs = self.model.embed(batch).to("cpu")
             finalIdx = nextIdx + len(outputs)
 
-            assert finalIdx <= len(outFile)
+            if inMemory:
+                inMemoryResults.append(outputs.detach().numpy())
+            else:
+                assert outFile is not None
+                assert finalIdx <= len(outFile)
+                outFile[nextIdx:finalIdx] = outputs.detach().numpy()
 
-            outFile[nextIdx:finalIdx] = outputs.detach().numpy()
             nextIdx += len(outputs)
 
             if i % 50 == 0:
@@ -83,17 +103,26 @@ class BatchInfer:
 
         rprint(f"Batch: {len(dataLoader)}\t/ {len(dataLoader)}")
 
-        # "close" the memmap
-        outFile.flush()
-        del outFile
+        if inMemory:
+            return (
+                np.concatenate(inMemoryResults, axis=0)
+                if inMemoryResults
+                else np.array([])
+            )
+        else:
+            # "close" the memmap
+            assert outFile is not None
+            outFile.flush()
+            del outFile
+            return None
 
     def _worker(
         self,
         rank: int,
         datasets: Sequence[IntervalDataset],
-        outPaths: Sequence[str],
+        outPaths: Sequence[str] | None,
         post: Sequence[Callable[[np.memmap], None]] | None,
-    ):
+    ) -> list[np.ndarray] | None:
         device = guessDevice(rank)
 
         if rank == 0:
@@ -101,10 +130,11 @@ class BatchInfer:
 
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
-        fasta: str | None = None
+        fasta: Path | None = None
 
         for dataset in datasets:
             datasetFasta = dataset.associatedFastaPath
+
             if fasta is None:
                 fasta = datasetFasta
             elif fasta != datasetFasta:
@@ -125,11 +155,36 @@ class BatchInfer:
         else:
             collate = passCollate
 
-        # with torch.profiler.profile(
-        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-        #     on_trace_ready=torch.profiler.tensorboard_trace_handler(f"logs/rank_{rank}"),
-        #     with_stack=True,
-        # ) as prof:
+        # INFO: In-memory only case:
+        # processes the entire input disregarded potential concurrent workers
+        inMemory = outPaths is None
+
+        if inMemory:
+            dataLoader = DataLoader(
+                masterDataset,
+                batch_size=self.batchSize,
+                shuffle=False,
+                pin_memory=True,
+                num_workers=self.subWorkerCount,
+                persistent_workers=self.subWorkerCount != 0,
+                collate_fn=collate,
+            )
+
+            embeddings = self._inferLoop(rank, dataLoader)
+
+            # Split embeddings back into separate arrays for each dataset
+            results = []
+            start_idx = 0
+            for dataset in datasets:
+                end_idx = start_idx + len(dataset)
+                results.append(embeddings[start_idx:end_idx])
+                start_idx = end_idx
+
+            return results
+
+        # INFO: Distributed memmap case:
+        # assumes a series of concurrent workers
+
         blockSampler = BlockDistributedSampler(masterDataset, self.workerCount, rank)
         sampleCount = len(blockSampler)
         offset = blockSampler.lower * eDim * 4  # (4 bytes per float32)
@@ -239,15 +294,41 @@ class BatchInfer:
         finally:
             dist.destroy_process_group()
 
+        return None
+
+    @overload
     def batch(
         self,
-        datasets: Sequence[ListLike],
+        datasets: Sequence[IntervalDataset],
         outPaths: Sequence[str],
         post: Sequence[Callable[[np.memmap], None]] | None = None,
-    ):
+    ) -> None: ...
+
+    @overload
+    def batch(
+        self,
+        datasets: Sequence[IntervalDataset],
+    ) -> list[np.ndarray]: ...
+
+    def batch(
+        self,
+        datasets: Sequence[IntervalDataset],
+        outPaths: Sequence[str] | None = None,
+        post: Sequence[Callable[[np.memmap], None]] | None = None,
+    ) -> list[np.ndarray] | None:
         """
         @param post: Is a list of processing Callable to apply to completed memmaps after inference is completed.
         """
+
+        inMemory = outPaths is None
+
+        if inMemory:
+            if outPaths is not None or post is not None:
+                raise ValueError(
+                    "In-memory mode does not support outPaths or post processing"
+                )
+            return self._worker(0, datasets, None, None)
+
         assert len(datasets) == len(outPaths)
 
         eDim = self.model.embedDim
@@ -267,3 +348,4 @@ class BatchInfer:
 
         # working file space
         os.remove(masterOut)
+        return None

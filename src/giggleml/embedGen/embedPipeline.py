@@ -41,7 +41,7 @@ class EmbedPipeline(ABC):
         intervals: IntervalDataset,
         out: None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> np.ndarray: ...
+    ) -> Embed: ...
 
     @overload
     def embed(
@@ -49,7 +49,7 @@ class EmbedPipeline(ABC):
         intervals: Sequence[IntervalDataset],
         out: None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[np.ndarray]: ...
+    ) -> Sequence[Embed]: ...
 
     @abstractmethod
     def embed(
@@ -104,7 +104,7 @@ class DirectPipeline(EmbedPipeline):
         intervals: IntervalDataset,
         out: None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> np.ndarray: ...
+    ) -> Embed: ...
 
     @overload
     def embed(
@@ -112,7 +112,7 @@ class DirectPipeline(EmbedPipeline):
         intervals: Sequence[IntervalDataset],
         out: None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[np.ndarray]: ...
+    ) -> Sequence[Embed]: ...
 
     @override
     def embed(
@@ -120,18 +120,16 @@ class DirectPipeline(EmbedPipeline):
         intervals: Sequence[IntervalDataset] | IntervalDataset,
         out: Sequence[str] | str | None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[Embed] | Embed | Sequence[np.ndarray] | np.ndarray:
+    ) -> Sequence[Embed] | Embed:
         # Handle input validation for file-based mode
         if out is not None:
             if isinstance(intervals, Sequence) == isinstance(out, str):
                 raise ValueError(
                     "Expecting either both or neither of data & out to be sequences"
                 )
-        
-        # Normalize inputs to sequences
+
         single_input = not isinstance(intervals, Sequence)
-        single_output = isinstance(out, str)
-        
+
         if not isinstance(intervals, Sequence):
             intervals = [intervals]
         if isinstance(out, str):
@@ -170,25 +168,26 @@ class DirectPipeline(EmbedPipeline):
 
         transformers = [IntervalTransformer(data, transforms) for data in intervals]
         newData = [transformer.newDataset for transformer in transformers]
-        
+        meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
+
         if out is None:
             # In-memory mode
-            meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
-            post = [_DeChunk(transformer, meta, in_memory=True) for transformer in transformers]
-            raw_embeddings = self.infer.batch(newData, out, post)
-            
+            post = [
+                _DeChunk(transformer, meta, in_memory=True)
+                for transformer in transformers
+            ]
+            raw_embeddings = self.infer.batch(newData)
             # Apply backward transform to get final embeddings
             final_embeddings = []
+
+            # manually apply the post call
             for i, raw_embedding in enumerate(raw_embeddings):
-                final_embedding = post[i](raw_embedding)
+                final_embedding = post[i].process(raw_embedding)
                 final_embeddings.append(final_embedding)
-            
-            if single_input:
-                return final_embeddings[0]
-            return final_embeddings
+
+            outEmbeds = [embedIO.Embed(meta, data=datum) for datum in final_embeddings]
         else:
             # File-based mode (original implementation)
-            meta = EmbedMeta(self.model.embedDim, np.float32, str(self.model))
             post = [_DeChunk(transformer, meta) for transformer in transformers]
             self.infer.batch(newData, out, post)
 
@@ -196,14 +195,16 @@ class DirectPipeline(EmbedPipeline):
             # so we need references and can avoid parsing because their meta is known
             outEmbeds = [embedIO.Embed(meta, dataPath=path) for path in out]
 
-            if single_output:
-                return outEmbeds[0]
-            return outEmbeds
+        if single_input:
+            return outEmbeds[0]
+        return outEmbeds
 
 
 @final
 class _DeChunk:
-    def __init__(self, transformer: IntervalTransformer, meta: EmbedMeta, in_memory: bool = False):
+    def __init__(
+        self, transformer: IntervalTransformer, meta: EmbedMeta, in_memory: bool = False
+    ):
         self.transformer = transformer
         self.meta = meta
         self.in_memory = in_memory
@@ -211,12 +212,18 @@ class _DeChunk:
     def _defaultAggregator(self, slice: np.ndarray) -> np.ndarray:
         return np.mean(slice, axis=0)
 
-    def __call__(self, item: np.memmap | np.ndarray) -> np.ndarray | None:
+    def process(self, item: np.memmap | np.ndarray) -> np.ndarray | None:
         if self.in_memory:
             # In-memory mode: return the backward transformed array
             return self.transformer.backwardTransform(item, self._defaultAggregator)
         else:
             # File-based mode: perform backward transform and write metadata
             self.transformer.backwardTransform(item, self._defaultAggregator)
+            assert isinstance(item, np.memmap)
             embedIO.writeMeta(item, self.meta)
             return None
+
+    def __call__(self, item: np.memmap) -> None:
+        if self.in_memory:
+            raise RuntimeError("only callable while not operating in in-memory mode")
+        self.process(item)
