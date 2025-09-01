@@ -23,7 +23,7 @@ from .embedModel import EmbedModel
 
 @final
 class FastaCollate:
-    def __init__(self, fasta: str):
+    def __init__(self, fasta: Path):
         self.fasta = fasta
 
     def __call__(self, batch: Sequence[GenomicInterval]):

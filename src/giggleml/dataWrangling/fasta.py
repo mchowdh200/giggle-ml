@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from os import PathLike
 from pathlib import Path
 from typing import Any, overload
 
@@ -13,7 +14,7 @@ knownFa: dict[str, Fasta] = dict()
 cache: tuple[str, Fasta] = ("", dict())
 
 
-def ensureFa(fastaPath: str) -> Fasta:
+def ensureFa(path: PathLike) -> Fasta:
     """
     Returns a chromosome -> sequence map based on
     1) memory cache
@@ -21,21 +22,20 @@ def ensureFa(fastaPath: str) -> Fasta:
     3) parses the fasta file (with fastx & caches)
     """
     global cache
+    normalPath = str(Path(path).resolve())  # normalization
 
     # attempt to skip the str(Path(.).resolve()) & dict call.
     # makes duplicate calls free
-    if fastaPath == cache[0]:
+    if normalPath == cache[0]:
         return cache[1]
 
-    fastaPathNormalized = str(Path(fastaPath).resolve())  # normalization
-
-    if fastaPathNormalized not in knownFa:
-        idx = pyfastx.Fasta(fastaPathNormalized)
+    if normalPath not in knownFa:
+        idx = pyfastx.Fasta(normalPath)
         seqs: Fasta = {seq.name: seq.seq for seq in idx}
-        knownFa[fastaPathNormalized] = seqs
+        knownFa[normalPath] = seqs
 
-    result = knownFa[fastaPathNormalized]
-    cache = (fastaPath, result)
+    result = knownFa[normalPath]
+    cache = (normalPath, result)
     return result
 
 
@@ -44,12 +44,12 @@ def map(data: IntervalDataset) -> ListDataset[str]: ...
 
 
 @overload
-def map(data: Sequence[GenomicInterval], fastaPath: str) -> list[str]: ...
+def map(data: Sequence[GenomicInterval], fastaPath: Path) -> list[str]: ...
 
 
 # TODO: inference pipeline should expose a parameter to avoid using fasta cache
 def map(
-    data: IntervalDataset | Sequence[GenomicInterval], fastaPath: str | None = None
+    data: IntervalDataset | Sequence[GenomicInterval], fastaPath: Path | None = None
 ) -> list[str] | ListDataset[str]:
     """
     @param fastaPath: can be a .fa or .gz file
