@@ -9,8 +9,8 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from giggleml.intervalTransformer import IntervalTransformer
-from giggleml.utils.intervalArithmetic import intersect
+from giggleml.interval_transformer import IntervalTransformer
+from giggleml.utils.interval_arithmetic import intersect
 from giggleml.utils.types import GenomicInterval, MmapF32
 
 
@@ -52,7 +52,7 @@ class SimpleKNN:
         return None, knn_indices
 
 
-def overlapDegree(x: GenomicInterval, y: GenomicInterval) -> float:
+def overlap_degree(x: GenomicInterval, y: GenomicInterval) -> float:
     """
     100% (1) means the smaller interval is fully contained in the larger interval.
     """
@@ -62,18 +62,18 @@ def overlapDegree(x: GenomicInterval, y: GenomicInterval) -> float:
     if z is None:
         return 0
 
-    zSize = z[2] - z[1]
-    xSize = x[2] - x[1]
-    ySize = y[2] - y[1]
-    refSize = min(xSize, ySize)
-    return zSize / refSize
+    z_size = z[2] - z[1]
+    x_size = x[2] - x[1]
+    y_size = y[2] - y[1]
+    ref_size = min(x_size, y_size)
+    return z_size / ref_size
 
 
 def intersects(x: GenomicInterval, y: GenomicInterval):
-    return overlapDegree(x, y) > 0
+    return overlap_degree(x, y) > 0
 
 
-def buildVectorDB(embeds: MmapF32):
+def build_vector_db(embeds: MmapF32):
     # dim = embeds.shape[1]
     # vdb = faiss.IndexFlatIP(dim)
     normal = embeds / np.linalg.norm(embeds, axis=1).reshape(-1, 1)
@@ -82,38 +82,38 @@ def buildVectorDB(embeds: MmapF32):
     return SimpleKNN(normal)
 
 
-def modernGiggle(
-    sampleIT: IntervalTransformer,
-    sampleEmbeds: MmapF32,
-    queryIT: IntervalTransformer,
-    queryEmbeds: MmapF32,
+def modern_giggle(
+    sample_it: IntervalTransformer,
+    sample_embeds: MmapF32,
+    query_it: IntervalTransformer,
+    query_embeds: MmapF32,
     k: int,
 ):
 
     results = defaultdict(set)
 
     print("Building vector database")
-    vdb = buildVectorDB(sampleEmbeds)
-    _, knn = vdb.search(queryEmbeds, k)
+    vdb = build_vector_db(sample_embeds)
+    _, knn = vdb.search(query_embeds, k)
     print(" - completed KNN search")
 
-    for queryId, neighbors in enumerate(knn):
-        queryBase = queryIT.oldDataset[queryIT.backwardIdx(queryId)]
+    for query_id, neighbors in enumerate(knn):
+        query_base = query_it.old_dataset[query_it.backward_idx(query_id)]
         hits = []
 
-        for neighborId in neighbors:
-            hitBase = sampleIT.oldDataset[sampleIT.backwardIdx(neighborId)]
+        for neighbor_id in neighbors:
+            hit_base = sample_it.old_dataset[sample_it.backward_idx(neighbor_id)]
 
-            if intersects(hitBase, queryBase):
-                hits.append(hitBase)
+            if intersects(hit_base, query_base):
+                hits.append(hit_base)
 
-        results[queryBase].update(hits)
+        results[query_base].update(hits)
 
     return results
 
 
-def parseLegacyGiggle(path: str) -> dict[GenomicInterval, list[GenomicInterval]]:
-    ancientResults = dict()
+def parse_legacy_giggle(path: str) -> dict[GenomicInterval, list[GenomicInterval]]:
+    ancient_results = dict()
     with open(path, "r") as f:
         profile = list[GenomicInterval]()
         head: GenomicInterval | None = None
@@ -124,7 +124,7 @@ def parseLegacyGiggle(path: str) -> dict[GenomicInterval, list[GenomicInterval]]
             end = int(end)
 
             if chr[0] == "#":
-                ancientResults[head] = profile
+                ancient_results[head] = profile
                 profile = []
                 chr = chr[2:]
                 head = (chr, start, end)
@@ -132,68 +132,68 @@ def parseLegacyGiggle(path: str) -> dict[GenomicInterval, list[GenomicInterval]]
 
             profile.append((chr, start, end))
 
-        ancientResults[head] = profile
-        ancientResults.pop(None)
+        ancient_results[head] = profile
+        ancient_results.pop(None)
 
-    return ancientResults
+    return ancient_results
 
 
-def analyzeResults(modernResults, ancientResults, overlapPlot, geOverlapPlot):
-    for query in modernResults.keys():
-        if query not in ancientResults:
+def analyze_results(modern_results, ancient_results, overlap_plot, ge_overlap_plot):
+    for query in modern_results.keys():
+        if query not in ancient_results:
             raise RuntimeError("Extra query in modern", query)
 
-    for query in ancientResults.keys():
-        if query not in modernResults:
+    for query in ancient_results.keys():
+        if query not in modern_results:
             raise RuntimeError("Missing query in modern", query)
 
     # core stats
 
-    highestDepthPerQuery = max(map(len, ancientResults.values()))
-    print("Highest depth per query (ground truth)", highestDepthPerQuery)
+    highest_depth_per_query = max(map(len, ancient_results.values()))
+    print("Highest depth per query (ground truth)", highest_depth_per_query)
 
-    print("Modern non zero hits", sum(filter(lambda x: x != 0, map(len, modernResults.values()))))
+    print("Modern non zero hits", sum(filter(lambda x: x != 0, map(len, modern_results.values()))))
 
-    hitCountAncient = sum(map(len, ancientResults.values()))
-    hitCountModern = sum(map(len, modernResults.values()))
+    hit_count_ancient = sum(map(len, ancient_results.values()))
+    hit_count_modern = sum(map(len, modern_results.values()))
     print("Hit Count")
-    print(" - ground truth", hitCountAncient)
-    print(" - modern", hitCountModern)
+    print(" - ground truth", hit_count_ancient)
+    print(" - modern", hit_count_modern)
 
     # used to make a histogram at 10% intervals
     hits = [0] * 11
     totals = [0] * 11
 
-    for query in ancientResults.keys():
-        modernProfile = set(modernResults[query])
-        ancientProfile = set(ancientResults[query])
+    for query in ancient_results.keys():
+        modern_profile = set(modern_results[query])
+        ancient_profile = set(ancient_results[query])
 
-        overlap = len(ancientProfile.intersection(modernProfile))
-        assert overlap >= min(len(modernProfile), len(ancientProfile))
+        overlap = len(ancient_profile.intersection(modern_profile))
+        assert overlap >= min(len(modern_profile), len(ancient_profile))
 
-        for realHit in ancientProfile:
-            overlap = overlapDegree(realHit, query)
-            discreteOverlap = round(overlap * 10)
-            totals[discreteOverlap] += 1
+        for real_hit in ancient_profile:
+            overlap = overlap_degree(real_hit, query)
+            discrete_overlap = round(overlap * 10)
+            totals[discrete_overlap] += 1
 
-            if realHit in modernProfile:
-                hits[discreteOverlap] += 1
+            if real_hit in modern_profile:
+                hits[discrete_overlap] += 1
 
-    recall = sum(hits) / hitCountAncient
+    recall = sum(hits) / hit_count_ancient
     print("recall", recall)
 
     # recall by overlap
 
-    hitProb = []
+    hit_prob = []
     for i in range(11):
         if totals[i] == 0:
             raise RuntimeError("A total is zero, cannot compute average")
-        hitProb.append(hits[i] / totals[i])
+        hit_prob.append(hits[i] / totals[i])
 
     ticks = np.arange(0, 1.1, 0.1)
 
     plt.figure()
-    plt.bar(ticks, hitProb, width=0.1)
+    plt.bar(ticks, hit_prob, width=0.1)
 
     plt.xticks(ticks)
     plt.xlim(0, 1)
@@ -203,24 +203,24 @@ def analyzeResults(modernResults, ancientResults, overlapPlot, geOverlapPlot):
     plt.xlabel("Overlap")
     plt.ylabel("Recall")
     plt.title("Recall by overlap")
-    plt.savefig(overlapPlot, dpi=300)
+    plt.savefig(overlap_plot, dpi=300)
 
     # recall by >= overlap
 
-    runningHits = np.array([0] * 11)
-    runningTotals = np.array([0] * 11)
+    running_hits = np.array([0] * 11)
+    running_totals = np.array([0] * 11)
 
     for i in range(len(hits)):
-        runningHits[i] = sum(hits[i:])
-        runningTotals[i] = sum(totals[i:])
+        running_hits[i] = sum(hits[i:])
+        running_totals[i] = sum(totals[i:])
 
-        if runningTotals[i] == 0:
+        if running_totals[i] == 0:
             print("A total is zero, cannot compute average")
 
-    hitProbSum = runningHits / runningTotals
+    hit_prob_sum = running_hits / running_totals
 
     plt.figure()
-    plt.bar(ticks, hitProbSum, width=0.1)
+    plt.bar(ticks, hit_prob_sum, width=0.1)
 
     plt.xticks(ticks)
     plt.xlim(0, 1)
@@ -230,19 +230,19 @@ def analyzeResults(modernResults, ancientResults, overlapPlot, geOverlapPlot):
     plt.xlabel(">= Overlap")
     plt.ylabel("Recall")
     plt.title("Recall by at least overlap")
-    plt.savefig(geOverlapPlot, dpi=300)
+    plt.savefig(ge_overlap_plot, dpi=300)
 
-    return hitCountModern, hitCountAncient
+    return hit_count_modern, hit_count_ancient
 
 
-def giggleBenchmark(
-    queryBed: IntervalTransformer,
-    sampleBed: IntervalTransformer,
-    queryEmbeds: MmapF32,
-    sampleEmbeds: MmapF32,
-    legacyResultsPath: str,
-    overlapPlotPath: str,
-    geOverlapPlotPath: str,
+def giggle_benchmark(
+    query_bed: IntervalTransformer,
+    sample_bed: IntervalTransformer,
+    query_embeds: MmapF32,
+    sample_embeds: MmapF32,
+    legacy_results_path: str,
+    overlap_plot_path: str,
+    ge_overlap_plot_path: str,
     k: int,
 ) -> tuple[int, int]:
     """
@@ -252,10 +252,10 @@ def giggleBenchmark(
     """
 
     print("Performing modern giggle")
-    modernResults = modernGiggle(sampleBed, sampleEmbeds, queryBed, queryEmbeds, k)
+    modern_results = modern_giggle(sample_bed, sample_embeds, query_bed, query_embeds, k)
     print("Parsing ancient giggle")
-    ancientResults = parseLegacyGiggle(legacyResultsPath)
+    ancient_results = parse_legacy_giggle(legacy_results_path)
 
-    Path(overlapPlotPath).parent.mkdir(parents=True, exist_ok=True)
-    Path(geOverlapPlotPath).parent.mkdir(parents=True, exist_ok=True)
-    return analyzeResults(modernResults, ancientResults, overlapPlotPath, geOverlapPlotPath)
+    Path(overlap_plot_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(ge_overlap_plot_path).parent.mkdir(parents=True, exist_ok=True)
+    return analyze_results(modern_results, ancient_results, overlap_plot_path, ge_overlap_plot_path)

@@ -8,33 +8,33 @@ from pathlib import Path
 import numpy as np
 import scipy.stats
 
-import giggleml.utils.roadmapEpigenomics as rme
-from analysis.advHeatmap import plot_heatmap_with_averages
-from giggleml.embedGen import meanEmbedDict
-from giggleml.utils.printTo import printTo
+import giggleml.utils.roadmap_epigenomics as rme
+from analysis.adv_heatmap import plot_heatmap_with_averages
+from giggleml.embed_gen import mean_embed_dict
+from giggleml.utils.print_to import print_to
 
 
-def modernRank(masterPath: str, outPath: str) -> dict[str, list[tuple[str, float]]]:
-    if os.path.isfile(outPath):
-        return pickle.load(open(outPath, "rb"))
+def modern_rank(master_path: str, out_path: str) -> dict[str, list[tuple[str, float]]]:
+    if os.path.isfile(out_path):
+        return pickle.load(open(out_path, "rb"))
 
-    embeds = meanEmbedDict.parse(masterPath)
+    embeds = mean_embed_dict.parse(master_path)
     top = dict()
 
-    for i, (base, baseEm) in enumerate(embeds.items()):
+    for i, (base, base_em) in enumerate(embeds.items()):
 
-        def emDist(em2: np.ndarray):
-            return np.linalg.norm(em2 - baseEm).item()
+        def em_dist(em2: np.ndarray):
+            return np.linalg.norm(em2 - base_em).item()
 
-        neighbors = [(name, emDist(em)) for (name, em) in embeds.items()]
+        neighbors = [(name, em_dist(em)) for (name, em) in embeds.items()]
         top[base] = sorted(neighbors, key=lambda x: x[1])
         print(f"{i + 1} / {len(embeds)}")
 
-    pickle.dump(top, open(outPath, "wb"))
+    pickle.dump(top, open(out_path, "wb"))
     return top
 
 
-def _cleanName(name: str):
+def _clean_name(name: str):
     name = os.path.basename(name)
 
     if name.endswith(".tsv"):
@@ -47,7 +47,7 @@ def _cleanName(name: str):
     return name
 
 
-def legacyRank(paths: Sequence[str]) -> dict[str, list[tuple[str, float]]]:
+def legacy_rank(paths: Sequence[str]) -> dict[str, list[tuple[str, float]]]:
     top = dict()
 
     for path in paths:
@@ -57,41 +57,41 @@ def legacyRank(paths: Sequence[str]) -> dict[str, list[tuple[str, float]]]:
             lines = iter(file.readlines())
 
             line0 = next(lines).strip()
-            keyCol = line0.split("\t").index("combo_score")
+            key_col = line0.split("\t").index("combo_score")
 
             for line in lines:
                 if line.startswith("#"):
                     continue
 
                 split = line.split("\t")
-                value = float(split[keyCol])
-                name = _cleanName(split[0])
+                value = float(split[key_col])
+                name = _clean_name(split[0])
                 scores.append((name, value))
 
         scores = sorted(scores, key=lambda x: -x[1])
-        baseName = _cleanName(path)
-        top[baseName] = scores
+        base_name = _clean_name(path)
+        top[base_name] = scores
 
     return top
 
 
-def keywordScore(base: str, others: Sequence[str]):
+def keyword_score(base: str, others: Sequence[str]):
     """
     A normalized score based on the indices of elements in the list with matching keywords
     to the base. Uses nDCG.
     """
 
     k = 1 * len(others)  # DCG is often calculated with only the upper subset
-    targetCT, targetCS = rme.cellTypeChrmStateSplit(base)
+    target_ct, target_cs = rme.cell_type_chrm_state_split(base)
     dcg = 0
 
     for i, other in enumerate(others[:k]):
-        ct, cs = rme.cellTypeChrmStateSplit(other)
+        ct, cs = rme.cell_type_chrm_state_split(other)
         gain = 0
 
-        if ct == targetCT:
+        if ct == target_ct:
             gain += 1
-        if cs == targetCS:
+        if cs == target_cs:
             gain += 1
 
         dcg += gain / log(i + 2, 2)
@@ -100,13 +100,13 @@ def keywordScore(base: str, others: Sequence[str]):
 
     idcg = 2  # ideally, the first item contains both CT & CS
 
-    for i in range(len(rme.chromatinStates) + len(rme.cellTypes) - 1):
+    for i in range(len(rme.chromatin_states) + len(rme.cell_types) - 1):
         idcg += 1 / log(i + 3, 2)
 
     return dcg / idcg
 
 
-def kendallSig(
+def kendall_sig(
     reference: Sequence[str], observed: Sequence[str], resamples: int = 9999
 ) -> float:
     """
@@ -124,15 +124,15 @@ def kendallSig(
     ref = [item for item in reference if item in common]
     obs = [item for item in observed if item in common]
 
-    commonSize = len(ref)
-    if commonSize < 2:
+    common_size = len(ref)
+    if common_size < 2:
         message = (
-            f"Warning: Only {commonSize} common item(s). "
+            f"Warning: Only {common_size} common item(s). "
             "Kendall's Tau requires at least 2 for a meaningful comparison."
         )
         print(message)
         # Calculate Tau for completeness if possible, though p-value might not be robust
-        if commonSize == 1:  # Only one common item
+        if common_size == 1:  # Only one common item
             # Tau is undefined or trivially 0, p-value is meaningless.
             # Or, based on some conventions, tau might be 1 if we only have one element.
             # SciPy's kendalltau will likely result in nan or error for < 2 elements.
@@ -141,9 +141,9 @@ def kendallSig(
         # if num_common_items is 0, it's caught by the `if not common_items` above.
 
     # 2. Map to Ranks
-    refRank = {item: i for i, item in enumerate(ref)}
+    ref_rank = {item: i for i, item in enumerate(ref)}
     # Observed ranks for the second list, based on the ordering defined by the first list
-    obsRank = np.array([refRank[item] for item in obs])
+    obs_rank = np.array([ref_rank[item] for item in obs])
 
     # 3. Define Statistic Function for permutation_test
     def statistic_fn(permuted_subject_ranks, fixed_ideal_ranks):
@@ -159,7 +159,7 @@ def kendallSig(
     # when permutation_type='pairings'.
     try:
         res = scipy.stats.permutation_test(
-            (obsRank, np.array(list(range(commonSize)))),  # Data tuple
+            (obs_rank, np.array(list(range(common_size)))),  # Data tuple
             statistic_fn,
             permutation_type="pairings",
             n_resamples=resamples,
@@ -180,9 +180,9 @@ def main():
     data = "data/roadmap_epigenomics"
     exp = "experiments/roadmapEpigenomics"
 
-    modernRanks = modernRank(f"{data}/embeds/master.pickle", f"{data}/ranks.pickle")
-    legacyRanks = legacyRank(
-        [f"{data}/giggleRanks/{name}.tsv" for name in modernRanks.keys()]
+    modern_ranks = modern_rank(f"{data}/embeds/master.pickle", f"{data}/ranks.pickle")
+    legacy_ranks = legacy_rank(
+        [f"{data}/giggleRanks/{name}.tsv" for name in modern_ranks.keys()]
     )
 
     # INFO: rank comparison .tsv files
@@ -191,35 +191,35 @@ def main():
     Path(f"{exp}/keywordRanks").mkdir(exist_ok=True)
     Path(f"{exp}/fileRanks").mkdir(exist_ok=True)
 
-    for i, name in enumerate(modernRanks.keys()):
+    for i, name in enumerate(modern_ranks.keys()):
         # raw rank data
 
-        with printTo(f"{exp}/fileRanks/{name}.tsv"):
+        with print_to(f"{exp}/fileRanks/{name}.tsv"):
             print("Embedding-based", "Giggle-legacy", sep="\t")
 
-            for modernValue, legacyValue in zip(modernRanks[name], legacyRanks[name]):
-                print(modernValue[0], legacyValue[0], sep="\t")
+            for modern_value, legacy_value in zip(modern_ranks[name], legacy_ranks[name]):
+                print(modern_value[0], legacy_value[0], sep="\t")
 
         # top keyword ranks
 
-        keywordSums1 = defaultdict(lambda: 0.0)
-        keywordSums2 = defaultdict(lambda: 0.0)
+        keyword_sums1 = defaultdict(lambda: 0.0)
+        keyword_sums2 = defaultdict(lambda: 0.0)
 
-        for j, (modernValue, legacyValue) in list(
-            enumerate(zip(modernRanks[name], legacyRanks[name]))
+        for j, (modern_value, legacy_value) in list(
+            enumerate(zip(modern_ranks[name], legacy_ranks[name]))
         ):
-            modern = rme.cellTypeChrmStateSplit(modernValue[0])
-            legacy = rme.cellTypeChrmStateSplit(legacyValue[0])
+            modern = rme.cell_type_chrm_state_split(modern_value[0])
+            legacy = rme.cell_type_chrm_state_split(legacy_value[0])
             k = 0  # this is like a temperature
             # (mean) reciprocal rank
-            keywordSums1[modern[0]] += 1 / (j + 1 + k)
-            keywordSums1[modern[1]] += 1 / (j + 1 + k)
-            keywordSums2[legacy[0]] += 1 / (j + 1 + k)
-            keywordSums2[legacy[1]] += 1 / (j + 1 + k)
+            keyword_sums1[modern[0]] += 1 / (j + 1 + k)
+            keyword_sums1[modern[1]] += 1 / (j + 1 + k)
+            keyword_sums2[legacy[0]] += 1 / (j + 1 + k)
+            keyword_sums2[legacy[1]] += 1 / (j + 1 + k)
 
-        with printTo(f"{exp}/keywordRanks/{name}-cellType.tsv"):
-            cellTypeRanks1 = sorted(rme.cellTypes, key=lambda x: -keywordSums1[x])
-            cellTypeRanks2 = sorted(rme.cellTypes, key=lambda x: -keywordSums2[x])
+        with print_to(f"{exp}/keywordRanks/{name}-cellType.tsv"):
+            cell_type_ranks1 = sorted(rme.cell_types, key=lambda x: -keyword_sums1[x])
+            cell_type_ranks2 = sorted(rme.cell_types, key=lambda x: -keyword_sums2[x])
 
             print(
                 "(New) Cell Type",
@@ -227,15 +227,15 @@ def main():
                 sep="\t",
             )
 
-            for x in zip(cellTypeRanks1, cellTypeRanks2):
+            for x in zip(cell_type_ranks1, cell_type_ranks2):
                 print(*x, sep="\t")
 
-        with printTo(f"{exp}/keywordRanks/{name}-chrmState.tsv"):
-            chrmStateRanks1 = sorted(
-                rme.chromatinStates, key=lambda x: -keywordSums1[x]
+        with print_to(f"{exp}/keywordRanks/{name}-chrmState.tsv"):
+            chrm_state_ranks1 = sorted(
+                rme.chromatin_states, key=lambda x: -keyword_sums1[x]
             )
-            chrmStateRanks2 = sorted(
-                rme.chromatinStates, key=lambda x: -keywordSums2[x]
+            chrm_state_ranks2 = sorted(
+                rme.chromatin_states, key=lambda x: -keyword_sums2[x]
             )
 
             print(
@@ -244,32 +244,32 @@ def main():
                 sep="\t",
             )
 
-            for x in zip(chrmStateRanks1, chrmStateRanks2):
+            for x in zip(chrm_state_ranks1, chrm_state_ranks2):
                 print(*x, sep="\t")
 
-        print(f"{i + 1} / {len(modernRanks)}")
+        print(f"{i + 1} / {len(modern_ranks)}")
 
     # INFO: heatmap
     print("Heatmap...")
 
     target = "Brain_Hippocampus_Middle_Enhancers"
-    modernHits = {hit: value for (hit, value) in modernRanks[target]}
-    legacyHits = {hit: value for (hit, value) in legacyRanks[target]}
+    modern_hits = {hit: value for (hit, value) in modern_ranks[target]}
+    legacy_hits = {hit: value for (hit, value) in legacy_ranks[target]}
 
-    def prepareHeatmapMatrix(sigMap):
+    def prepare_heatmap_matrix(sig_map):
         matrix = list()
-        yLabels = list()
+        y_labels = list()
 
-        for category in rme.cellCategory:
-            cellTypes = rme.cellCategory[category]
-            yLabels.append((category, len(cellTypes)))
+        for category in rme.cell_category:
+            cell_types = rme.cell_category[category]
+            y_labels.append((category, len(cell_types)))
 
-            for cellType in cellTypes:
+            for cell_type in cell_types:
                 row = list()
 
-                for chrmState in rme.chromatinStates:
-                    name = f"{cellType}_{chrmState}"
-                    value = modernHits.get(name, None)
+                for chrm_state in rme.chromatin_states:
+                    name = f"{cell_type}_{chrm_state}"
+                    value = modern_hits.get(name, None)
                     row.append(value)
 
                 matrix.append(row)
@@ -278,49 +278,49 @@ def main():
         matrix = np.array(matrix)
         mask = np.ma.masked_invalid(matrix.astype(float))
         matrix = np.where(matrix != None, mask.max() - matrix.astype(float), None)
-        return matrix, yLabels
+        return matrix, y_labels
 
-    matrix, yLabels = prepareHeatmapMatrix(modernHits)
+    matrix, y_labels = prepare_heatmap_matrix(modern_hits)
     path = f"{exp}/heatmaps/{target}.png"
     fig, _ = plot_heatmap_with_averages(
-        rme.chromatinStates, yLabels, matrix, title=target, desired_tile_in=(0.3, 0.1)
+        rme.chromatin_states, y_labels, matrix, title=target, desired_tile_in=(0.3, 0.1)
     )
     fig.savefig(path, dpi=300, bbox_inches="tight")
 
     # INFO: general scores
     print("General scores...")
 
-    modernKeyScores = dict[str, float]()
-    legacyKeyScores = dict[str, float]()
+    modern_key_scores = dict[str, float]()
+    legacy_key_scores = dict[str, float]()
 
     with open(f"{exp}/rankAnalysis.tsv", "w") as f:
         print("name", "(new) nDCG", "(old) nDCG", sep="\t", file=f)
 
-        for i, name in enumerate(modernRanks.keys()):
+        for i, name in enumerate(modern_ranks.keys()):
             # keyword score
 
-            modernNeighbors = [other for (other, _) in modernRanks[name]]
-            modernKeyScore = keywordScore(name, modernNeighbors)
-            modernKeyScores[name] = modernKeyScore
+            modern_neighbors = [other for (other, _) in modern_ranks[name]]
+            modern_key_score = keyword_score(name, modern_neighbors)
+            modern_key_scores[name] = modern_key_score
 
-            legacyNeighbors = [other for (other, _) in legacyRanks[name]]
-            legacyKeyScore = keywordScore(name, legacyNeighbors)
-            legacyKeyScores[name] = legacyKeyScore
+            legacy_neighbors = [other for (other, _) in legacy_ranks[name]]
+            legacy_key_score = keyword_score(name, legacy_neighbors)
+            legacy_key_scores[name] = legacy_key_score
 
-            print(name, modernKeyScore, legacyKeyScore, sep="\t", file=f)
-            print(f"{i + 1} / {len(modernRanks)}")
+            print(name, modern_key_score, legacy_key_score, sep="\t", file=f)
+            print(f"{i + 1} / {len(modern_ranks)}")
 
-        modernKeyScoreAvg = np.mean(list(modernKeyScores.values()))
-        legacyKeyScoreAvg = np.mean(list(legacyKeyScores.values()))
-        print("avg", modernKeyScoreAvg, legacyKeyScoreAvg, sep="\t", file=f)
+        modern_key_score_avg = np.mean(list(modern_key_scores.values()))
+        legacy_key_score_avg = np.mean(list(legacy_key_scores.values()))
+        print("avg", modern_key_score_avg, legacy_key_score_avg, sep="\t", file=f)
 
     # INFO: kendall's tau, pvalue
     print("Kendall's Tau, P-Value (using legacy-giggle as the reference rankings)")
-    legacyNeighbors = [name for (name, _) in legacyRanks[target]]
-    modernNeighbors = [name for (name, _) in modernRanks[target]]
+    legacy_neighbors = [name for (name, _) in legacy_ranks[target]]
+    modern_neighbors = [name for (name, _) in modern_ranks[target]]
     # TODO: the kendall tau sig is too good; investigate
-    ktPval = kendallSig(legacyNeighbors, modernNeighbors, 99999)
-    print(f" - for {target}: {ktPval}")
+    kt_pval = kendall_sig(legacy_neighbors, modern_neighbors, 99999)
+    print(f" - for {target}: {kt_pval}")
 
 
 if __name__ == "__main__":

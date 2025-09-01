@@ -2,7 +2,7 @@ import random
 from random import randint
 from time import time
 
-chrmSizesF = [
+chrm_sizes_f = [
     248.96,  # Chromosome 1
     242.19,  # Chromosome 2
     198.30,  # Chromosome 3
@@ -29,49 +29,49 @@ chrmSizesF = [
     57.23,  # Chromosome Y
 ]
 
-chrmSizes: list[int] = list(map(lambda x: round(x * 1e6), chrmSizesF))  # In Mbp
-chrmNames = [f"chr{i+1}" for i, _ in enumerate(chrmSizes)]
-chrmNames[22] = "chrX"
-chrmNames[23] = "chrY"
+chrm_sizes: list[int] = list(map(lambda x: round(x * 1e6), chrm_sizes_f))  # In Mbp
+chrm_names = [f"chr{i+1}" for i, _ in enumerate(chrm_sizes)]
+chrm_names[22] = "chrX"
+chrm_names[23] = "chrY"
 
 
 class Chromosome:
-    def __init__(self, blockSize):
+    def __init__(self, block_size):
         self.blocks = dict()
-        self.blockSize = blockSize
+        self.block_size = block_size
 
     def block_id(self, pos):
-        return pos // self.blockSize
+        return pos // self.block_size
 
     def blocks_in(self, start, end):
-        startBlock = self.block_id(start)
-        endBlock = self.block_id(end - 1)
-        return range(startBlock, endBlock)
+        start_block = self.block_id(start)
+        end_block = self.block_id(end - 1)
+        return range(start_block, end_block)
 
-    def fill_block(self, blockId):
-        if blockId not in self.blocks:
-            entry = [0] * self.blockSize
+    def fill_block(self, block_id):
+        if block_id not in self.blocks:
+            entry = [0] * self.block_size
             entry = list(map(lambda x: randint(0, 3), entry))
-            self.blocks[blockId] = entry
+            self.blocks[block_id] = entry
 
     def include(self, start, end):
-        for blockId in self.blocks_in(start, end):
-            self.fill_block(blockId)
+        for block_id in self.blocks_in(start, end):
+            self.fill_block(block_id)
 
-    def block_as_seq(self, blockId):
+    def block_as_seq(self, block_id):
         literals = "ACGT"
-        block = self.blocks[blockId]
+        block = self.blocks[block_id]
         return list(map(lambda x: literals[x], block))
 
-    def fasta_format(self, chrmName):
-        out = [">", str(chrmName), "\n"]
+    def fasta_format(self, chrm_name):
+        out = [">", str(chrm_name), "\n"]
 
-        prevBlockId = 0
-        for blockId in sorted(self.blocks.keys()):
-            gap = max(0, blockId - prevBlockId - 1)
-            out += ["N"] * (gap * self.blockSize)
-            out += self.block_as_seq(blockId)
-            prevBlockId = blockId
+        prev_block_id = 0
+        for block_id in sorted(self.blocks.keys()):
+            gap = max(0, block_id - prev_block_id - 1)
+            out += ["N"] * (gap * self.block_size)
+            out += self.block_as_seq(block_id)
+            prev_block_id = block_id
 
         return "".join(out)
 
@@ -79,65 +79,65 @@ class Chromosome:
         return str(self.blocks)
 
 
-def synthesize(fastaOut, outFiles, seqLenMin, seqLenMax, seqPerUniverse, seed):
+def synthesize(fasta_out, out_files, seq_len_min, seq_len_max, seq_per_universe, seed):
     random.seed(seed)
-    print("Using chromosome structure:", list(zip(chrmNames, chrmSizes)))
+    print("Using chromosome structure:", list(zip(chrm_names, chrm_sizes)))
 
     # ---------------- Synthesize intervals ----------------
     print("Synthesizing intervals...")
     universes = []
-    for _ in range(len(outFiles)):
+    for _ in range(len(out_files)):
         univ = []
 
-        for _ in range(seqPerUniverse):
-            seqLen = randint(seqLenMin, seqLenMax)
-            chromId = randint(0, len(chrmSizes) - 1)
-            chrmSize = chrmSizes[chromId]
-            start = randint(0, chrmSize - seqLen)
-            end = start + seqLen
-            univ.append((chromId, start, end))
+        for _ in range(seq_per_universe):
+            seq_len = randint(seq_len_min, seq_len_max)
+            chrom_id = randint(0, len(chrm_sizes) - 1)
+            chrm_size = chrm_sizes[chrom_id]
+            start = randint(0, chrm_size - seq_len)
+            end = start + seq_len
+            univ.append((chrom_id, start, end))
         universes.append(univ)
 
     # -------------- Synthesize nucleotides ----------------
     print("Synthesizing nucleotides...")
-    blockSize = seqLenMax
-    blocks = [Chromosome(blockSize) for _ in range(len(chrmSizes))]
+    block_size = seq_len_max
+    blocks = [Chromosome(block_size) for _ in range(len(chrm_sizes))]
 
     t0 = time()
-    for univId, univ in enumerate(universes):
-        print("Building universe", univId)
+    for univ_id, univ in enumerate(universes):
+        print("Building universe", univ_id)
 
-        for regId, (chrmId, start, end) in enumerate(univ):
+        for reg_id, (chrm_id, start, end) in enumerate(univ):
             # extra padding
             size = end - start
             start = max(0, start - size)
-            end = min(chrmSizes[chrmId], end + size)
+            end = min(chrm_sizes[chrm_id], end + size)
 
-            if regId % 1000 == 0:
+            if reg_id % 1000 == 0:
                 dt = time() - t0
-                eta = (dt / (regId + 1)) * (seqPerUniverse - regId)
+                eta = (dt / (reg_id + 1)) * (seq_per_universe - reg_id)
                 eta = round(eta / 60, 1)
-                print(f"- region {regId},\tETA: {eta} min")
+                print(f"- region {reg_id},\tETA: {eta} min")
 
-            chrm = blocks[chrmId]
+            chrm = blocks[chrm_id]
             chrm.include(start, end)
 
     # ---------------- File output -----------------------
     # TODO: check paths exist before attempting long computation
     print("Generating output files...")
     # bed files
-    for regId, reg in enumerate(universes):
-        path = outFiles[regId]
+    for reg_id, reg in enumerate(universes):
+        path = out_files[reg_id]
         with open(path, "w") as f:
-            for chrmId, start, end in reg:
-                chrmName = chrmNames[chrmId]
-                f.write(f"{chrmName}\t{start}\t{end}\n")
+            for chrm_id, start, end in reg:
+                chrm_name = chrm_names[chrm_id]
+                f.write(f"{chrm_name}\t{start}\t{end}\n")
 
     # fasta file
-    with open(fastaOut, "w") as f:
+    with open(fasta_out, "w") as f:
         out = []
-        for chrmId, chrm in enumerate(blocks):
-            chrmName = chrmNames[chrmId]
-            out.append(chrm.fasta_format(chrmName))
+        for chrm_id, chrm in enumerate(blocks):
+            chrm_name = chrm_names[chrm_id]
+            out.append(chrm.fasta_format(chrm_name))
             out.append("\n")
         f.write("".join(out))

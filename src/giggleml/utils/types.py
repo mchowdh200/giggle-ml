@@ -17,9 +17,9 @@ def lazy[T](cls: T) -> T:
     return cls
 
 
-T_co = TypeVar("T_co", covariant=True)
+TCo = TypeVar("T_co", covariant=True)
 
 
-class ListLike[T_co](Protocol):
-    def __getitem__(self, idx: int) -> T_co: ...
+class ListLike[TCo](Protocol):
+    def __getitem__(self, idx: int) -> TCo: ...
     def __len__(self) -> int: ...

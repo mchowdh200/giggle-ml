@@ -4,8 +4,8 @@ import numpy as np
 import ruranges
 from numpy.typing import NDArray
 
-import giggleml.utils.roadmapEpigenomics as rme
-from giggleml.dataWrangling.intervalDataset import BedDataset
+import giggleml.utils.roadmap_epigenomics as rme
+from giggleml.data_wrangling.interval_dataset import BedDataset
 from giggleml.utils.misc import fix_bed_ext
 from giggleml.utils.time_this import time_this
 
@@ -60,7 +60,7 @@ def main():
     wet_database = DataSource()
 
     with time_this("load source"):
-        for i, bed in enumerate(rme.bedNames):
+        for i, bed in enumerate(rme.bed_names):
             data = stack(fetch(i), i)
             wet_database.starts.extend(data.starts)
             wet_database.ends.extend(data.ends)
