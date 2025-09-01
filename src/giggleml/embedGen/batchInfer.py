@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 from time import time
-from typing import Callable, final, overload
+from typing import Callable, final
 
 import numpy as np
 import torch
@@ -87,243 +87,183 @@ class BatchInfer:
         outFile.flush()
         del outFile
 
-    def _inferLoop_inmemory(self, rank: int, dataLoader: DataLoader) -> np.ndarray:
-        """Inference loop that returns results in memory."""
-        rprint = lambda *args: print(f"[{rank}]:", *args)
-        time0 = time()
-
-        all_outputs = []
-        for i, batch in enumerate(dataLoader):
-            outputs = self.model.embed(batch).to("cpu")
-            all_outputs.append(outputs.detach().numpy())
-
-            if i % 50 == 0:
-                rprint(f"Batch: {i + 1}\t/ {len(dataLoader)}")
-            if i % 150 == 1 and rank == 0:
-                elapsed = time() - time0
-                eta = timedelta(
-                    seconds=((elapsed / (i + 1)) * len(dataLoader)) - elapsed
-                )
-                elapsedDt = timedelta(seconds=elapsed)
-                rprint(f"== {str(elapsedDt)}, ETA: {str(eta)}")
-
-        rprint(f"Batch: {len(dataLoader)}\t/ {len(dataLoader)}")
-
-        if not all_outputs:
-            return np.empty((0, self.embedDim), dtype=np.float32)
-
-        return np.concatenate(all_outputs, axis=0)
-
     def _worker(
         self,
         rank: int,
         datasets: Sequence[IntervalDataset],
-        outPaths: Sequence[str] | None,
+        outPaths: Sequence[str],
         post: Sequence[Callable[[np.memmap], None]] | None,
-        world_size_override: int | None = None,
-    ) -> np.ndarray | None:
+    ):
         device = guessDevice(rank)
-        in_memory = outPaths is None
-        world_size = world_size_override or self.workerCount
 
         if rank == 0:
             print("Starting inference.")
 
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
-        fasta_path: str | None = None
+        fasta: str | None = None
 
         for dataset in datasets:
             datasetFasta = dataset.associatedFastaPath
-            if fasta_path is None:
-                fasta_path = datasetFasta
-            elif fasta_path != datasetFasta:
+            if fasta is None:
+                fasta = datasetFasta
+            elif fasta != datasetFasta:
                 # TODO: this constraint could be avoided
                 raise ValueError("Expecting all datasets to have same fasta path")
 
         masterDataset = UnifiedDataset[GenomicInterval](datasets)
 
         model = self.model.to(device)
+        model.to(device)
         wantsSeq = self.model.wants == "sequences"
         eDim = self.model.embedDim
 
         if wantsSeq:
-            if fasta_path is None:
+            if fasta is None:
                 raise ValueError("Unable to map to fasta; missing associatedFastaPath")
-            collate = FastaCollate(fasta_path)
+            collate = FastaCollate(fasta)
         else:
             collate = passCollate
 
-        pg_managed_here = False
-        if not dist.is_initialized():
-            pg_managed_here = True
+        # with torch.profiler.profile(
+        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        #     on_trace_ready=torch.profiler.tensorboard_trace_handler(f"logs/rank_{rank}"),
+        #     with_stack=True,
+        # ) as prof:
+        blockSampler = BlockDistributedSampler(masterDataset, self.workerCount, rank)
+        sampleCount = len(blockSampler)
+        offset = blockSampler.lower * eDim * 4  # (4 bytes per float32)
+        masterOutPath = Path(outPaths[0]).parent / "wip.tmp.npy"
+        masterOutFile = np.memmap(
+            masterOutPath, np.float32, "r+", offset, shape=(sampleCount, eDim)
+        )
+
+        dataLoader = DataLoader(
+            masterDataset,
+            batch_size=self.batchSize,
+            sampler=blockSampler,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=self.subWorkerCount,
+            persistent_workers=self.subWorkerCount != 0,  # (usually True) -- crucial
+            collate_fn=collate,
+        )
+
+        try:
+            # INFO: init process group
+
             os.environ["MASTER_ADDR"] = "localhost"
             os.environ["MASTER_PORT"] = "12356"
             dist.init_process_group(
                 backend="nccl" if torch.cuda.is_available() else "gloo",
                 rank=rank,
-                world_size=world_size,
-                timeout=timedelta(seconds=len(masterDataset) / world_size * 0.5),
+                world_size=self.workerCount,
+                # it seems to be about 1.2 seconds per batch 5/27/2025
+                timeout=timedelta(seconds=len(masterDataset) / self.workerCount * 0.5),
                 device_id=(device if device.type == "cuda" else None),
             )
 
-        try:
             if not dist.is_initialized():
-                raise RuntimeError("Process group could not be initialized")
+                raise RuntimeError("Process group could not initialized")
 
             dist.barrier()
 
-            blockSampler = BlockDistributedSampler(masterDataset, world_size, rank)
-            dataLoader = DataLoader(
-                masterDataset,
-                batch_size=self.batchSize,
-                sampler=blockSampler,
-                shuffle=False,
-                pin_memory=True,
-                num_workers=self.subWorkerCount,
-                persistent_workers=self.subWorkerCount != 0,
-                collate_fn=collate,
+            # INFO: big step
+
+            self._inferLoop(
+                rank,
+                dataLoader,
+                masterOutFile,
             )
 
-            if in_memory:
+            dist.barrier()  # INFO: inference complete.
+            #                 now beginning separation of outputs
+            if rank == 0:
+                print("Starting post-processing.")
+
+            # we are splitting up embeds from masterOutFile into separate memmaps
+            # based on the distribution of datasets. Each worker is responsible for
+            # the datasets they implicitly completed.
+
+            setIdxStart = (
+                masterDataset.listIdxOf(blockSampler.lower)
+                if blockSampler.lower < len(masterDataset)
+                else len(masterDataset.lists)
+            )
+            setIdxEnd = (
+                masterDataset.listIdxOf(blockSampler.upper)
+                if blockSampler.upper < len(masterDataset)
+                else len(masterDataset.lists)
+            )
+
+            #                                     (1)     (2)     (3)
+            # for datasets full of intervals,   [----] [-------] [---]
+            # the sampler can split datasets:   |==========|=========|
+            # so memmap init works like:        (rank1)(    rank2    )
+
+            # since sometimes a rank might need to write some intervals preparred by
+            # rank-1, we need to remap masterOutFile
+            masterOutFile.flush()
+            del masterOutFile
+            masterSize = masterDataset.sums[setIdxEnd] - masterDataset.sums[setIdxStart]
+            masterOutFile = np.memmap(
+                masterOutPath,
+                np.float32,
+                "r",
+                offset=masterDataset.sums[setIdxStart] * eDim * 4,
+                shape=(masterSize, eDim),
+            )
+
+            for setIdx in range(setIdxStart, setIdxEnd):
+                size = len(datasets[setIdx])
+                outPath = outPaths[setIdx]
+
+                # reorganize data
+                i = masterDataset.sums[setIdx] - masterDataset.sums[setIdxStart]
+                content = masterOutFile[i : i + size]
+                mmap = np.memmap(outPath, np.float32, "w+", shape=(size, eDim))
+                mmap[:] = content
+                mmap.flush()
+
+                if post is not None:
+                    # post processing
+                    postCall = post[setIdx]
+                    postCall(mmap)
+
                 if rank == 0:
-                    print("Starting in-memory inference.")
-                embeddings = self._inferLoop_inmemory(rank, dataLoader)
-                dist.barrier()
-                return embeddings
-            else:
-                assert outPaths is not None
-                sampleCount = len(blockSampler)
-                offset = blockSampler.lower * eDim * 4
-                masterOutPath = Path(outPaths[0]).parent / "wip.tmp.npy"
-                masterOutFile = np.memmap(
-                    masterOutPath, np.float32, "r+", offset, shape=(sampleCount, eDim)
-                )
-
-                self._inferLoop(rank, dataLoader, masterOutFile)
-                dist.barrier()
-
-                if rank == 0:
-                    print("Starting post-processing.")
-
-                setIdxStart = (
-                    masterDataset.listIdxOf(blockSampler.lower)
-                    if blockSampler.lower < len(masterDataset)
-                    else len(masterDataset.lists)
-                )
-                setIdxEnd = (
-                    masterDataset.listIdxOf(blockSampler.upper)
-                    if blockSampler.upper < len(masterDataset)
-                    else len(masterDataset.lists)
-                )
-
-                masterOutFile.flush()
-                del masterOutFile
-                masterSize = (
-                    masterDataset.sums[setIdxEnd] - masterDataset.sums[setIdxStart]
-                )
-                masterOutFile = np.memmap(
-                    masterOutPath,
-                    np.float32,
-                    "r",
-                    offset=masterDataset.sums[setIdxStart] * eDim * 4,
-                    shape=(masterSize, eDim),
-                )
-
-                for setIdx in range(setIdxStart, setIdxEnd):
-                    size = len(datasets[setIdx])
-                    outPath = outPaths[setIdx]
-                    i = masterDataset.sums[setIdx] - masterDataset.sums[setIdxStart]
-                    content = masterOutFile[i : i + size]
-                    mmap = np.memmap(outPath, np.float32, "w+", shape=(size, eDim))
-                    mmap[:] = content
-                    mmap.flush()
-
-                    if post is not None:
-                        postCall = post[setIdx]
-                        postCall(mmap)
-
-                    if rank == 0 and (100 * setIdx // len(outPaths)) % 10 == 0:
+                    if (100 * setIdx // len(outPaths)) % 10 == 0:  # roughly every 10%
                         rprint(f"{setIdx + 1} / {len(outPaths)}")
 
-                rprint(f"{len(outPaths)} / {len(outPaths)}")
-                dist.barrier()
-                return None
+            rprint(f"{len(outPaths)} / {len(outPaths)}")
+            dist.barrier()
         finally:
-            if pg_managed_here and dist.is_initialized():
-                dist.destroy_process_group()
+            dist.destroy_process_group()
 
-    @overload
-    def batch(
-        self,
-        datasets: Sequence[ListLike],
-        outPaths: None = None,
-        post: Sequence[Callable[[np.memmap], None]] | None = None,
-    ) -> list[np.ndarray]: ...
-
-    @overload
     def batch(
         self,
         datasets: Sequence[ListLike],
         outPaths: Sequence[str],
         post: Sequence[Callable[[np.memmap], None]] | None = None,
-    ) -> None: ...
+    ):
+        """
+        @param post: Is a list of processing Callable to apply to completed memmaps after inference is completed.
+        """
+        assert len(datasets) == len(outPaths)
 
-    def batch(
-        self,
-        datasets: Sequence[ListLike],
-        outPaths: Sequence[str] | None = None,
-        post: Sequence[Callable[[np.memmap], None]] | None = None,
-    ) -> list[np.ndarray] | None:
-        if outPaths is None:
-            if not dist.is_initialized():
-                raise RuntimeError(
-                    "Process group must be initialized for in-memory batch inference."
-                )
+        eDim = self.model.embedDim
+        totalLen = sum([len(dataset) for dataset in datasets])
+        masterOut = Path(outPaths[0]).parent.mkdir(parents=True, exist_ok=True)
+        masterOut = Path(outPaths[0]).parent / "wip.tmp.npy"
+        mmTotal = np.memmap(masterOut, np.float32, "w+", shape=(totalLen, eDim))
+        mmTotal[:] = 0
+        mmTotal.flush()
+        del mmTotal
 
-            rank = dist.get_rank()
-            world_size = dist.get_world_size()
+        # big operation
+        args = (datasets, outPaths, post)
+        mp.spawn(
+            self._worker, args=args, nprocs=self.workerCount, join=True
+        )  # spawn method
 
-            if self.workerCount != world_size:
-                print(
-                    f"Warning: workerCount ({self.workerCount}) does not match distributed world size ({world_size}). Using world size."
-                )
-                self.workerCount = world_size
-
-            my_embeddings = self._worker(
-                rank, datasets, None, None, world_size_override=world_size
-            )
-
-            gathered_embeddings = [None] * world_size
-            dist.all_gather_object(gathered_embeddings, my_embeddings)
-
-            master_embeddings = np.concatenate(gathered_embeddings, axis=0)
-            masterDataset = UnifiedDataset[GenomicInterval](datasets)
-            result_arrays = []
-            for i in range(len(datasets)):
-                start_index = masterDataset.sums[i]
-                end_index = masterDataset.sums[i + 1]
-                dataset_embedding = master_embeddings[start_index:end_index]
-                result_arrays.append(dataset_embedding)
-
-            return result_arrays
-        else:
-            assert len(datasets) == len(outPaths)
-            eDim = self.model.embedDim
-            totalLen = sum([len(dataset) for dataset in datasets])
-            masterOut = Path(outPaths[0]).parent
-            masterOut.mkdir(parents=True, exist_ok=True)
-            masterOut_path = masterOut / "wip.tmp.npy"
-            mmTotal = np.memmap(
-                masterOut_path, np.float32, "w+", shape=(totalLen, eDim)
-            )
-            mmTotal[:] = 0
-            mmTotal.flush()
-            del mmTotal
-
-            args = (datasets, outPaths, post)
-            mp.spawn(self._worker, args=args, nprocs=self.workerCount, join=True)
-
-            os.remove(masterOut_path)
-            return None
-
+        # working file space
+        os.remove(masterOut)
