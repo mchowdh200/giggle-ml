@@ -51,6 +51,7 @@
           packages = with pkgs; [
             seqpare
             uv
+            just
             # wget
             # bedtools
             # samtools
