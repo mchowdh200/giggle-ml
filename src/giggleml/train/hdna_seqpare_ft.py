@@ -59,10 +59,17 @@ class SeqpareDB:
             for line in f:
                 # parse the seqpare tsv file
                 terms = line.split()
+                if len(terms) < 6:
+                    continue  # skip malformed lines
                 # the column that corresponds to file names
                 item = terms[5]
                 # these are in the form ./label.bed
-                item_id = self._labels[item[2:]]
+                if not item.startswith("./") or len(item) < 3:
+                    continue  # skip unexpected format
+                label_name = item[2:]
+                if label_name not in self._labels:
+                    continue  # skip unknown labels
+                item_id = self._labels[label_name]
                 positive = float(terms[4]) >= self.positive_threshold
                 bits[item_id] = positive
 
@@ -137,6 +144,8 @@ class RmeSeqpareClusters(IterableDataset):
             # map into interval list
             for label in labels:
                 path = fix_bed_ext(self.road_epig_path / label)
+                if not path.exists():
+                    raise FileNotFoundError(f"BED file not found: {path}")
                 bed = list(iter(BedDataset(path)))
                 intervals = my_rng.choices(bed, k=self.density)
                 cluster.append(intervals)
@@ -259,6 +268,14 @@ def main():
     log_dir = Path(training_dir, "logs")
     checkpoint_dir = Path(training_dir, "checkpoints")
     fasta = Path("data/hg/hg19.fa")
+    
+    # Validate required paths exist
+    if not rme_dir.exists():
+        raise FileNotFoundError(f"Roadmap epigenomics directory not found: {rme_dir}")
+    if not seqpare_dir.exists():
+        raise FileNotFoundError(f"Seqpare directory not found: {seqpare_dir}")
+    if not fasta.exists():
+        raise FileNotFoundError(f"FASTA file not found: {fasta}")
 
     # cluster sampling
     clusters_per_batch = 10
@@ -320,16 +337,13 @@ def main():
     checkpoint_path = checkpoint_dir / "latest-checkpoint.pt"
 
     start_epoch = 0
-    if fabric.is_global_zero and checkpoint_path.is_file():
+    if checkpoint_path.is_file():
         fabric.print(f"Resuming from checkpoint: {checkpoint_path}")
-        # `fabric.load` safely loads the checkpoint ONLY on the main process
+        # Load checkpoint on all ranks to ensure model/optimizer sync
         state = fabric.load(checkpoint_path)
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
         start_epoch = state["epoch"] + 1
-
-    # Broadcast the start_epoch to all processes to ensure they are in sync
-    start_epoch = fabric.broadcast(start_epoch)
 
     # INFO: ---------------------------
     #       Training Loop
