@@ -4,6 +4,7 @@ from functools import cached_property
 from typing import final, overload
 
 import numpy as np
+import torch
 
 from giggleml.interval_transforms import IntervalTransform
 
@@ -138,22 +139,28 @@ class IntervalTransformer:
         self, data: np.ndarray, aggregator: Callable[[np.ndarray], np.ndarray]
     ) -> np.ndarray: ...
 
+    @overload
+    def backward_transform(
+        self, data: torch.Tensor, aggregator: Callable[[torch.Tensor], torch.Tensor]
+    ) -> torch.Tensor: ...
+
     def backward_transform(
         self,
-        data: np.memmap | np.ndarray,
-        aggregator: Callable[[np.ndarray], np.ndarray],
-    ) -> np.memmap | np.ndarray:
+        data: np.memmap | np.ndarray | torch.Tensor,
+        aggregator: Callable[[np.ndarray], np.ndarray] | Callable[[torch.Tensor], torch.Tensor],
+    ) -> np.memmap | np.ndarray | torch.Tensor:
         """
-        Maps items from the data (memmap or numpy array) back to
+        Maps items from the data (memmap, numpy array, or tensor) back to
         a result of the same length as oldDataset, using the aggregator
         function to combine elements.
 
         For memmap: rebuilds the file and returns a new memmap.
         For numpy array: operates in-memory and returns a new numpy array.
+        For tensor: operates in-memory and returns a new tensor.
 
         This is NOT a machine learning architecture.
 
-        @param data: Either a memmap or numpy array to transform backward
+        @param data: Either a memmap, numpy array, or tensor to transform backward
         @param aggregator: Operates on slices from the data[T]. If data is NxD
         then for an arbitrary slice size K, the aggregator would be used in the
         form [KxD] -> [1xD]
@@ -199,7 +206,7 @@ class IntervalTransformer:
 
             return np.memmap(front_path, dtype=dtype, mode="r", shape=back_shape)
 
-        else:
+        elif isinstance(data, np.ndarray):
             # In-memory numpy array implementation
             back_shape = data.shape
             back_shape = (self._old_length, back_shape[1])
@@ -214,3 +221,19 @@ class IntervalTransformer:
                 back_array[i] = aggregate
 
             return back_array
+
+        else:
+            # In-memory tensor implementation
+            back_shape = data.shape
+            back_shape = (self._old_length, back_shape[1])
+            back_tensor = torch.empty(back_shape, dtype=data.dtype, device=data.device)
+
+            j = 0
+            for i in range(self._old_length):
+                front_count = len(self._to_idx[i])
+                slice = data[j : j + front_count]
+                aggregate = aggregator(slice)
+                j += front_count
+                back_tensor[i] = aggregate
+
+            return back_tensor

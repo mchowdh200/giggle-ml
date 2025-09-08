@@ -68,7 +68,7 @@ def test_pipeline_in_memory():
     bed = BedDataset("tests/test.bed", "tests/test.fa")
     embed = pipeline.embed(bed)
 
-    assert len(embed.data) == len(bed)
+    assert len(embed) == len(bed)
     # the second item 0-40 should have been split into
     #   [0-10), [10-20), [20-30), [30-40)
     #   that's
@@ -91,5 +91,5 @@ def test_pipeline_in_memory():
         [0.0, 0.0, 0.0, 5.0],
     ]
 
-    for result, expect in zip(embed.data, expecting):
+    for result, expect in zip(embed, expecting):
         assert np.array_equal(result, np.array(expect))

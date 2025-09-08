@@ -6,6 +6,7 @@ from typing import final, overload, override
 
 import numpy as np
 import torch
+from torch import Tensor
 
 from giggleml.embed_gen.batch_infer import BatchInfer
 
@@ -41,7 +42,7 @@ class EmbedPipeline(ABC):
         intervals: IntervalDataset,
         out: None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Embed: ...
+    ) -> Tensor: ...
 
     @overload
     def embed(
@@ -49,7 +50,7 @@ class EmbedPipeline(ABC):
         intervals: Sequence[IntervalDataset],
         out: None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[Embed]: ...
+    ) -> Tensor: ...
 
     @abstractmethod
     def embed(
@@ -57,7 +58,7 @@ class EmbedPipeline(ABC):
         intervals: Sequence[IntervalDataset] | IntervalDataset,
         out: Sequence[str] | str | None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[Embed] | Embed | Sequence[np.ndarray] | np.ndarray: ...
+    ) -> Tensor | Sequence[Embed] | Embed | Sequence[np.ndarray] | np.ndarray: ...
 
 
 class DirectPipeline(EmbedPipeline):
@@ -104,7 +105,7 @@ class DirectPipeline(EmbedPipeline):
         intervals: IntervalDataset,
         out: None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Embed: ...
+    ) -> Tensor: ...
 
     @overload
     def embed(
@@ -112,7 +113,7 @@ class DirectPipeline(EmbedPipeline):
         intervals: Sequence[IntervalDataset],
         out: None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[Embed]: ...
+    ) -> Tensor: ...
 
     @override
     def embed(
@@ -120,7 +121,7 @@ class DirectPipeline(EmbedPipeline):
         intervals: Sequence[IntervalDataset] | IntervalDataset,
         out: Sequence[str] | str | None = None,
         transforms: list[IntervalTransform] | None = None,
-    ) -> Sequence[Embed] | Embed:
+    ) -> Tensor | Sequence[Embed] | Embed:
         # Handle input validation for file-based mode
         if out is not None:
             if isinstance(intervals, Sequence) == isinstance(out, str):
@@ -185,15 +186,18 @@ class DirectPipeline(EmbedPipeline):
                 final_embedding = post[i].process(raw_embedding)
                 final_embeddings.append(final_embedding)
 
-            out_embeds = [embed_io.Embed(meta, data=datum) for datum in final_embeddings]
-        else:
-            # File-based mode (original implementation)
-            post = [_DeChunk(transformer, meta) for transformer in transformers]
-            self.infer.batch(new_data, out, post)
+            if single_input:
+                return final_embeddings[0]
+            else:
+                return torch.stack(final_embeddings)
 
-            # all Embeds were already embed.IO.writeMeta(.) due to DeChunk
-            # so we need references and can avoid parsing because their meta is known
-            out_embeds = [embed_io.Embed(meta, data_path=path) for path in out]
+        # File-based mode (original implementation)
+        post = [_DeChunk(transformer, meta) for transformer in transformers]
+        self.infer.batch(new_data, out, post)
+
+        # all Embeds were already embed.IO.writeMeta(.) due to DeChunk
+        # so we need references and can avoid parsing because their meta is known
+        out_embeds = [embed_io.Embed(meta, data_path=path) for path in out]
 
         if single_input:
             return out_embeds[0]
@@ -212,12 +216,20 @@ class _DeChunk:
     def _default_aggregator(self, slice: np.ndarray) -> np.ndarray:
         return np.mean(slice, axis=0)
 
-    def process(self, item: np.memmap | np.ndarray) -> np.ndarray | None:
+    def _tensor_aggregator(self, slice: Tensor) -> Tensor:
+        return torch.mean(slice, dim=0)
+
+    def process(self, item: np.ndarray | Tensor) -> np.ndarray | Tensor | None:
         if self.in_memory:
             # In-memory mode: return the backward transformed array
-            return self.transformer.backward_transform(item, self._default_aggregator)
+            if isinstance(item, Tensor):
+                return self.transformer.backward_transform(item, self._tensor_aggregator)
+            else:
+                return self.transformer.backward_transform(item, self._default_aggregator)
         else:
             # File-based mode: perform backward transform and write metadata
+            if isinstance(item, Tensor):
+                raise ValueError("File-based mode does not support tensor input")
             self.transformer.backward_transform(item, self._default_aggregator)
             assert isinstance(item, np.memmap)
             embed_io.write_meta(item, self.meta)

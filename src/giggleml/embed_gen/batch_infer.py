@@ -8,6 +8,7 @@ from typing import Callable, final, overload
 import numpy as np
 import torch
 import torch.distributed as dist
+from torch import Tensor
 from torch import multiprocessing as mp
 from torch.utils.data import DataLoader
 
@@ -60,7 +61,7 @@ class BatchInfer:
         self.embed_dim = model.embed_dim
 
     @overload
-    def _infer_loop(self, rank: int, data_loader: DataLoader) -> np.ndarray: ...
+    def _infer_loop(self, rank: int, data_loader: DataLoader) -> Tensor: ...
 
     @overload
     def _infer_loop(
@@ -69,7 +70,7 @@ class BatchInfer:
 
     def _infer_loop(
         self, rank: int, data_loader: DataLoader, out_file: np.memmap | None = None
-    ) -> np.ndarray | None:
+    ) -> Tensor | None:
         """inference loop."""
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
@@ -83,7 +84,7 @@ class BatchInfer:
             final_idx = next_idx + len(outputs)
 
             if in_memory:
-                in_memory_results.append(outputs.detach().numpy())
+                in_memory_results.append(outputs.detach())
             else:
                 assert out_file is not None
                 assert final_idx <= len(out_file)
@@ -105,9 +106,9 @@ class BatchInfer:
 
         if in_memory:
             return (
-                np.concatenate(in_memory_results, axis=0)
+                torch.cat(in_memory_results, dim=0)
                 if in_memory_results
-                else np.array([])
+                else torch.tensor([])
             )
         else:
             # "close" the memmap
@@ -122,7 +123,7 @@ class BatchInfer:
         datasets: Sequence[IntervalDataset],
         out_paths: Sequence[str] | None,
         post: Sequence[Callable[[np.memmap], None]] | None,
-    ) -> list[np.ndarray] | None:
+    ) -> list[Tensor] | None:
         device = guess_device(rank)
 
         if rank == 0:
@@ -172,7 +173,7 @@ class BatchInfer:
 
             embeddings = self._infer_loop(rank, data_loader)
 
-            # Split embeddings back into separate arrays for each dataset
+            # Split embeddings back into separate tensors for each dataset
             results = []
             start_idx = 0
             for dataset in datasets:
@@ -214,7 +215,9 @@ class BatchInfer:
                 rank=rank,
                 world_size=self.worker_count,
                 # it seems to be about 1.2 seconds per batch 5/27/2025
-                timeout=timedelta(seconds=len(master_dataset) / self.worker_count * 0.5),
+                timeout=timedelta(
+                    seconds=len(master_dataset) / self.worker_count * 0.5
+                ),
                 device_id=(device if device.type == "cuda" else None),
             )
 
@@ -260,7 +263,9 @@ class BatchInfer:
             # rank-1, we need to remap masterOutFile
             master_out_file.flush()
             del master_out_file
-            master_size = master_dataset.sums[set_idx_end] - master_dataset.sums[set_idx_start]
+            master_size = (
+                master_dataset.sums[set_idx_end] - master_dataset.sums[set_idx_start]
+            )
             master_out_file = np.memmap(
                 master_out_path,
                 np.float32,
@@ -308,14 +313,14 @@ class BatchInfer:
     def batch(
         self,
         datasets: Sequence[IntervalDataset],
-    ) -> list[np.ndarray]: ...
+    ) -> list[Tensor]: ...
 
     def batch(
         self,
         datasets: Sequence[IntervalDataset],
         out_paths: Sequence[str] | None = None,
         post: Sequence[Callable[[np.memmap], None]] | None = None,
-    ) -> list[np.ndarray] | None:
+    ) -> list[Tensor] | None:
         """
         @param post: Is a list of processing Callable to apply to completed memmaps after inference is completed.
         """
