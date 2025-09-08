@@ -1,0 +1,2 @@
+- Seqpare
+  - Self-consistent metric. Due to the triangle inequality holding, I can make assumptions about the relative similarity between A and C where A and C are both independently close to B. This lets me trivially sample clusters seqpare-based KNN results.
