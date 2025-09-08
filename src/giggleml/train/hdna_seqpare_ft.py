@@ -1,10 +1,8 @@
-import os
-import tempfile
 from collections.abc import Callable, Iterator
 from functools import cache
 from pathlib import Path
 from random import Random
-from typing import override
+from typing import cast, override
 
 import numpy as np
 import torch
@@ -232,31 +230,16 @@ class IntervalClusterTripletFT(Module):
 def embed_batch(
     pipeline: EmbedPipeline, edim: int, batch: list[Cluster], fasta: Path | str
 ):
-    """
-    Embeds parallel. Meant to be called on a single process, automatically
-    distributes to workers internally.
-    """
-
     fasta = as_path(fasta)
     flat_input: list[IntervalDataset] = list()
-    temp_paths = list[str]()
 
-    try:
-        for cluster in batch:
-            for intervals in cluster:
-                dataset = MemoryIntervalDataset(intervals, fasta)
-                flat_input.append(dataset)
-                temp_path = tempfile.NamedTemporaryFile(
-                    suffix=".npy", delete=False
-                ).name
-                temp_paths.append(temp_path)
+    for cluster in batch:
+        for intervals in cluster:
+            dataset = MemoryIntervalDataset(intervals, fasta)
+            flat_input.append(dataset)
 
-        embeds = pipeline.embed(flat_input, temp_paths)
-        embed_tensors = np.array([embed.data for embed in embeds])
-        return Tensor(embed_tensors).reshape(len(batch), -1, edim)
-    finally:
-        for path in temp_paths:
-            os.remove(path)
+    embeds = pipeline.embed(flat_input)
+    return embeds.reshape(len(batch), -1, edim)
 
 
 # ---------------------------------
@@ -358,16 +341,10 @@ def main():
         model.train()
         optimizer.zero_grad()
 
-        if rank == 0:
-            batch = next(data)
-            # we embed on rank zero because the Embed Pipeline internally distributes to workers and
-            # returns a series of file wrappers representing the embeddings.
-            # then, we sync all threads on the batch and each mines for hard triplets in different
-            # areas within the (same) overall batch
-            batch_tensor = embed_batch(pipeline, emodel.embed_dim, batch, fasta)
-            batch_tensor = fabric.broadcast(batch_tensor)
-        else:
-            batch_tensor: Tensor = fabric.broadcast(None)  # pyright: ignore[reportAssignmentType]
+        batch = next(data)
+        batch_tensor = embed_batch(pipeline, emodel.embed_dim, batch, fasta)
+        batch_tensor: Tensor = cast(Tensor, fabric.all_gather(batch_tensor))
+        batch_tensor = batch_tensor.reshape(-1, *batch_tensor.shape[2:]).to(device)
 
         loss = train_step.training_step(batch_tensor)
         fabric.backward(loss)
