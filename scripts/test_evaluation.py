@@ -38,7 +38,7 @@ def main():
     
     # Run evaluation on test set
     cmd = [
-        sys.executable, "src/giggleml/train/hdna_seqpare_ft.py",
+        sys.executable, "src/giggleml/train/train_orchestrator.py",
         "--use_cv",
         "--cv_split", "test",
         "--learning_rate", str(best_hparams["learning_rate"]),

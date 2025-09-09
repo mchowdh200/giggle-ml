@@ -30,7 +30,7 @@ def run_training(hyperparams: dict[str, Any], results_dir: Path, resume_from_epo
     """
     # Build command to run training script
     cmd = [
-        sys.executable, "src/giggleml/train/hdna_seqpare_ft.py",
+        sys.executable, "src/giggleml/train/train_orchestrator.py",
         "--use_cv",
         "--cv_split", "train", 
         "--learning_rate", str(hyperparams["learning_rate"]),

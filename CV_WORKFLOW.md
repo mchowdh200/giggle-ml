@@ -5,6 +5,7 @@ This document describes the complete workflow for training HyenaDNA with proper 
 ## Overview
 
 The system implements a rigorous 3-way split of the Roadmap Epigenomics dataset:
+
 - **Training set (70%)**: Used for hyperparameter search and model training
 - **Validation set (15%)**: Used for hyperparameter selection during search
 - **Test set (15%)**: Used for final unbiased evaluation (use only once!)
@@ -14,6 +15,7 @@ The splits are based on tissue+chromatin state pairs (e.g., "Lung_Strong_transcr
 ## Complete Workflow
 
 ### 1. Hyperparameter Search
+
 ```bash
 # Full search (30,375 combinations)
 python scripts/hparam_search.py
@@ -26,6 +28,7 @@ python scripts/hparam_search.py --resume
 ```
 
 **What it does:**
+
 - Tests all combinations of hyperparameters across 9 dimensions
 - Uses train split for training, validation split for selection
 - Saves results to `models/hdna_seqpare_hparam_search/search_results.json`
@@ -34,22 +37,26 @@ python scripts/hparam_search.py --resume
 - Supports dataset resumption for reproducibility
 
 ### 2. Train Final Model
+
 ```bash
 python scripts/train_with_best_hparams.py
 ```
 
 **What it does:**
+
 - Loads best hyperparameters from step 1
 - Trains the final model on the full training set using optimal hyperparameters
 - Validates during training using validation set
 - Saves final model checkpoint
 
 ### 3. Test Set Evaluation (FINAL STEP - RUN ONLY ONCE!)
+
 ```bash
 python scripts/test_evaluation.py
 ```
 
 **What it does:**
+
 - Prompts for confirmation (to prevent accidental multiple runs)
 - Evaluates the final model on the held-out test set
 - Provides unbiased performance estimate
@@ -60,23 +67,29 @@ python scripts/test_evaluation.py
 ## Hyperparameter Search Space
 
 ### Default Search Space (30,375 total combinations)
+
 **Core Training Parameters:**
+
 - **Learning rates**: [1e-6, 1e-5, 2e-5, 5e-5, 1e-4] (5 values)
 - **Margins**: [0.5, 1.0, 1.5, 2.0, 3.0] (5 values)
 - **Epochs**: [8, 10, 12] (3 values)
 
 **Data Sampling Parameters:**
+
 - **Batch sizes**: [8, 10, 12] (clusters per batch) (3 values)
 - **Cluster sizes**: [8, 10, 12] (intervals per cluster) (3 values)
 - **Densities**: [20, 30, 40] (intervals per candidate) (3 values)
 
 **AdamW Optimizer Parameters:**
+
 - **Beta1**: [0.85, 0.9, 0.95] (3 values)
 - **Beta2**: [0.99, 0.999, 0.9999] (3 values)
 - **Weight decay**: [0.0, 1e-4, 1e-3] (3 values)
 
 ### Conservative Search Space (18 total combinations)
+
 For faster experimentation:
+
 - **Learning rates**: [1e-5, 2e-5, 5e-5] (3 values)
 - **Margins**: [1.0, 1.5, 2.0] (3 values)
 - **All other parameters**: Fixed to standard values
@@ -85,17 +98,20 @@ For faster experimentation:
 ## Resumption and Robustness Features
 
 ### Dataset Resumption
+
 - **Deterministic sampling**: Reproducible random sequences with seeds
 - **State tracking**: Can resume from any epoch with identical data
 - **Cross-validation integrity**: Maintains proper train/val/test splits
 
 ### Search Resumption
+
 - **Automatic detection**: Identifies completed vs partial runs
 - **Smart skipping**: Avoids re-running completed combinations
 - **Progress preservation**: Saves intermediate results continuously
 - **Float precision handling**: Robust hyperparameter comparison
 
 ### Data Integrity
+
 - **No data leakage**: Tissue+chromatin state pairs strictly separated
 - **Reproducible splits**: Deterministic hash-based splitting
 - **Validation**: Prevents training on validation/test data
@@ -103,8 +119,9 @@ For faster experimentation:
 ## Manual Usage
 
 ### Training with specific hyperparameters:
+
 ```bash
-python src/giggleml/train/hdna_seqpare_ft.py \
+python src/giggleml/train/train_orchestrator.py \
   --use_cv \
   --cv_split train \
   --learning_rate 2e-5 \
@@ -120,8 +137,9 @@ python src/giggleml/train/hdna_seqpare_ft.py \
 ```
 
 ### Resuming from specific epoch:
+
 ```bash
-python src/giggleml/train/hdna_seqpare_ft.py \
+python src/giggleml/train/train_orchestrator.py \
   --use_cv \
   --cv_split train \
   --resume_from_epoch 5 \
@@ -150,10 +168,15 @@ scripts/
 
 src/giggleml/
 ├── train/
-│   ├── hdna_seqpare_ft.py        # Main training script
-│   └── hparam_config.py          # Hyperparameter configuration
+│   ├── train_orchestrator.py     # Main training orchestrator
+│   ├── seqpare_db.py            # SeqpareDB similarity database
+│   ├── rme_clusters_dataset.py           # RmeSeqpareClusters dataset class
+│   ├── triplet_trainer.py       # IntervalClusterTripletFT training logic
+│   ├── embed_utils.py           # Embedding utility functions
+│   ├── hdna_seqpare_ft.py       # Deprecated (use train_orchestrator.py)
+│   └── hparam_config.py         # Hyperparameter configuration
 └── utils/
-    └── cv_splits.py              # Cross-validation split utilities
+    └── cv_splits.py             # Cross-validation split utilities
 ```
 
 ## Customizing Search Space
@@ -171,7 +194,7 @@ def default(cls) -> "HyperparameterConfig":
         densities=[20, 40],                   # Test data density impact
         epochs=[10],                          # Fix for time constraints
         betas_1=[0.9],                        # Standard optimizer
-        betas_2=[0.999],                      # Standard optimizer  
+        betas_2=[0.999],                      # Standard optimizer
         weight_decays=[0.0, 1e-4, 1e-3]      # Test regularization
     )
 ```
@@ -193,3 +216,4 @@ def default(cls) -> "HyperparameterConfig":
 - **Resumption overhead**: Minimal, state tracking is lightweight
 
 This comprehensive system ensures rigorous hyperparameter optimization while maintaining scientific rigor and reproducibility.
+
