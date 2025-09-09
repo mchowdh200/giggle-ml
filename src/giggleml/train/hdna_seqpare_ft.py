@@ -3,6 +3,7 @@ from functools import cache
 from pathlib import Path
 from random import Random
 from typing import cast, override
+import argparse
 
 import numpy as np
 import torch
@@ -28,6 +29,7 @@ from giggleml.embed_gen.embed_pipeline import DirectPipeline, EmbedPipeline
 from giggleml.utils.misc import partition_integer, partition_list
 from giggleml.utils.path_utils import as_path, fix_bed_ext
 from giggleml.utils.types import GenomicInterval
+from giggleml.utils.cv_splits import create_cv_splits
 
 
 class SeqpareDB:
@@ -111,9 +113,11 @@ class RmeSeqpareClusters(IterableDataset):
         clusters_amnt: int = 10,
         cluster_size: int = 10,
         density: int = 30,
+        allowed_rme_names: list[str] | None = None,
     ) -> None:
         """
         @param density: the amount of intervals per candidate
+        @param allowed_rme_names: List of RME names to restrict sampling to. If None, uses all available.
         """
         super().__init__()
         self.road_epig_path: Path = as_path(road_epig_path)
@@ -123,22 +127,31 @@ class RmeSeqpareClusters(IterableDataset):
         self.anchors: int = clusters_amnt
         self.cluster_size: int = cluster_size
         self.density: int = density
+        self.allowed_rme_names: set[str] = set(allowed_rme_names) if allowed_rme_names else set(rme.bed_names)
         self._rng: Random = Random(42)
 
     @override
     def __iter__(self) -> Iterator[list[Cluster]]:
         # "my" -- this rank
         my_rng: Random = Random(self.rank)
+        # Filter available bed names to only allowed ones
+        available_names = [name for name in rme.bed_names if name in self.allowed_rme_names]
+        if not available_names:
+            raise ValueError("No available RME names after filtering")
+        
         # an identical value across the world size
-        anchors = self._rng.choices(rme.bed_names, k=self.anchors)
+        anchors = self._rng.choices(available_names, k=self.anchors)
         my_anchors = partition_list(anchors, self.world_size, self.rank)
         my_clusters = list[Cluster]()
 
         for anchor in my_anchors:
             neighbors, _ = self.seqpare_db.fetch(anchor)
+            # Filter neighbors to only allowed names
+            allowed_neighbors = [n for n in neighbors if n in self.allowed_rme_names]
             # in the event that an anchor has little neighbors, this will repeatedly resample
             # from the same labels
-            labels = my_rng.choices([anchor, *neighbors], k=self.cluster_size)
+            candidate_labels = [anchor] + allowed_neighbors
+            labels = my_rng.choices(candidate_labels, k=self.cluster_size)
             cluster: Cluster = list()
 
             # map into interval list
@@ -234,6 +247,79 @@ class IntervalClusterTripletFT(Module):
 
         # hard triplets anchored by this rank's embeds
         return self.loss(my_embeds, positives, negatives)
+    
+    def validation_step(self, batch: Tensor) -> tuple[float, float]:
+        """
+        Run validation on a batch and return loss and triplet accuracy.
+        Similar to training_step but with evaluation metrics.
+        """
+        # Set model to eval mode for validation
+        self.model.trainable_model.eval()
+        
+        with torch.no_grad():
+            # Use the same triplet mining logic as training
+            edim = self.model.embed_dim
+            all_embeds = batch.reshape(-1, edim)
+            
+            # For validation, use all data (don't split by rank)
+            dist_matrix = torch.cdist(all_embeds, all_embeds, p=2.0)
+            batch_size = batch.shape[0]
+            cluster_size = batch.shape[1]
+            
+            # Create labels for clusters
+            all_labels = torch.arange(batch_size, device=self.device).unsqueeze(1).expand(batch_size, cluster_size)
+            all_labels = all_labels.reshape(-1)
+            
+            total_loss = 0.0
+            total_correct = 0
+            total_triplets = 0
+            
+            # Mine triplets for validation
+            for i in range(len(all_embeds)):
+                anchor_label = all_labels[i]
+                anchor_embed = all_embeds[i]
+                
+                # Find positive and negative candidates
+                positive_mask = (all_labels == anchor_label) & (torch.arange(len(all_labels), device=self.device) != i)
+                negative_mask = all_labels != anchor_label
+                
+                if not positive_mask.any() or not negative_mask.any():
+                    continue
+                
+                # Hard positive: furthest positive from anchor
+                positive_dists = dist_matrix[i][positive_mask]
+                hard_positive_idx = torch.argmax(positive_dists)
+                positive_idx = torch.where(positive_mask)[0][hard_positive_idx]
+                
+                # Hard negative: closest negative to anchor  
+                negative_dists = dist_matrix[i][negative_mask]
+                hard_negative_idx = torch.argmin(negative_dists)
+                negative_idx = torch.where(negative_mask)[0][hard_negative_idx]
+                
+                # Compute triplet loss
+                triplet_loss = self.loss(
+                    anchor_embed.unsqueeze(0),
+                    all_embeds[positive_idx].unsqueeze(0),
+                    all_embeds[negative_idx].unsqueeze(0)
+                )
+                total_loss += triplet_loss.item()
+                
+                # Compute triplet accuracy (d(a,p) < d(a,n))
+                ap_dist = torch.norm(anchor_embed - all_embeds[positive_idx])
+                an_dist = torch.norm(anchor_embed - all_embeds[negative_idx])
+                if ap_dist < an_dist:
+                    total_correct += 1
+                
+                total_triplets += 1
+            
+            # Compute averages
+            avg_loss = total_loss / max(total_triplets, 1)
+            accuracy = total_correct / max(total_triplets, 1)
+        
+        # Set model back to train mode
+        self.model.trainable_model.train()
+        
+        return avg_loss, accuracy
 
 
 def embed_batch(
@@ -256,7 +342,24 @@ def embed_batch(
 # ---------------------------------
 
 
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="HyenaDNA fine-tuning with seqpare")
+    parser.add_argument("--use_cv", action="store_true", help="Use cross-validation splits")
+    parser.add_argument("--cv_split", choices=["train", "val", "test"], default="train", 
+                       help="Which CV split to use")
+    parser.add_argument("--learning_rate", type=float, help="Learning rate override")
+    parser.add_argument("--margin", type=float, help="Triplet margin override") 
+    parser.add_argument("--clusters_per_batch", type=int, help="Clusters per batch override")
+    parser.add_argument("--validation_freq", type=int, default=5, help="Validation frequency (epochs)")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    
     # INFO: ---------------------------
     #       Config
     # ---------------------------------
@@ -277,16 +380,31 @@ def main():
     if not fasta.exists():
         raise FileNotFoundError(f"FASTA file not found: {fasta}")
 
+    # Cross-validation splits
+    allowed_rme_names = None
+    val_rme_names = None
+    if args.use_cv:
+        cv_splits = create_cv_splits(rme_dir)
+        allowed_rme_names = cv_splits[args.cv_split]
+        if args.cv_split == "train":
+            val_rme_names = cv_splits["val"]
+        print(f"Using CV split '{args.cv_split}' with {len(allowed_rme_names)} RME files")
+        if val_rme_names:
+            print(f"Validation set has {len(val_rme_names)} RME files")
+
     # cluster sampling
-    clusters_per_batch = 10
+    clusters_per_batch = args.clusters_per_batch or 10
     cluster_size = 10
     centroid_size = 30
 
-    # training
+    # training hyperparameters (with overrides)
     epochs = 10
+    learning_rate = args.learning_rate or 1e-7
+    margin = args.margin or 3.0
+    
     emodel: EmbedModel = HyenaDNA("1k", training=True)
-    optimizer = optim.AdamW(lr=1e-7, params=emodel.trainable_model.parameters())
-    loss = TripletMarginLoss(margin=3)
+    optimizer = optim.AdamW(lr=learning_rate, params=emodel.trainable_model.parameters())
+    loss = TripletMarginLoss(margin=margin)
 
     # the embed pipeline is used for inference
     pipeline = DirectPipeline(emodel, 64)
@@ -321,7 +439,22 @@ def main():
         clusters_per_batch,
         cluster_size,
         centroid_size,
+        allowed_rme_names,
     )
+    
+    # Create validation dataset if needed
+    val_dataset = None
+    if val_rme_names:
+        val_dataset = RmeSeqpareClusters(
+            rme_dir,
+            seqpare_db,
+            world_size,
+            rank,
+            clusters_per_batch,
+            cluster_size,
+            centroid_size,
+            val_rme_names,
+        )
     train_step = IntervalClusterTripletFT(world_size, rank, device, emodel, loss)
     # Use fabric.setup to wrap the components. This prepares them for the
     # chosen hardware and strategy (e.g., wraps model in DDP).
@@ -364,8 +497,24 @@ def main():
         fabric.backward(loss)
         optimizer.step()
 
-        fabric.print(f"Epoch {epoch} / {epochs} | Loss: {loss.item():.4f}")
+        fabric.print(f"Epoch {epoch} / {epochs} | Train Loss: {loss.item():.4f}")
         fabric.log("train_loss", loss.item(), step=epoch)
+
+        # Validation phase
+        if val_dataset and (epoch + 1) % args.validation_freq == 0:
+            try:
+                val_data = iter(val_dataset)
+                val_batch = next(val_data)
+                val_batch_tensor = embed_batch(pipeline, emodel.embed_dim, val_batch, fasta)
+                val_batch_tensor: Tensor = cast(Tensor, fabric.all_gather(val_batch_tensor))
+                val_batch_tensor = val_batch_tensor.reshape(-1, *val_batch_tensor.shape[2:]).to(device)
+                
+                val_loss, val_accuracy = train_step.validation_step(val_batch_tensor)
+                fabric.print(f"Epoch {epoch} / {epochs} | Val Loss: {val_loss:.4f} | Val Acc: {val_accuracy:.4f}")
+                fabric.log("val_loss", val_loss, step=epoch)
+                fabric.log("val_accuracy", val_accuracy, step=epoch)
+            except StopIteration:
+                fabric.print("Validation data exhausted, skipping validation")
 
         # INFO: ---------------------------
         #       Save Checkpoint
