@@ -158,7 +158,7 @@ class HyperparameterSearchResults:
     """Manages saving/loading hyperparameter search results."""
 
     def __init__(self, results_path: Path):
-        self.results_path = results_path
+        self.results_path: Path = results_path
         self.results: list[ValidationResult] = []
         self.load_existing()
 

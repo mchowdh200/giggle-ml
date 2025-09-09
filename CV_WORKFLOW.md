@@ -104,7 +104,7 @@ For faster experimentation:
 
 ### Training with specific hyperparameters:
 ```bash
-python src/giggleml/train/hdna_seqpare_ft.py \
+python src/giggleml/train/train_orchestrator.py \
   --use_cv \
   --cv_split train \
   --learning_rate 2e-5 \
@@ -121,7 +121,7 @@ python src/giggleml/train/hdna_seqpare_ft.py \
 
 ### Resuming from specific epoch:
 ```bash
-python src/giggleml/train/hdna_seqpare_ft.py \
+python src/giggleml/train/train_orchestrator.py \
   --use_cv \
   --cv_split train \
   --resume_from_epoch 5 \
@@ -150,10 +150,15 @@ scripts/
 
 src/giggleml/
 ├── train/
-│   ├── hdna_seqpare_ft.py        # Main training script
-│   └── hparam_config.py          # Hyperparameter configuration
+│   ├── train_orchestrator.py     # Main training orchestrator
+│   ├── seqpare_db.py            # SeqpareDB similarity database
+│   ├── rme_dataset.py           # RmeSeqpareClusters dataset class
+│   ├── triplet_trainer.py       # IntervalClusterTripletFT training logic
+│   ├── embed_utils.py           # Embedding utility functions
+│   ├── hdna_seqpare_ft.py       # Deprecated (use train_orchestrator.py)
+│   └── hparam_config.py         # Hyperparameter configuration
 └── utils/
-    └── cv_splits.py              # Cross-validation split utilities
+    └── cv_splits.py             # Cross-validation split utilities
 ```
 
 ## Customizing Search Space

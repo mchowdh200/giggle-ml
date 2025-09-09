@@ -28,7 +28,7 @@ def main():
     
     # Run training with best hyperparameters on full training set
     cmd = [
-        sys.executable, "src/giggleml/train/hdna_seqpare_ft.py",
+        sys.executable, "src/giggleml/train/train_orchestrator.py",
         "--use_cv",
         "--cv_split", "train",
         "--learning_rate", str(best_hparams["learning_rate"]),
