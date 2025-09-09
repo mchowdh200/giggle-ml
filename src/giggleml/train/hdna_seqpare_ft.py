@@ -2,7 +2,7 @@ from collections.abc import Callable, Iterator
 from functools import cache
 from pathlib import Path
 from random import Random
-from typing import cast, override
+from typing import Any, cast, override
 import argparse
 
 import numpy as np
@@ -192,7 +192,7 @@ class RmeSeqpareClusters(IterableDataset):
             self._iteration_count += 1
             yield my_clusters
     
-    def get_state(self) -> dict:
+    def get_state(self) -> dict[str, Any]:
         """Get current dataset state for resumption."""
         return {
             "iteration_count": self._iteration_count,
@@ -201,7 +201,7 @@ class RmeSeqpareClusters(IterableDataset):
             "start_iteration": self.start_iteration
         }
     
-    def set_state(self, state: dict) -> None:
+    def set_state(self, state: dict[str, Any]) -> None:
         """Set dataset state for resumption."""
         self._iteration_count = state["iteration_count"]
         self._rng.setstate(state["rng_state"])

@@ -1,24 +1,25 @@
-from dataclasses import dataclass
-from typing import Any, Dict, List
-import json
 import itertools
+import json
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
 class HyperparameterConfig:
     """Configuration for hyperparameter search space."""
-    learning_rates: List[float]
-    margins: List[float] 
-    batch_sizes: List[int] = None  # clusters_per_batch
-    cluster_sizes: List[int] = None  # intervals per cluster
-    densities: List[int] = None  # intervals per candidate (centroid_size)
-    epochs: List[int] = None  # training epochs
+
+    learning_rates: list[float]
+    margins: list[float]
+    batch_sizes: list[int] | None = None  # clusters_per_batch
+    cluster_sizes: list[int] | None = None  # intervals per cluster
+    densities: list[int] | None = None  # intervals per candidate (centroid_size)
+    epochs: list[int] | None = None  # training epochs
     # AdamW parameters
-    betas_1: List[float] = None  # AdamW beta1
-    betas_2: List[float] = None  # AdamW beta2
-    weight_decays: List[float] = None  # AdamW weight decay
-    
+    betas_1: list[float] | None = None  # AdamW beta1
+    betas_2: list[float] | None = None  # AdamW beta2
+    weight_decays: list[float] | None = None  # AdamW weight decay
+
     def __post_init__(self):
         if self.batch_sizes is None:
             self.batch_sizes = [10]
@@ -34,7 +35,7 @@ class HyperparameterConfig:
             self.betas_2 = [0.999]
         if self.weight_decays is None:
             self.weight_decays = [0.0]
-    
+
     @classmethod
     def default(cls) -> "HyperparameterConfig":
         """Default hyperparameter search space."""
@@ -48,9 +49,9 @@ class HyperparameterConfig:
             # AdamW hyperparameters
             betas_1=[0.85, 0.9, 0.95],  # AdamW beta1
             betas_2=[0.99, 0.999, 0.9999],  # AdamW beta2
-            weight_decays=[0.0, 1e-4, 1e-3]  # Weight decay
+            weight_decays=[0.0, 1e-4, 1e-3],  # Weight decay
         )
-    
+
     @classmethod
     def conservative(cls) -> "HyperparameterConfig":
         """Conservative search space for faster experimentation."""
@@ -63,47 +64,76 @@ class HyperparameterConfig:
             epochs=[10],  # Keep standard
             betas_1=[0.9],  # Standard
             betas_2=[0.999],  # Standard
-            weight_decays=[0.0, 1e-4]  # Light regularization only
+            weight_decays=[0.0, 1e-4],  # Light regularization only
         )
-    
-    def grid_search_combinations(self) -> List[Dict[str, Any]]:
+
+    def grid_search_combinations(self) -> list[dict[str, Any]]:
         """Generate all combinations for grid search."""
         combinations = []
-        for lr, margin, batch_size, cluster_size, density, epochs, beta1, beta2, weight_decay in itertools.product(
-            self.learning_rates, self.margins, self.batch_sizes, 
-            self.cluster_sizes, self.densities, self.epochs,
-            self.betas_1, self.betas_2, self.weight_decays
+        
+        # Ensure all lists are not None after __post_init__
+        assert self.batch_sizes is not None
+        assert self.cluster_sizes is not None
+        assert self.densities is not None
+        assert self.epochs is not None
+        assert self.betas_1 is not None
+        assert self.betas_2 is not None
+        assert self.weight_decays is not None
+        
+        for (
+            lr,
+            margin,
+            batch_size,
+            cluster_size,
+            density,
+            epochs,
+            beta1,
+            beta2,
+            weight_decay,
+        ) in itertools.product(
+            self.learning_rates,
+            self.margins,
+            self.batch_sizes,
+            self.cluster_sizes,
+            self.densities,
+            self.epochs,
+            self.betas_1,
+            self.betas_2,
+            self.weight_decays,
         ):
-            combinations.append({
-                "learning_rate": lr,
-                "margin": margin,
-                "clusters_per_batch": batch_size,
-                "cluster_size": cluster_size,
-                "density": density,
-                "epochs": epochs,
-                "beta1": beta1,
-                "beta2": beta2,
-                "weight_decay": weight_decay
-            })
+            combinations.append(
+                {
+                    "learning_rate": lr,
+                    "margin": margin,
+                    "clusters_per_batch": batch_size,
+                    "cluster_size": cluster_size,
+                    "density": density,
+                    "epochs": epochs,
+                    "beta1": beta1,
+                    "beta2": beta2,
+                    "weight_decay": weight_decay,
+                }
+            )
         return combinations
 
 
-@dataclass 
+@dataclass
 class ValidationResult:
     """Results from hyperparameter validation."""
-    hyperparams: Dict[str, Any]
+
+    hyperparams: dict[str, Any]
     val_loss: float
     val_triplet_accuracy: float
     train_loss: float
     epoch: int
     completed_epoch: int = 0  # For resumption tracking
-    dataset_state: Dict[str, Any] = None  # Dataset state for resumption
-    
+    dataset_state: dict[str, Any] | None = None  # Dataset state for resumption
+
     def __post_init__(self):
         if self.dataset_state is None:
             self.dataset_state = {}
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "hyperparams": self.hyperparams,
             "val_loss": self.val_loss,
@@ -111,11 +141,11 @@ class ValidationResult:
             "train_loss": self.train_loss,
             "epoch": self.epoch,
             "completed_epoch": self.completed_epoch,
-            "dataset_state": self.dataset_state
+            "dataset_state": self.dataset_state,
         }
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ValidationResult":
+    def from_dict(cls, data: dict[str, Any]) -> "ValidationResult":
         # Handle backward compatibility
         if "completed_epoch" not in data:
             data["completed_epoch"] = data.get("epoch", 0)
@@ -126,35 +156,35 @@ class ValidationResult:
 
 class HyperparameterSearchResults:
     """Manages saving/loading hyperparameter search results."""
-    
+
     def __init__(self, results_path: Path):
         self.results_path = results_path
-        self.results: List[ValidationResult] = []
+        self.results: list[ValidationResult] = []
         self.load_existing()
-    
+
     def load_existing(self):
         """Load existing results if file exists."""
         if self.results_path.exists():
             try:
-                with open(self.results_path, 'r') as f:
+                with open(self.results_path, "r") as f:
                     data = json.load(f)
                 self.results = [ValidationResult.from_dict(r) for r in data]
                 print(f"Loaded {len(self.results)} existing hyperparameter results")
             except Exception as e:
                 print(f"Could not load existing results: {e}")
                 self.results = []
-    
+
     def add_result(self, result: ValidationResult):
         """Add new result and save to disk."""
         self.results.append(result)
         self.save()
-    
+
     def save(self):
         """Save results to disk."""
         self.results_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.results_path, 'w') as f:
+        with open(self.results_path, "w") as f:
             json.dump([r.to_dict() for r in self.results], f, indent=2)
-    
+
     def get_completed_hyperparams(self) -> set:
         """Get set of hyperparameter combinations already completed."""
         completed = set()
@@ -169,12 +199,12 @@ class HyperparameterSearchResults:
                     hp_items.append((key, value))
             completed.add(tuple(hp_items))
         return completed
-    
-    def get_partial_results(self) -> List[ValidationResult]:
+
+    def get_partial_results(self) -> list[ValidationResult]:
         """Get results that may be partially completed (for resumption)."""
         return [r for r in self.results if r.completed_epoch < r.epoch]
-    
-    def is_hyperparams_completed(self, hyperparams: Dict[str, Any]) -> bool:
+
+    def is_hyperparams_completed(self, hyperparams: dict[str, Any]) -> bool:
         """Check if specific hyperparameter combination is fully completed."""
         hp_items = []
         for key, value in sorted(hyperparams.items()):
@@ -183,7 +213,7 @@ class HyperparameterSearchResults:
             else:
                 hp_items.append((key, value))
         hp_tuple = tuple(hp_items)
-        
+
         for result in self.results:
             result_items = []
             for key, value in sorted(result.hyperparams.items()):
@@ -192,18 +222,19 @@ class HyperparameterSearchResults:
                 else:
                     result_items.append((key, value))
             result_tuple = tuple(result_items)
-            
+
             if hp_tuple == result_tuple and result.completed_epoch >= result.epoch:
                 return True
         return False
-    
+
     def get_best_result(self) -> ValidationResult | None:
         """Get best result based on validation loss."""
         if not self.results:
             return None
         return min(self.results, key=lambda r: r.val_loss)
-    
-    def get_best_hyperparams(self) -> Dict[str, Any] | None:
+
+    def get_best_hyperparams(self) -> dict[str, Any] | None:
         """Get hyperparameters of best result."""
         best = self.get_best_result()
         return best.hyperparams if best else None
+

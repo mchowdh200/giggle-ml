@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from typing import Any
+
 from giggleml.train.hparam_config import (
     HyperparameterConfig,
     HyperparameterSearchResults,
@@ -14,7 +16,7 @@ from giggleml.train.hparam_config import (
 )
 
 
-def run_training(hyperparams: dict, results_dir: Path, resume_from_epoch: int = None) -> tuple[float, float, float]:
+def run_training(hyperparams: dict[str, Any], results_dir: Path, resume_from_epoch: int | None = None) -> tuple[float, float, float]:
     """
     Run training with given hyperparameters and return validation metrics.
     

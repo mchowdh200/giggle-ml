@@ -1,18 +1,18 @@
 import hashlib
-import random
-from typing import Dict, List
 from pathlib import Path
 
-from .roadmap_epigenomics import bed_names, cell_type_chrm_state_split
+from typing import Any
+
+from .roadmap_epigenomics import cell_type_chrm_state_split
 
 
 def split_rme_names(
-    rme_names: List[str],
+    rme_names: list[str],
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
     seed: int = 42
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """
     Split RME names (tissue+chromatin state pairs) into train/val/test sets.
     
@@ -50,7 +50,7 @@ def split_rme_names(
     return splits
 
 
-def get_available_rme_names(rme_dir: Path) -> List[str]:
+def get_available_rme_names(rme_dir: Path) -> list[str]:
     """
     Get list of available RME names by scanning the bed files directory.
     
@@ -67,7 +67,7 @@ def get_available_rme_names(rme_dir: Path) -> List[str]:
         name = bed_file.stem
         # Validate it's a proper tissue+chromatin state combination
         try:
-            cell_type, chrm_state = cell_type_chrm_state_split(name)
+            _ = cell_type_chrm_state_split(name)
             rme_names.append(name)
         except ValueError:
             # Skip files that don't match expected naming pattern
@@ -76,7 +76,7 @@ def get_available_rme_names(rme_dir: Path) -> List[str]:
     return sorted(rme_names)
 
 
-def create_cv_splits(rme_dir: Path, **kwargs) -> Dict[str, List[str]]:
+def create_cv_splits(rme_dir: Path, **kwargs: Any) -> dict[str, list[str]]:
     """
     Convenience function to create CV splits from RME directory.
     
