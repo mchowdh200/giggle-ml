@@ -14,9 +14,14 @@ from giggleml.train.hparam_config import (
 )
 
 
-def run_training(hyperparams: dict, results_dir: Path) -> tuple[float, float, float]:
+def run_training(hyperparams: dict, results_dir: Path, resume_from_epoch: int = None) -> tuple[float, float, float]:
     """
     Run training with given hyperparameters and return validation metrics.
+    
+    Args:
+        hyperparams: Dictionary of hyperparameters
+        results_dir: Directory to save results
+        resume_from_epoch: Epoch to resume from (for partial runs)
     
     Returns:
         (val_loss, val_accuracy, train_loss)
@@ -29,8 +34,19 @@ def run_training(hyperparams: dict, results_dir: Path) -> tuple[float, float, fl
         "--learning_rate", str(hyperparams["learning_rate"]),
         "--margin", str(hyperparams["margin"]),
         "--clusters_per_batch", str(hyperparams["clusters_per_batch"]),
-        "--validation_freq", "2"  # Validate more frequently during search
+        "--cluster_size", str(hyperparams["cluster_size"]),
+        "--density", str(hyperparams["density"]),
+        "--epochs", str(hyperparams["epochs"]),
+        "--beta1", str(hyperparams["beta1"]),
+        "--beta2", str(hyperparams["beta2"]),
+        "--weight_decay", str(hyperparams["weight_decay"]),
+        "--validation_freq", "2",  # Validate more frequently during search
+        "--seed", str(hyperparams.get("seed", 42))
     ]
+    
+    # Add resumption if specified
+    if resume_from_epoch is not None:
+        cmd.extend(["--resume_from_epoch", str(resume_from_epoch)])
     
     print(f"Running: {' '.join(cmd)}")
     
@@ -84,36 +100,67 @@ def run_training(hyperparams: dict, results_dir: Path) -> tuple[float, float, fl
 
 
 def main():
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description="Hyperparameter search for HyenaDNA")
+    parser.add_argument("--conservative", action="store_true", help="Use conservative search space")
+    parser.add_argument("--resume", action="store_true", help="Resume partial runs")
+    args = parser.parse_args()
+    
     # Setup paths
     results_dir = Path("models/hdna_seqpare_hparam_search")
     results_dir.mkdir(parents=True, exist_ok=True)
     results_path = results_dir / "search_results.json"
     
     # Initialize hyperparameter search
-    config = HyperparameterConfig.default()
+    if args.conservative:
+        config = HyperparameterConfig.conservative()
+        print("Using conservative hyperparameter search space")
+    else:
+        config = HyperparameterConfig.default()
+        print("Using default hyperparameter search space")
+    
     search_results = HyperparameterSearchResults(results_path)
     
-    print(f"Starting hyperparameter search with {len(config.grid_search_combinations())} combinations")
+    combinations = config.grid_search_combinations()
+    print(f"Starting hyperparameter search with {len(combinations)} combinations")
     print(f"Results will be saved to: {results_path}")
     
     # Get already completed combinations to avoid re-running
-    completed = search_results.get_completed_hyperparams()
-    print(f"Found {len(completed)} already completed combinations")
+    print(f"Found {len(search_results.results)} existing results")
+    
+    # Handle resumption of partial runs
+    if args.resume:
+        partial_results = search_results.get_partial_results()
+        print(f"Found {len(partial_results)} partial results that can be resumed")
     
     # Run grid search
-    combinations = config.grid_search_combinations()
     for i, hyperparams in enumerate(combinations):
-        # Skip if already completed
-        hp_items = tuple(sorted(hyperparams.items()))
-        if hp_items in completed:
-            print(f"Skipping combination {i+1}/{len(combinations)} (already completed): {hyperparams}")
+        # Add seed to hyperparams for reproducibility
+        hyperparams["seed"] = 42
+        
+        # Check if already completed
+        if search_results.is_hyperparams_completed(hyperparams):
+            print(f"Skipping combination {i+1}/{len(combinations)} (already completed)")
             continue
         
         print(f"\n=== Combination {i+1}/{len(combinations)} ===")
         print(f"Hyperparameters: {hyperparams}")
         
+        # Check for resumption
+        resume_from_epoch = None
+        if args.resume:
+            for result in search_results.results:
+                if (result.hyperparams == hyperparams and 
+                    result.completed_epoch < result.epoch):
+                    resume_from_epoch = result.completed_epoch
+                    print(f"Resuming from epoch {resume_from_epoch}")
+                    break
+        
         try:
-            val_loss, val_accuracy, train_loss = run_training(hyperparams, results_dir)
+            val_loss, val_accuracy, train_loss = run_training(
+                hyperparams, results_dir, resume_from_epoch
+            )
             
             # Save result
             result = ValidationResult(
@@ -121,7 +168,8 @@ def main():
                 val_loss=val_loss,
                 val_triplet_accuracy=val_accuracy,
                 train_loss=train_loss,
-                epoch=10  # Final epoch - could be made configurable
+                epoch=hyperparams["epochs"],
+                completed_epoch=hyperparams["epochs"]  # Mark as fully completed
             )
             
             search_results.add_result(result)

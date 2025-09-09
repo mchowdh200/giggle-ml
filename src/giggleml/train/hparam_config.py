@@ -11,10 +11,29 @@ class HyperparameterConfig:
     learning_rates: List[float]
     margins: List[float] 
     batch_sizes: List[int] = None  # clusters_per_batch
+    cluster_sizes: List[int] = None  # intervals per cluster
+    densities: List[int] = None  # intervals per candidate (centroid_size)
+    epochs: List[int] = None  # training epochs
+    # AdamW parameters
+    betas_1: List[float] = None  # AdamW beta1
+    betas_2: List[float] = None  # AdamW beta2
+    weight_decays: List[float] = None  # AdamW weight decay
     
     def __post_init__(self):
         if self.batch_sizes is None:
-            self.batch_sizes = [10]  # Default from current config
+            self.batch_sizes = [10]
+        if self.cluster_sizes is None:
+            self.cluster_sizes = [10]
+        if self.densities is None:
+            self.densities = [30]
+        if self.epochs is None:
+            self.epochs = [10]
+        if self.betas_1 is None:
+            self.betas_1 = [0.9]
+        if self.betas_2 is None:
+            self.betas_2 = [0.999]
+        if self.weight_decays is None:
+            self.weight_decays = [0.0]
     
     @classmethod
     def default(cls) -> "HyperparameterConfig":
@@ -22,19 +41,49 @@ class HyperparameterConfig:
         return cls(
             learning_rates=[1e-6, 1e-5, 2e-5, 5e-5, 1e-4],
             margins=[0.5, 1.0, 1.5, 2.0, 3.0],
-            batch_sizes=[10]  # Keep fixed for now due to memory constraints
+            batch_sizes=[8, 10, 12],  # Expand if memory allows
+            cluster_sizes=[8, 10, 12],  # Intervals per cluster
+            densities=[20, 30, 40],  # Intervals per candidate
+            epochs=[8, 10, 12],  # Training epochs
+            # AdamW hyperparameters
+            betas_1=[0.85, 0.9, 0.95],  # AdamW beta1
+            betas_2=[0.99, 0.999, 0.9999],  # AdamW beta2
+            weight_decays=[0.0, 1e-4, 1e-3]  # Weight decay
+        )
+    
+    @classmethod
+    def conservative(cls) -> "HyperparameterConfig":
+        """Conservative search space for faster experimentation."""
+        return cls(
+            learning_rates=[1e-5, 2e-5, 5e-5],
+            margins=[1.0, 1.5, 2.0],
+            batch_sizes=[10],  # Keep fixed for memory
+            cluster_sizes=[10],  # Keep standard
+            densities=[30],  # Keep standard
+            epochs=[10],  # Keep standard
+            betas_1=[0.9],  # Standard
+            betas_2=[0.999],  # Standard
+            weight_decays=[0.0, 1e-4]  # Light regularization only
         )
     
     def grid_search_combinations(self) -> List[Dict[str, Any]]:
         """Generate all combinations for grid search."""
         combinations = []
-        for lr, margin, batch_size in itertools.product(
-            self.learning_rates, self.margins, self.batch_sizes
+        for lr, margin, batch_size, cluster_size, density, epochs, beta1, beta2, weight_decay in itertools.product(
+            self.learning_rates, self.margins, self.batch_sizes, 
+            self.cluster_sizes, self.densities, self.epochs,
+            self.betas_1, self.betas_2, self.weight_decays
         ):
             combinations.append({
                 "learning_rate": lr,
                 "margin": margin,
-                "clusters_per_batch": batch_size
+                "clusters_per_batch": batch_size,
+                "cluster_size": cluster_size,
+                "density": density,
+                "epochs": epochs,
+                "beta1": beta1,
+                "beta2": beta2,
+                "weight_decay": weight_decay
             })
         return combinations
 
@@ -47,6 +96,12 @@ class ValidationResult:
     val_triplet_accuracy: float
     train_loss: float
     epoch: int
+    completed_epoch: int = 0  # For resumption tracking
+    dataset_state: Dict[str, Any] = None  # Dataset state for resumption
+    
+    def __post_init__(self):
+        if self.dataset_state is None:
+            self.dataset_state = {}
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -54,11 +109,18 @@ class ValidationResult:
             "val_loss": self.val_loss,
             "val_triplet_accuracy": self.val_triplet_accuracy,
             "train_loss": self.train_loss,
-            "epoch": self.epoch
+            "epoch": self.epoch,
+            "completed_epoch": self.completed_epoch,
+            "dataset_state": self.dataset_state
         }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ValidationResult":
+        # Handle backward compatibility
+        if "completed_epoch" not in data:
+            data["completed_epoch"] = data.get("epoch", 0)
+        if "dataset_state" not in data:
+            data["dataset_state"] = {}
         return cls(**data)
 
 
@@ -97,10 +159,43 @@ class HyperparameterSearchResults:
         """Get set of hyperparameter combinations already completed."""
         completed = set()
         for result in self.results:
-            # Convert dict to frozenset for hashing
-            hp_items = tuple(sorted(result.hyperparams.items()))
-            completed.add(hp_items)
+            # Convert dict to frozenset for hashing, handling float precision
+            hp_items = []
+            for key, value in sorted(result.hyperparams.items()):
+                if isinstance(value, float):
+                    # Round floats for consistent hashing
+                    hp_items.append((key, round(value, 10)))
+                else:
+                    hp_items.append((key, value))
+            completed.add(tuple(hp_items))
         return completed
+    
+    def get_partial_results(self) -> List[ValidationResult]:
+        """Get results that may be partially completed (for resumption)."""
+        return [r for r in self.results if r.completed_epoch < r.epoch]
+    
+    def is_hyperparams_completed(self, hyperparams: Dict[str, Any]) -> bool:
+        """Check if specific hyperparameter combination is fully completed."""
+        hp_items = []
+        for key, value in sorted(hyperparams.items()):
+            if isinstance(value, float):
+                hp_items.append((key, round(value, 10)))
+            else:
+                hp_items.append((key, value))
+        hp_tuple = tuple(hp_items)
+        
+        for result in self.results:
+            result_items = []
+            for key, value in sorted(result.hyperparams.items()):
+                if isinstance(value, float):
+                    result_items.append((key, round(value, 10)))
+                else:
+                    result_items.append((key, value))
+            result_tuple = tuple(result_items)
+            
+            if hp_tuple == result_tuple and result.completed_epoch >= result.epoch:
+                return True
+        return False
     
     def get_best_result(self) -> ValidationResult | None:
         """Get best result based on validation loss."""

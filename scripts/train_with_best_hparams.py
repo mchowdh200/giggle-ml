@@ -33,7 +33,13 @@ def main():
         "--cv_split", "train",
         "--learning_rate", str(best_hparams["learning_rate"]),
         "--margin", str(best_hparams["margin"]),
-        "--clusters_per_batch", str(best_hparams["clusters_per_batch"])
+        "--clusters_per_batch", str(best_hparams["clusters_per_batch"]),
+        "--cluster_size", str(best_hparams["cluster_size"]),
+        "--density", str(best_hparams["density"]),
+        "--epochs", str(best_hparams["epochs"]),
+        "--beta1", str(best_hparams["beta1"]),
+        "--beta2", str(best_hparams["beta2"]),
+        "--weight_decay", str(best_hparams["weight_decay"])
     ]
     
     print(f"\nRunning: {' '.join(cmd)}")

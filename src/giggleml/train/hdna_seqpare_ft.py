@@ -114,10 +114,14 @@ class RmeSeqpareClusters(IterableDataset):
         cluster_size: int = 10,
         density: int = 30,
         allowed_rme_names: list[str] | None = None,
+        seed: int = 42,
+        start_iteration: int = 0,
     ) -> None:
         """
         @param density: the amount of intervals per candidate
         @param allowed_rme_names: List of RME names to restrict sampling to. If None, uses all available.
+        @param seed: Random seed for reproducibility
+        @param start_iteration: For resumption, skip this many iterations
         """
         super().__init__()
         self.road_epig_path: Path = as_path(road_epig_path)
@@ -128,44 +132,81 @@ class RmeSeqpareClusters(IterableDataset):
         self.cluster_size: int = cluster_size
         self.density: int = density
         self.allowed_rme_names: set[str] = set(allowed_rme_names) if allowed_rme_names else set(rme.bed_names)
-        self._rng: Random = Random(42)
+        self.seed: int = seed
+        self.start_iteration: int = start_iteration
+        self._rng: Random = Random(seed)
+        self._iteration_count: int = 0
 
     @override
     def __iter__(self) -> Iterator[list[Cluster]]:
         # "my" -- this rank
-        my_rng: Random = Random(self.rank)
+        my_rng: Random = Random(self.rank + self.seed)
+        
         # Filter available bed names to only allowed ones
         available_names = [name for name in rme.bed_names if name in self.allowed_rme_names]
         if not available_names:
             raise ValueError("No available RME names after filtering")
         
-        # an identical value across the world size
-        anchors = self._rng.choices(available_names, k=self.anchors)
-        my_anchors = partition_list(anchors, self.world_size, self.rank)
-        my_clusters = list[Cluster]()
+        # Reset iteration counter for each iterator
+        self._iteration_count = 0
+        
+        while True:
+            # Skip iterations for resumption
+            if self._iteration_count < self.start_iteration:
+                # Advance RNG state to maintain reproducibility
+                self._rng.choices(available_names, k=self.anchors)
+                my_anchors = partition_list(list(range(self.anchors)), self.world_size, self.rank)
+                for _ in my_anchors:
+                    my_rng.choices([0, 1], k=self.cluster_size)  # Dummy choices to advance state
+                    for _ in range(self.cluster_size):
+                        my_rng.choices([0, 1], k=self.density)  # Dummy choices to advance state
+                self._iteration_count += 1
+                continue
+            
+            # an identical value across the world size
+            anchors = self._rng.choices(available_names, k=self.anchors)
+            my_anchors = partition_list(anchors, self.world_size, self.rank)
+            my_clusters = list[Cluster]()
 
-        for anchor in my_anchors:
-            neighbors, _ = self.seqpare_db.fetch(anchor)
-            # Filter neighbors to only allowed names
-            allowed_neighbors = [n for n in neighbors if n in self.allowed_rme_names]
-            # in the event that an anchor has little neighbors, this will repeatedly resample
-            # from the same labels
-            candidate_labels = [anchor] + allowed_neighbors
-            labels = my_rng.choices(candidate_labels, k=self.cluster_size)
-            cluster: Cluster = list()
+            for anchor in my_anchors:
+                neighbors, _ = self.seqpare_db.fetch(anchor)
+                # Filter neighbors to only allowed names
+                allowed_neighbors = [n for n in neighbors if n in self.allowed_rme_names]
+                # in the event that an anchor has little neighbors, this will repeatedly resample
+                # from the same labels
+                candidate_labels = [anchor] + allowed_neighbors
+                labels = my_rng.choices(candidate_labels, k=self.cluster_size)
+                cluster: Cluster = list()
 
-            # map into interval list
-            for label in labels:
-                path = fix_bed_ext(self.road_epig_path / label)
-                if not path.exists():
-                    raise FileNotFoundError(f"BED file not found: {path}")
-                bed = list(iter(BedDataset(path)))
-                intervals = my_rng.choices(bed, k=self.density)
-                cluster.append(intervals)
+                # map into interval list
+                for label in labels:
+                    path = fix_bed_ext(self.road_epig_path / label)
+                    if not path.exists():
+                        raise FileNotFoundError(f"BED file not found: {path}")
+                    bed = list(iter(BedDataset(path)))
+                    intervals = my_rng.choices(bed, k=self.density)
+                    cluster.append(intervals)
 
-            my_clusters.append(cluster)
+                my_clusters.append(cluster)
 
-        yield my_clusters
+            self._iteration_count += 1
+            yield my_clusters
+    
+    def get_state(self) -> dict:
+        """Get current dataset state for resumption."""
+        return {
+            "iteration_count": self._iteration_count,
+            "rng_state": self._rng.getstate(),
+            "seed": self.seed,
+            "start_iteration": self.start_iteration
+        }
+    
+    def set_state(self, state: dict) -> None:
+        """Set dataset state for resumption."""
+        self._iteration_count = state["iteration_count"]
+        self._rng.setstate(state["rng_state"])
+        self.seed = state["seed"]
+        self.start_iteration = state["start_iteration"]
 
 
 # TODO: where's the cross validation?
@@ -350,10 +391,25 @@ def parse_args():
     parser.add_argument("--use_cv", action="store_true", help="Use cross-validation splits")
     parser.add_argument("--cv_split", choices=["train", "val", "test"], default="train", 
                        help="Which CV split to use")
+    
+    # Core hyperparameters
     parser.add_argument("--learning_rate", type=float, help="Learning rate override")
     parser.add_argument("--margin", type=float, help="Triplet margin override") 
     parser.add_argument("--clusters_per_batch", type=int, help="Clusters per batch override")
+    parser.add_argument("--cluster_size", type=int, help="Intervals per cluster override")
+    parser.add_argument("--density", type=int, help="Intervals per candidate override")
+    parser.add_argument("--epochs", type=int, help="Training epochs override")
+    
+    # AdamW hyperparameters
+    parser.add_argument("--beta1", type=float, help="AdamW beta1 override")
+    parser.add_argument("--beta2", type=float, help="AdamW beta2 override")
+    parser.add_argument("--weight_decay", type=float, help="AdamW weight decay override")
+    
+    # Training control
     parser.add_argument("--validation_freq", type=int, default=5, help="Validation frequency (epochs)")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--resume_from_epoch", type=int, help="Resume training from specific epoch")
+    
     return parser.parse_args()
 
 
@@ -392,18 +448,28 @@ def main():
         if val_rme_names:
             print(f"Validation set has {len(val_rme_names)} RME files")
 
-    # cluster sampling
+    # cluster sampling (with overrides)
     clusters_per_batch = args.clusters_per_batch or 10
-    cluster_size = 10
-    centroid_size = 30
+    cluster_size = args.cluster_size or 10
+    centroid_size = args.density or 30
 
     # training hyperparameters (with overrides)
-    epochs = 10
+    epochs = args.epochs or 10
     learning_rate = args.learning_rate or 1e-7
     margin = args.margin or 3.0
     
+    # AdamW hyperparameters (with overrides)
+    beta1 = args.beta1 or 0.9
+    beta2 = args.beta2 or 0.999
+    weight_decay = args.weight_decay or 0.0
+    
     emodel: EmbedModel = HyenaDNA("1k", training=True)
-    optimizer = optim.AdamW(lr=learning_rate, params=emodel.trainable_model.parameters())
+    optimizer = optim.AdamW(
+        lr=learning_rate, 
+        params=emodel.trainable_model.parameters(),
+        betas=(beta1, beta2),
+        weight_decay=weight_decay
+    )
     loss = TripletMarginLoss(margin=margin)
 
     # the embed pipeline is used for inference
@@ -431,6 +497,13 @@ def main():
     # ---------------------------------
 
     seqpare_db = SeqpareDB(seqpare_dir, seqpare_positive_threshold)
+    
+    # Calculate start iteration for resumption
+    start_iteration = 0
+    if args.resume_from_epoch:
+        start_iteration = args.resume_from_epoch
+        print(f"Resuming from epoch {args.resume_from_epoch}")
+    
     dataset = RmeSeqpareClusters(
         rme_dir,
         seqpare_db,
@@ -440,6 +513,8 @@ def main():
         cluster_size,
         centroid_size,
         allowed_rme_names,
+        seed=args.seed,
+        start_iteration=start_iteration,
     )
     
     # Create validation dataset if needed
@@ -454,6 +529,8 @@ def main():
             cluster_size,
             centroid_size,
             val_rme_names,
+            seed=args.seed + 1000,  # Different seed for validation
+            start_iteration=0,  # Always start validation from beginning
         )
     train_step = IntervalClusterTripletFT(world_size, rank, device, emodel, loss)
     # Use fabric.setup to wrap the components. This prepares them for the
