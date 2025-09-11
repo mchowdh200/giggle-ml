@@ -14,10 +14,8 @@ from giggleml.utils.path_utils import as_path
 class SeqpareDB:
     """reads all seqpare form .tsv files in the directory, taking the name, without last suffix, as the label"""
 
-    def __init__(self, dir: str | Path, positive_threshold: float = 0.7) -> None:
-        """categorizes into positive & negative based on the similarity"""
+    def __init__(self, dir: str | Path):
         self.dir: Path = as_path(dir)
-        self.positive_threshold: float = positive_threshold
         self._labels: dict[str, int] = dict()
 
         for file in self.dir.iterdir():
@@ -25,7 +23,7 @@ class SeqpareDB:
                 self._labels[file.stem] = len(self._labels)
 
     @cache
-    def _fetch_dense(self, label: str) -> NDArray[np.bool]:
+    def _fetch_dense(self, label: str, positive_threshold: float) -> NDArray[np.bool]:
         path = self.dir / (label + ".bed.tsv")
 
         if not path.exists():
@@ -49,14 +47,19 @@ class SeqpareDB:
                 if label_name not in self._labels:
                     continue  # skip unknown labels
                 item_id = self._labels[label_name]
-                positive = float(terms[4]) >= self.positive_threshold
+                positive = float(terms[4]) > positive_threshold
                 bits[item_id] = positive
 
             return bits
 
-    def fetch(self, label: str) -> tuple[list[str], list[str]]:
-        """@returns (positives, negatives) for a label"""
-        bits = self._fetch_dense(label)
+    def fetch(
+        self, label: str, positive_threshold: float = 0.7
+    ) -> tuple[list[str], list[str]]:
+        """
+        positives are items less than the positive_threshold to the anchor
+        @returns (positives, negatives) for a label
+        """
+        bits = self._fetch_dense(label, positive_threshold)
         positives, negatives = list(), list()
         labels = list(self._labels.keys())
 
@@ -69,3 +72,4 @@ class SeqpareDB:
                 negatives.append(label)
 
         return positives, negatives
+
