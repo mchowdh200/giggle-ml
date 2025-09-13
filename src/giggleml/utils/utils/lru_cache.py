@@ -44,7 +44,7 @@ class LRUCache[K, T]:
 
 @overload
 def lru_cache[**P, T](
-    *, limit: int = 8192, typed: bool = False
+    *, max_size: int = 8192, typed: bool = False
 ) -> Callable[[Callable[P, T]], Callable[P, T]]: ...
 
 
@@ -55,7 +55,7 @@ def lru_cache[**P, T](func: Callable[P, T]) -> Callable[P, T]: ...
 
 # Implementation of the decorator
 def lru_cache[**P, T](
-    func: Callable[P, T] | None = None, *, limit: int = 8192, typed: bool = False
+    func: Callable[P, T] | None = None, *, max_size: int = 8192, typed: bool = False
 ) -> Callable[[Callable[P, T]], Callable[P, T]] | Callable[P, T]:
     """
     A strongly-typed wrapper for functools.lru_cache
@@ -72,7 +72,7 @@ def lru_cache[**P, T](
     # from the outer scope and applies them to its signature.
     def decorator(f: Callable[P, T]) -> Callable[P, T]:
         # Note: The underlying functools.lru_cache uses 'maxsize'.
-        return functools.lru_cache(maxsize=limit, typed=typed)(f)  # pyright: ignore[reportReturnType]
+        return functools.lru_cache(maxsize=max_size, typed=typed)(f)  # pyright: ignore[reportReturnType]
 
     if func is not None:
         return decorator(func)
