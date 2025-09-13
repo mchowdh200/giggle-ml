@@ -9,8 +9,10 @@ import numpy as np
 from numpy._typing import NDArray
 
 from giggleml.utils.path_utils import as_path
+from giggleml.utils.types import lazy
 
 
+@lazy
 class SeqpareDB:
     """reads all seqpare form .tsv files in the directory, taking the name, without last suffix, as the label"""
 
@@ -72,4 +74,3 @@ class SeqpareDB:
                 negatives.append(label)
 
         return positives, negatives
-
