@@ -150,7 +150,7 @@ def main():
     #       Setup Model, Optimizer, and Data
     # ---------------------------------
 
-    seqpare_db = SeqpareDB(seqpare_dir, seqpare_positive_threshold)
+    seqpare_db = SeqpareDB(seqpare_dir)
 
     # Calculate start iteration for resumption
     start_iteration = 0
@@ -159,33 +159,34 @@ def main():
         print(f"Resuming from epoch {args.resume_from_epoch}")
 
     dataset = RmeSeqpareClusters(
-        rme_dir,
-        seqpare_db,
-        world_size,
-        rank,
-        clusters_per_batch,
-        cluster_size,
-        centroid_size,
-        allowed_rme_names,
+        road_epig_path=rme_dir,
+        seqpare=seqpare_db,
+        world_size=world_size,
+        rank=rank,
+        positive_threshold=seqpare_positive_threshold,
+        clusters_amnt=clusters_per_batch * world_size,
+        groups_per_cluster=cluster_size,
+        intervals_per_group=centroid_size,
+        allowed_rme_names=allowed_rme_names,
         seed=args.seed,
-        start_iteration=start_iteration,
     )
 
     # Create validation dataset if needed
     val_dataset = None
     if val_rme_names:
         val_dataset = RmeSeqpareClusters(
-            rme_dir,
-            seqpare_db,
-            world_size,
-            rank,
-            clusters_per_batch,
-            cluster_size,
-            centroid_size,
-            val_rme_names,
-            seed=args.seed + 1000,  # Different seed for validation
-            start_iteration=0,  # Always start validation from beginning
+            road_epig_path=rme_dir,
+            seqpare=seqpare_db,
+            world_size=world_size,
+            rank=rank,
+            positive_threshold=seqpare_positive_threshold,
+            clusters_amnt=max(5, clusters_per_batch // 2) * world_size,
+            groups_per_cluster=cluster_size,
+            intervals_per_group=centroid_size,
+            allowed_rme_names=val_rme_names,
+            seed=args.seed + 1,  # Different seed for validation
         )
+
     train_step = IntervalClusterTripletFT(world_size, rank, device, emodel, loss)
     # Use fabric.setup to wrap the components. This prepares them for the
     # chosen hardware and strategy (e.g., wraps model in DDP).
@@ -207,6 +208,15 @@ def main():
         state = fabric.load(checkpoint_path)
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
+        dataset = RmeSeqpareClusters.load_dict(
+            state["train_dataset_state"],
+            seqpare_db,
+        )
+        if val_dataset and state["val_dataset_state"]:
+            val_dataset = RmeSeqpareClusters.load_dict(
+                state["val_dataset_state"],
+                seqpare_db,
+            )
         start_epoch = state["epoch"] + 1
 
     # INFO: ---------------------------
@@ -259,7 +269,13 @@ def main():
         #       Save Checkpoint
         # ---------------------------------
         # Fabric ensures this only happens on the main process to prevent race conditions.
-        state = {"model": model, "optimizer": optimizer, "epoch": epoch}
+        state = {
+            "model": model,
+            "optimizer": optimizer,
+            "epoch": epoch,
+            "train_dataset_state": dataset.save_dict(),
+            "val_dataset_state": val_dataset.save_dict() if val_dataset else None,
+        }
         fabric.save(checkpoint_path, state)
         fabric.print(f"Checkpoint saved at epoch {epoch} to {checkpoint_path}")
 
@@ -268,4 +284,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

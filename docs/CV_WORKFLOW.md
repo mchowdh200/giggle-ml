@@ -61,7 +61,6 @@ You can also run individual components manually:
 ### Training with specific hyperparameters:
 ```bash
 python src/giggleml/train/hdna_seqpare_ft.py \
-  --use_cv \
   --cv_split train \
   --learning_rate 2e-5 \
   --margin 1.0 \
@@ -72,10 +71,10 @@ python src/giggleml/train/hdna_seqpare_ft.py \
 ### Evaluation on specific splits:
 ```bash
 # Validate during training
-python src/giggleml/train/hdna_seqpare_ft.py --use_cv --cv_split train --validation_freq 2
+python src/giggleml/train/hdna_seqpare_ft.py --cv_split train --validation_freq 2
 
 # Final test evaluation  
-python src/giggleml/train/hdna_seqpare_ft.py --use_cv --cv_split test
+python src/giggleml/train/hdna_seqpare_ft.py --cv_split test
 ```
 
 ## Key Features
