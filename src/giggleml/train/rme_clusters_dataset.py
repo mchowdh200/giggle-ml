@@ -52,7 +52,6 @@ class RmeSeqpareClusters(IterableDataset):
         intervals_per_group: int = 30,
         allowed_rme_names: Iterable[str] | None = None,
         seed: int = 42,
-        start_iteration: int = 0,
     ) -> None:
         """
         Initializes the dataset.
@@ -68,7 +67,6 @@ class RmeSeqpareClusters(IterableDataset):
             intervals_per_group: Number of intervals per group.
             allowed_rme_names: Iterable of RME names for cross-validation. Defaults to all names.
             seed: Random seed for reproducibility.
-            start_iteration: The iteration to start from.
         """
         # Assign attributes first
         self.rme_dir: PathLike = road_epig_path
@@ -80,7 +78,6 @@ class RmeSeqpareClusters(IterableDataset):
         self.groups_per_cluster: int = groups_per_cluster
         self.intervals_per_group: int = intervals_per_group
         self.seed: int = seed
-        self.start_iteration: int = start_iteration
 
         # Validate parameters
         if clusters_amnt % world_size != 0:
@@ -197,7 +194,6 @@ class RmeSeqpareClusters(IterableDataset):
             "intervals_per_group": self.intervals_per_group,
             "allowed_rme_names": list(self.allowed_rme_names),
             "seed": self.seed,
-            "start_iteration": self.start_iteration,
             # Random number generator states
             "world_rng_state": self._world_rng.getstate(),
             "rank_rng_state": self._rank_rng.getstate(),
@@ -227,7 +223,6 @@ class RmeSeqpareClusters(IterableDataset):
             intervals_per_group=state_dict["intervals_per_group"],
             allowed_rme_names=state_dict["allowed_rme_names"],
             seed=state_dict["seed"],
-            start_iteration=state_dict["start_iteration"],
         )
 
         # Restore random number generator states
