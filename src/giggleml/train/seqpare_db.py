@@ -2,6 +2,7 @@
 SeqpareDB for reading and processing seqpare similarity files.
 """
 
+from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
 
@@ -25,7 +26,7 @@ class SeqpareDB:
                 self._labels[file.stem] = len(self._labels)
 
     @cache
-    def _fetch_dense(self, label: str, positive_threshold: float) -> NDArray[np.bool]:
+    def fetch_mask(self, label: str, positive_threshold: float) -> NDArray[np.bool]:
         path = self.dir / (label + ".bed.tsv")
 
         if not path.exists():
@@ -49,23 +50,32 @@ class SeqpareDB:
                 if label_name not in self._labels:
                     continue  # skip unknown labels
                 item_id = self._labels[label_name]
-                positive = float(terms[4]) > positive_threshold
+                positive = float(terms[4]) >= positive_threshold
                 bits[item_id] = positive
 
             return bits
 
-    def fetch(
+    def fetch_labels(
         self, label: str, positive_threshold: float = 0.7
     ) -> tuple[list[str], list[str]]:
         """
-        positives are items less than the positive_threshold to the anchor
+        fetches the (positives, negatives) labels for a given label
+        @param label: the label to fetch
+        @param positive_threshold: the threshold above which a label is considered positive
         @returns (positives, negatives) for a label
         """
-        bits = self._fetch_dense(label, positive_threshold)
+        mask = self.fetch_mask(label, positive_threshold)
+        return self.mask_to_labels(mask)
+
+    def mask_to_labels(self, mask: NDArray[np.bool]) -> tuple[list[str], list[str]]:
+        """
+        converts a mask to (positives, negatives) labels
+        @returns (positives, negatives) for a label
+        """
         positives, negatives = list(), list()
         labels = list(self._labels.keys())
 
-        for i, bit in enumerate(bits):
+        for i, bit in enumerate(mask):
             label = labels[i]
 
             if bit:
@@ -74,3 +84,39 @@ class SeqpareDB:
                 negatives.append(label)
 
         return positives, negatives
+
+    def labels_to_mask(self, positives: Iterable[str]) -> NDArray[np.bool]:
+        """
+        converts a list of positive labels to a mask
+        @param positives: the positive labels
+        @returns the mask
+        """
+        mask: NDArray[np.bool] = np.zeros(len(self._labels), dtype=np.bool)
+
+        for label in positives:
+            if label not in self._labels:
+                raise ValueError(f"unknown label: {label}")
+            item_id = self._labels[label]
+            mask[item_id] = True
+
+        return mask
+
+    def label_to_idx(self, label: str) -> int:
+        """
+        converts a label to its index
+        @param label: the label to convert
+        @returns the index of the label
+        """
+        if label not in self._labels:
+            raise ValueError(f"unknown label: {label}")
+        return self._labels[label]
+
+    def idx_to_label(self, idx: int) -> str:
+        """
+        converts an index to its label
+        @param idx: the index to convert
+        @returns the label of the index
+        """
+        if idx < 0 or idx >= len(self._labels):
+            raise ValueError(f"index out of range: {idx}")
+        return list(self._labels.keys())[idx]
