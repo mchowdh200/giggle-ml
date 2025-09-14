@@ -12,7 +12,6 @@ import numpy as np
 from numpy._typing import NDArray
 from torch.utils.data import IterableDataset
 
-import giggleml.utils.roadmap_epigenomics as rme
 from giggleml.data_wrangling.interval_dataset import BedDataset
 from giggleml.train.seqpare_db import SeqpareDB
 from giggleml.utils.misc import partition_list
@@ -103,8 +102,14 @@ class RmeSeqpareClusters(IterableDataset):
                 f"intervals_per_group must be positive, got {intervals_per_group}"
             )
 
+        @as_list
+        def total_possible_rme_names() -> Iterable[str]:
+            for entry in Path(self.rme_dir).iterdir():
+                if entry.is_file() and entry.suffix in {".bed", ".bed.gz"}:
+                    yield entry.stem
+
         self.allowed_rme_names: set[str] = set(
-            allowed_rme_names if allowed_rme_names else rme.bed_names
+            allowed_rme_names if allowed_rme_names else total_possible_rme_names()
         )
 
         self._allowed_mask: NDArray[np.bool_] = self.sdb.labels_to_mask(
