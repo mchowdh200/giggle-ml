@@ -14,6 +14,7 @@ class HyperparameterConfig:
     batch_sizes: list[int] | None = None  # clusters_per_batch
     cluster_sizes: list[int] | None = None  # intervals per cluster
     densities: list[int] | None = None  # intervals per candidate (centroid_size)
+    positive_threshold: float | None = None
     epochs: list[int] | None = None  # training epochs
     # AdamW parameters
     betas_1: list[float] | None = None  # AdamW beta1
@@ -27,6 +28,8 @@ class HyperparameterConfig:
             self.cluster_sizes = [10]
         if self.densities is None:
             self.densities = [30]
+        if self.positive_threshold is None:
+            self.positive_threshold = 0.7
         if self.epochs is None:
             self.epochs = [10]
         if self.betas_1 is None:
@@ -45,6 +48,7 @@ class HyperparameterConfig:
             batch_sizes=[8, 10, 12],  # Expand if memory allows
             cluster_sizes=[8, 10, 12],  # Intervals per cluster
             densities=[20, 30, 40],  # Intervals per candidate
+            positive_threshold=0.7,  # Fixed
             epochs=[8, 10, 12],  # Training epochs
             # AdamW hyperparameters
             betas_1=[0.85, 0.9, 0.95],  # AdamW beta1
@@ -61,6 +65,7 @@ class HyperparameterConfig:
             batch_sizes=[10],  # Keep fixed for memory
             cluster_sizes=[10],  # Keep standard
             densities=[30],  # Keep standard
+            positive_threshold=0.7,  # Fixed
             epochs=[10],  # Keep standard
             betas_1=[0.9],  # Standard
             betas_2=[0.999],  # Standard
@@ -70,7 +75,7 @@ class HyperparameterConfig:
     def grid_search_combinations(self) -> list[dict[str, Any]]:
         """Generate all combinations for grid search."""
         combinations = []
-        
+
         # Ensure all lists are not None after __post_init__
         assert self.batch_sizes is not None
         assert self.cluster_sizes is not None
@@ -79,7 +84,7 @@ class HyperparameterConfig:
         assert self.betas_1 is not None
         assert self.betas_2 is not None
         assert self.weight_decays is not None
-        
+
         for (
             lr,
             margin,
@@ -237,4 +242,3 @@ class HyperparameterSearchResults:
         """Get hyperparameters of best result."""
         best = self.get_best_result()
         return best.hyperparams if best else None
-

@@ -44,6 +44,9 @@ def parse_args():
         "--cluster_size", type=int, help="Intervals per cluster override"
     )
     parser.add_argument("--density", type=int, help="Intervals per candidate override")
+    parser.add_argument(
+        "--positive_threshold", type=int, help="Seqpare positive threshold override"
+    )
     parser.add_argument("--epochs", type=int, help="Training epochs override")
 
     # AdamW hyperparameters
@@ -130,7 +133,7 @@ def main():
     pipeline = DirectPipeline(emodel, 64)
 
     # other
-    seqpare_positive_threshold = 0.7
+    seqpare_positive_threshold = args.positive_threshold or 0.7
 
     # INFO: ----------------------------
     #       Fabric Setup
