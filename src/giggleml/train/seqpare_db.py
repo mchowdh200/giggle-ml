@@ -2,6 +2,7 @@
 SeqpareDB for reading and processing seqpare similarity files.
 """
 
+import re
 from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
@@ -22,12 +23,21 @@ class SeqpareDB:
         self._labels: dict[str, int] = dict()
 
         for file in self.dir.iterdir():
-            if file.suffix == ".tsv":
-                self._labels[file.stem] = len(self._labels)
+            suffix = "".join(file.suffixes)
+
+            if suffix.endswith(".bed.gz.tsv"):
+                label = file.name[: -len(".bed.gz.tsv")]
+                self._labels[label] = len(self._labels)
+            elif suffix.endswith(".bed.tsv"):
+                label = file.name[: -len(".bed.tsv")]
+                self._labels[label] = len(self._labels)
 
     @cache
     def fetch_mask(self, label: str, positive_threshold: float) -> NDArray[np.bool]:
         path = self.dir / (label + ".bed.tsv")
+
+        if not path.exists():
+            path = self.dir / (label + ".bed.gz.tsv")
 
         if not path.exists():
             raise FileNotFoundError(path)
@@ -39,17 +49,23 @@ class SeqpareDB:
             for line in f:
                 # parse the seqpare tsv file
                 terms = line.split()
+
                 if len(terms) < 6:
                     continue  # skip malformed lines
+
                 # the column that corresponds to file names
                 item = terms[5]
-                # these are in the form ./label.bed
-                if not item.startswith("./") or len(item) < 3:
-                    continue  # skip unexpected format
-                label_name = item[2:]
-                if label_name not in self._labels:
+
+                # these are in the form ./dir/dir2/label.bed.gz
+                if match := re.match(r"(.+/)*(.+)\.bed(\.gz)?", item):
+                    other_label = match.group(2)
+                else:
+                    raise ValueError(f"malformed seqpare item: {item}")
+
+                if other_label not in self._labels:
                     continue  # skip unknown labels
-                item_id = self._labels[label_name]
+
+                item_id = self._labels[other_label]
                 positive = float(terms[4]) >= positive_threshold
                 bits[item_id] = positive
 
