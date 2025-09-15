@@ -76,16 +76,17 @@ def main():
     # ---------------------------------
 
     # paths
-    rme_dir = Path("data/roadmap_epigenomics/beds")
-    seqpare_dir = Path("data/roadmap_epigenomics/seqpareRanks")
+    rme_dir = Path("data/roadmap_epigenomics")
+    rme_beds = Path(rme_dir, "beds")
+    seqpare_dir = Path(rme_dir, "seqpareRanks")
     training_dir = Path("models/hdna_seqpare_08092025")
     log_dir = Path(training_dir, "logs")
     checkpoint_dir = Path(training_dir, "checkpoints")
     fasta = Path("data/hg/hg19.fa")
 
     # Validate required paths exist
-    if not rme_dir.exists():
-        raise FileNotFoundError(f"Roadmap epigenomics directory not found: {rme_dir}")
+    if not rme_beds.exists():
+        raise FileNotFoundError(f"Roadmap epigenomics directory not found: {rme_beds}")
     if not seqpare_dir.exists():
         raise FileNotFoundError(f"Seqpare directory not found: {seqpare_dir}")
     if not fasta.exists():
@@ -95,7 +96,8 @@ def main():
     allowed_rme_names = None
     val_rme_names = None
     if args.use_cv:
-        cv_splits = create_cv_splits(rme_dir)
+        cv_ratio = {"train_ratio": 0.89, "val_ratio": 0.01, "test_ratio": 0.1}
+        cv_splits = create_cv_splits(rme_beds, **cv_ratio)
         allowed_rme_names = cv_splits[args.cv_split]
         if args.cv_split == "train":
             val_rme_names = cv_splits["val"]
@@ -130,7 +132,7 @@ def main():
     loss = TripletMarginLoss(margin=margin)
 
     # the embed pipeline is used for inference
-    pipeline = DirectPipeline(emodel, 64)
+    pipeline = DirectPipeline(emodel, 1)
 
     # other
     seqpare_positive_threshold = args.positive_threshold or 0.7
@@ -142,7 +144,7 @@ def main():
     # 'auto' will intelligently select the accelerator (CUDA, MPS, CPU) and devices.
     logger = TensorBoardLogger(root_dir=log_dir)
     fabric = Fabric(
-        accelerator="auto", strategy="ddp", devices="auto", loggers=[logger]
+        accelerator="auto", strategy="auto", devices="auto", loggers=[logger]
     )
     fabric.launch()  # Entry point for distributed training
     world_size = fabric.world_size
@@ -162,7 +164,7 @@ def main():
         print(f"Resuming from epoch {args.resume_from_epoch}")
 
     dataset = RmeSeqpareClusters(
-        road_epig_path=rme_dir,
+        road_epig_path=rme_beds,
         seqpare=seqpare_db,
         world_size=world_size,
         rank=rank,
@@ -178,7 +180,7 @@ def main():
     val_dataset = None
     if val_rme_names:
         val_dataset = RmeSeqpareClusters(
-            road_epig_path=rme_dir,
+            road_epig_path=rme_beds,
             seqpare=seqpare_db,
             world_size=world_size,
             rank=rank,
