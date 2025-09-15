@@ -120,22 +120,25 @@ class RmeSeqpareClusters(IterableDataset):
 
     @override
     def __iter__(self) -> Iterator[list[Cluster]]:
-        anchors = self._sample_anchors()  # same across ranks
-        rank_anchors = partition_list(anchors, self.world_size, self.rank)
-        clusters = [self._sample_positives(anchor) for anchor in rank_anchors]
+        while True:
+            anchors = self._sample_anchors()  # same across ranks
+            rank_anchors = partition_list(anchors, self.world_size, self.rank)
+            clusters = [self._sample_positives(anchor) for anchor in rank_anchors]
 
-        # sanity checks
-        assert len(clusters) == self.clusters_amnt // self.world_size
-        assert all([len(cluster) == self.groups_per_cluster for cluster in clusters])
-        assert all(
-            [
-                len(group) == self.intervals_per_group
-                for cluster in clusters
-                for group in cluster
-            ]
-        )
+            # sanity checks
+            assert len(clusters) == self.clusters_amnt // self.world_size
+            assert all(
+                [len(cluster) == self.groups_per_cluster for cluster in clusters]
+            )
+            assert all(
+                [
+                    len(group) == self.intervals_per_group
+                    for cluster in clusters
+                    for group in cluster
+                ]
+            )
 
-        yield clusters
+            yield clusters
 
     @as_list
     def _sample_positives(self, anchor: str) -> Iterable[list[GenomicInterval]]:
