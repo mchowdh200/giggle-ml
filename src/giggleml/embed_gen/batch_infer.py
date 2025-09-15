@@ -84,7 +84,7 @@ class BatchInfer:
             final_idx = next_idx + len(outputs)
 
             if in_memory:
-                in_memory_results.append(outputs.detach())
+                in_memory_results.append(outputs)
             else:
                 assert out_file is not None
                 assert final_idx <= len(out_file)
