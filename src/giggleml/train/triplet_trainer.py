@@ -32,6 +32,21 @@ class IntervalClusterTripletFT(Module):
         self.model: TrainableEmbedModel = model
         self.loss: Loss3 = loss
 
+    def _create_cluster_labels(self, batch: Tensor) -> Tensor:
+        """Create labels for cluster assignment."""
+        return (
+            torch.arange(batch.shape[0], device=self.device)
+            .unsqueeze(1)
+            .expand(batch.shape[0], batch.shape[1])
+            .reshape(-1)
+        )
+
+    def _prepare_embeddings_and_labels(self, batch: Tensor) -> tuple[Tensor, Tensor]:
+        """Prepare embeddings and labels from batch."""
+        all_embeds = batch.reshape(-1, self.model.embed_dim)
+        all_labels = self._create_cluster_labels(batch)
+        return all_embeds, all_labels
+
     def _mine_hard_triplets(
         self, embeds: Tensor, all_embeds: Tensor, labels: Tensor, all_labels: Tensor
     ) -> tuple[Tensor, Tensor]:
@@ -57,28 +72,37 @@ class IntervalClusterTripletFT(Module):
 
         return positives, negatives
 
+    def _compute_loss_and_accuracy(
+        self, anchors: Tensor, positives: Tensor, negatives: Tensor
+    ) -> tuple[float, float]:
+        """Compute triplet loss and accuracy metrics."""
+        triplet_losses = self.loss(anchors, positives, negatives)
+        total_loss = triplet_losses.sum().item()
+
+        # Compute triplet accuracy (d(a,p) < d(a,n))
+        ap_dists = torch.norm(anchors - positives, dim=1)
+        an_dists = torch.norm(anchors - negatives, dim=1)
+        total_correct = (ap_dists < an_dists).sum().item()
+
+        total_triplets = len(anchors)
+        avg_loss = total_loss / max(total_triplets, 1)
+        accuracy = total_correct / max(total_triplets, 1)
+
+        return avg_loss, accuracy
+
     def training_step(self, batch: Tensor):
         """
         Assumes that the batch is identical across all ranks.
         @param batch: shape[cluster_amnt, cluster_size, embed_dim]
         """
-        edim = self.model.embed_dim
-        all_embeds = batch.reshape(-1, edim)
+        all_embeds, all_labels = self._prepare_embeddings_and_labels(batch)
 
         # This rank operates on a subset of the batch
         splits = partition_integer(len(batch), self.world_size)
         my_start_cluster = sum(splits[: self.rank])
         my_amnt_clusters = splits[self.rank]
         my_embeds = batch[my_start_cluster : my_start_cluster + my_amnt_clusters].view(
-            -1, edim
-        )
-
-        # Create labels for all clusters
-        all_labels = (
-            torch.arange(batch.shape[0], device=self.device)
-            .unsqueeze(1)
-            .expand(batch.shape[0], batch.shape[1])
-            .reshape(-1)
+            -1, self.model.embed_dim
         )
         my_labels = all_labels[
             my_start_cluster * batch.shape[1] : (my_start_cluster + my_amnt_clusters)
@@ -100,39 +124,17 @@ class IntervalClusterTripletFT(Module):
         self.model.trainable_model.eval()
 
         with torch.no_grad():
-            edim = self.model.embed_dim
-            all_embeds = batch.reshape(-1, edim)
-
-            # Create labels for clusters
-            all_labels = (
-                torch.arange(batch.shape[0], device=self.device)
-                .unsqueeze(1)
-                .expand(batch.shape[0], batch.shape[1])
-                .reshape(-1)
-            )
+            all_embeds, all_labels = self._prepare_embeddings_and_labels(batch)
 
             # Mine hard triplets using the shared method
             positives, negatives = self._mine_hard_triplets(
                 all_embeds, all_embeds, all_labels, all_labels
             )
 
-            total_loss = 0.0
-            total_correct = 0
-            total_triplets = len(all_embeds)
-
-            # Compute triplet loss and accuracy
-            triplet_losses = self.loss(all_embeds, positives, negatives)
-            total_loss = triplet_losses.sum().item()
-
-            # Compute triplet accuracy (d(a,p) < d(a,n))
-            ap_dists = torch.norm(all_embeds - positives, dim=1)
-            an_dists = torch.norm(all_embeds - negatives, dim=1)
-            total_correct = (ap_dists < an_dists).sum().item()
-
-            # Compute averages
-            avg_loss = total_loss / max(total_triplets, 1)
-            accuracy = total_correct / max(total_triplets, 1)
+            # Compute loss and accuracy using the shared method
+            avg_loss, accuracy = self._compute_loss_and_accuracy(
+                all_embeds, positives, negatives
+            )
 
         self.model.trainable_model.train()
         return avg_loss, accuracy
-
