@@ -235,7 +235,9 @@ def main():
         batch = next(data)
         batch_tensor = embed_batch(pipeline, emodel.embed_dim, batch, fasta)
         batch_tensor: Tensor = cast(Tensor, fabric.all_gather(batch_tensor))
-        batch_tensor = batch_tensor.reshape(-1, *batch_tensor.shape[2:]).to(device)
+        batch_tensor = batch_tensor.reshape(
+            clusters_per_batch * world_size, cluster_size, emodel.embed_dim
+        ).to(device)
 
         loss = train_step.training_step(batch_tensor)
         fabric.backward(loss)
