@@ -45,11 +45,11 @@ class HyperparameterConfig:
         return cls(
             learning_rates=[6e-4, 8e-4, 1e-3, 1.2e-3],
             margins=[0.5, 1.0, 1.5, 2.0, 3.0],
-            batch_sizes=[64, 100, 144],  # total batch sizes
-            pk_ratios=[0.5, 1.0, 2.0],  # pk ratios for cluster calculation
+            batch_sizes=[32, 64, 128],  # total batch sizes
+            pk_ratios=[0.5, 1.0, 2.0, 4.0, 8.0],  # pk ratios for cluster calculation
             densities=[20, 30, 40],  # Intervals per group
             positive_threshold=0.05,  # Fixed
-            epochs=[10],  # Fixed
+            epochs=[2],  # Fixed
             # AdamW hyperparameters
             betas_1=[0.9],  # Standard
             betas_2=[0.999],  # Standard
