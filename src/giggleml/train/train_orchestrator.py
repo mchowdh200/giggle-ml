@@ -3,6 +3,7 @@ Main training orchestrator for HyenaDNA fine-tuning with seqpare similarity metr
 """
 
 import argparse
+import math
 from pathlib import Path
 from typing import cast
 
@@ -38,10 +39,10 @@ def parse_args():
     parser.add_argument("--learning_rate", type=float, help="Learning rate override")
     parser.add_argument("--margin", type=float, help="Triplet margin override")
     parser.add_argument(
-        "--clusters_per_batch", type=int, help="Clusters per batch override"
+        "--batch_size", type=int, help="Total batch size override"
     )
     parser.add_argument(
-        "--cluster_size", type=int, help="Intervals per cluster override"
+        "--pk_ratio", type=float, help="PK ratio for cluster calculation override"
     )
     parser.add_argument("--density", type=int, help="Intervals per candidate override")
     parser.add_argument(
@@ -73,8 +74,8 @@ def run_training(
     mode: str = "train",
     learning_rate: float | None = None,
     margin: float | None = None,
-    clusters_per_batch: int | None = None,
-    cluster_size: int | None = None,
+    batch_size: int | None = None,
+    pk_ratio: float | None = None,
     density: int | None = None,
     positive_threshold: int | None = None,
     epochs: int | None = None,
@@ -146,9 +147,20 @@ def run_training(
         else:
             raise ValueError(f"Invalid mode: {mode}. Must be 'train', 'val', or 'test'")
 
-    # cluster sampling (with overrides)
-    clusters_per_batch = clusters_per_batch or 10
-    cluster_size = cluster_size or 10
+    # Convert batch_size and pk_ratio to clusters_per_batch and cluster_size
+    batch_size = batch_size or 100
+    pk_ratio = pk_ratio or 1.0
+    
+    # Calculate cluster_amnt and cluster_size from batch_size and pk_ratio
+    # cluster_amnt = sqrt(batch_size * pk_ratio)
+    # cluster_size = cluster_amnt / pk_ratio
+    cluster_amnt = int(math.sqrt(batch_size * pk_ratio))
+    cluster_size = int(cluster_amnt / pk_ratio)
+    
+    # Ensure minimum values
+    clusters_per_batch = max(1, cluster_amnt)
+    cluster_size = max(1, cluster_size)
+    
     centroid_size = density or 30
 
     # training hyperparameters (with overrides)
@@ -390,8 +402,8 @@ def main():
         mode=args.mode,
         learning_rate=args.learning_rate,
         margin=args.margin,
-        clusters_per_batch=args.clusters_per_batch,
-        cluster_size=args.cluster_size,
+        batch_size=args.batch_size,
+        pk_ratio=args.pk_ratio,
         density=args.density,
         positive_threshold=args.positive_threshold,
         epochs=args.epochs,

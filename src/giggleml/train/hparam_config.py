@@ -11,8 +11,8 @@ class HyperparameterConfig:
 
     learning_rates: list[float]
     margins: list[float]
-    batch_sizes: list[int] | None = None  # clusters_per_batch
-    cluster_sizes: list[int] | None = None  # intervals per cluster
+    batch_sizes: list[int] | None = None  # total batch size
+    pk_ratios: list[float] | None = None  # pk ratio for cluster calculation
     densities: list[int] | None = None  # intervals per candidate (centroid_size)
     positive_threshold: float | None = None
     epochs: list[int] | None = None  # training epochs
@@ -23,9 +23,9 @@ class HyperparameterConfig:
 
     def __post_init__(self):
         if self.batch_sizes is None:
-            self.batch_sizes = [10]
-        if self.cluster_sizes is None:
-            self.cluster_sizes = [10]
+            self.batch_sizes = [100]
+        if self.pk_ratios is None:
+            self.pk_ratios = [1.0]
         if self.densities is None:
             self.densities = [30]
         if self.positive_threshold is None:
@@ -45,8 +45,8 @@ class HyperparameterConfig:
         return cls(
             learning_rates=[6e-4, 8e-4, 1e-3, 1.2e-3],
             margins=[0.5, 1.0, 1.5, 2.0, 3.0],
-            batch_sizes=[8, 10, 12],  # Expand if memory allows
-            cluster_sizes=[8, 10, 12],  # Groups per cluster
+            batch_sizes=[64, 100, 144],  # total batch sizes
+            pk_ratios=[0.5, 1.0, 2.0],  # pk ratios for cluster calculation
             densities=[20, 30, 40],  # Intervals per group
             positive_threshold=0.05,  # Fixed
             epochs=[10],  # Fixed
@@ -62,9 +62,9 @@ class HyperparameterConfig:
         return cls(
             learning_rates=[6e-4, 1e-3],  # Reduced for testing
             margins=[0.5, 1.0, 2.0],  # Reduced for testing
-            batch_sizes=[1],  # Very small for memory
-            cluster_sizes=[2],  # Very small for memory
-            densities=[3],  # Very small for memory (total batch = 1*2*3 = 6 intervals)
+            batch_sizes=[6],  # Very small for memory
+            pk_ratios=[1.0],  # pk ratio for cluster calculation
+            densities=[3],  # Very small for memory (total batch = 6 intervals)
             positive_threshold=0.05,  # Fixed
             epochs=[2],  # Fixed
             # AdamW hyperparameters
@@ -79,7 +79,7 @@ class HyperparameterConfig:
 
         # Ensure all lists are not None after __post_init__
         assert self.batch_sizes is not None
-        assert self.cluster_sizes is not None
+        assert self.pk_ratios is not None
         assert self.densities is not None
         assert self.epochs is not None
         assert self.betas_1 is not None
@@ -90,7 +90,7 @@ class HyperparameterConfig:
             lr,
             margin,
             batch_size,
-            cluster_size,
+            pk_ratio,
             density,
             epochs,
             beta1,
@@ -100,7 +100,7 @@ class HyperparameterConfig:
             self.learning_rates,
             self.margins,
             self.batch_sizes,
-            self.cluster_sizes,
+            self.pk_ratios,
             self.densities,
             self.epochs,
             self.betas_1,
@@ -111,8 +111,8 @@ class HyperparameterConfig:
                 {
                     "learning_rate": lr,
                     "margin": margin,
-                    "clusters_per_batch": batch_size,
-                    "cluster_size": cluster_size,
+                    "batch_size": batch_size,
+                    "pk_ratio": pk_ratio,
                     "density": density,
                     "epochs": epochs,
                     "beta1": beta1,
