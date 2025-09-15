@@ -158,13 +158,6 @@ def main():
         with open(best_path, "w") as f:
             json.dump(best.hyperparams, f, indent=2)
         print(f"Best hyperparameters saved to: {best_path}")
-
-        print("\n=== NEXT STEPS ===")
-        print("1. Train final model with best hyperparameters:")
-        print("   python scripts/train_with_best_hparams.py")
-        print()
-        print("2. Evaluate on test set (only once!):")
-        print("   python scripts/test_evaluation.py")
     else:
         print("No successful results found")
 
