@@ -60,11 +60,11 @@ class HyperparameterConfig:
     def conservative(cls) -> "HyperparameterConfig":
         """Conservative search space for faster experimentation."""
         return cls(
-            learning_rates=[6e-4, 8e-4, 1e-3, 1.2e-3],
-            margins=[0.5, 1.0, 1.5, 2.0, 3.0],
-            batch_sizes=[3],  # Fixed for speed
-            cluster_sizes=[3],  # Fixed for speed
-            densities=[20, 30, 40],  # Intervals per group
+            learning_rates=[6e-4, 1e-3],  # Reduced for testing
+            margins=[0.5, 1.0, 2.0],  # Reduced for testing
+            batch_sizes=[1],  # Very small for memory
+            cluster_sizes=[2],  # Very small for memory
+            densities=[3],  # Very small for memory (total batch = 1*2*3 = 6 intervals)
             positive_threshold=0.05,  # Fixed
             epochs=[2],  # Fixed
             # AdamW hyperparameters

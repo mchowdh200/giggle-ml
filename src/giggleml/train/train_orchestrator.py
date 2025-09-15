@@ -28,10 +28,10 @@ def parse_args():
         "--use_cv", action="store_true", help="Use cross-validation splits"
     )
     parser.add_argument(
-        "--cv_split",
+        "--mode",
         choices=["train", "val", "test"],
         default="train",
-        help="Which CV split to use",
+        help="Training mode: train (train on train/test on val with checkpointing), val (same as train but no checkpointing), test (test on test set using checkpoint)",
     )
 
     # Core hyperparameters
@@ -68,15 +68,43 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
+def run_training(
+    use_cv: bool = False,
+    mode: str = "train",
+    learning_rate: float | None = None,
+    margin: float | None = None,
+    clusters_per_batch: int | None = None,
+    cluster_size: int | None = None,
+    density: int | None = None,
+    positive_threshold: int | None = None,
+    epochs: int | None = None,
+    beta1: float | None = None,
+    beta2: float | None = None,
+    weight_decay: float | None = None,
+    validation_freq: int = 5,
+    seed: int = 42,
+    resume_from_epoch: int | None = None,
+) -> tuple[float, float]:
+    """
+    Run training/evaluation with given hyperparameters.
+    
+    The function behaves differently based on mode:
+    - "train": Train on train split, evaluate on val split, save checkpoints
+    - "val": Train on train split, evaluate on val split, no checkpointing (for hyperparameter optimization)
+    - "test": Load checkpoint and evaluate on test split only
 
+    Returns:
+        (primary_loss, primary_accuracy) where:
+        - For mode="train": (val_loss, val_accuracy) from training on train set
+        - For mode="val": (val_loss, val_accuracy) from training on train set
+        - For mode="test": (test_loss, test_accuracy) from evaluation only
+    """
     # INFO: ---------------------------
     #       Config
     # ---------------------------------
 
     # paths
-    rme_dir = Path("data/roadmap_epigenomics")
+    rme_dir = Path("data/rme_small")
     rme_beds = Path(rme_dir, "beds")
     seqpare_dir = Path(rme_dir, "seqpareRanks")
     training_dir = Path("models/hdna_seqpare_08092025")
@@ -92,35 +120,46 @@ def main():
     if not fasta.exists():
         raise FileNotFoundError(f"FASTA file not found: {fasta}")
 
-    # Cross-validation splits
-    allowed_rme_names = None
-    val_rme_names = None
-    if args.use_cv:
-        cv_ratio = {"train_ratio": 0.89, "val_ratio": 0.01, "test_ratio": 0.1}
+    # Cross-validation splits and mode determination
+    train_rme_names = None
+    eval_rme_names = None
+    is_training_mode = mode in ["val", "train"]  # Both val and train modes involve training
+    is_test_only = mode == "test"
+    save_checkpoints = mode == "train"  # Only save checkpoints in train mode
+    
+    if use_cv:
+        cv_ratio = {"train_ratio": 0.8, "val_ratio": 0.1, "test_ratio": 0.1}
         cv_splits = create_cv_splits(rme_beds, **cv_ratio)
-        allowed_rme_names = cv_splits[args.cv_split]
-        if args.cv_split == "train":
-            val_rme_names = cv_splits["val"]
-        print(
-            f"Using CV split '{args.cv_split}' with {len(allowed_rme_names)} RME files"
-        )
-        if val_rme_names:
-            print(f"Validation set has {len(val_rme_names)} RME files")
+        
+        if mode in ["train", "val"]:
+            # Both train and val modes: train on train set, evaluate on val set
+            train_rme_names = cv_splits["train"]
+            eval_rme_names = cv_splits["val"]
+            checkpoint_mode = "with checkpointing" if save_checkpoints else "no checkpointing"
+            print(f"{mode.capitalize()} mode: Training on train split ({len(train_rme_names)} files), evaluating on val split ({len(eval_rme_names)} files), {checkpoint_mode}")
+            
+        elif mode == "test":
+            # Test mode: evaluate only on test set
+            eval_rme_names = cv_splits["test"]
+            print(f"Test mode: Evaluating on test split with {len(eval_rme_names)} RME files")
+            
+        else:
+            raise ValueError(f"Invalid mode: {mode}. Must be 'train', 'val', or 'test'")
 
     # cluster sampling (with overrides)
-    clusters_per_batch = args.clusters_per_batch or 10
-    cluster_size = args.cluster_size or 10
-    centroid_size = args.density or 30
+    clusters_per_batch = clusters_per_batch or 10
+    cluster_size = cluster_size or 10
+    centroid_size = density or 30
 
     # training hyperparameters (with overrides)
-    epochs = args.epochs or 10
-    learning_rate = args.learning_rate or 1e-7
-    margin = args.margin or 3.0
+    epochs = epochs or 10
+    learning_rate = learning_rate or 1e-7
+    margin = margin or 3.0
 
     # AdamW hyperparameters (with overrides)
-    beta1 = args.beta1 or 0.9
-    beta2 = args.beta2 or 0.999
-    weight_decay = args.weight_decay or 0.0
+    beta1 = beta1 or 0.9
+    beta2 = beta2 or 0.999
+    weight_decay = weight_decay or 0.0
 
     emodel: EmbedModel = HyenaDNA("1k", training=True)
     optimizer = optim.AdamW(
@@ -135,7 +174,7 @@ def main():
     pipeline = DirectPipeline(emodel, 1)
 
     # other
-    seqpare_positive_threshold = args.positive_threshold or 0.7
+    seqpare_positive_threshold = positive_threshold or 0.7
 
     # INFO: ----------------------------
     #       Fabric Setup
@@ -159,38 +198,45 @@ def main():
 
     # Calculate start iteration for resumption
     start_iteration = 0
-    if args.resume_from_epoch:
-        start_iteration = args.resume_from_epoch
-        print(f"Resuming from epoch {args.resume_from_epoch}")
+    if resume_from_epoch:
+        start_iteration = resume_from_epoch
+        print(f"Resuming from epoch {resume_from_epoch}")
 
-    dataset = RmeSeqpareClusters(
-        road_epig_path=rme_beds,
-        seqpare=seqpare_db,
-        world_size=world_size,
-        rank=rank,
-        positive_threshold=seqpare_positive_threshold,
-        clusters_amnt=clusters_per_batch * world_size,
-        groups_per_cluster=cluster_size,
-        intervals_per_group=centroid_size,
-        allowed_rme_names=allowed_rme_names,
-        seed=args.seed,
-    )
-
-    # Create validation dataset if needed
-    val_dataset = None
-    if val_rme_names:
-        val_dataset = RmeSeqpareClusters(
+    # Create datasets based on mode
+    train_dataset = None
+    eval_dataset = None
+    
+    if is_training_mode:
+        # Create training dataset
+        train_dataset = RmeSeqpareClusters(
             road_epig_path=rme_beds,
             seqpare=seqpare_db,
             world_size=world_size,
             rank=rank,
             positive_threshold=seqpare_positive_threshold,
-            clusters_amnt=max(5, clusters_per_batch // 2) * world_size,
+            clusters_amnt=clusters_per_batch * world_size,
             groups_per_cluster=cluster_size,
             intervals_per_group=centroid_size,
-            allowed_rme_names=val_rme_names,
-            seed=args.seed + 1,  # Different seed for validation
+            allowed_rme_names=train_rme_names,
+            seed=seed,
         )
+    
+    # Create evaluation dataset (used in all modes)
+    # For val mode (hyperparameter search), use smaller evaluation batches to save memory
+    eval_clusters_amnt = 2 * world_size if mode == "val" else max(5, clusters_per_batch // 2) * world_size
+    
+    eval_dataset = RmeSeqpareClusters(
+        road_epig_path=rme_beds,
+        seqpare=seqpare_db,
+        world_size=world_size,
+        rank=rank,
+        positive_threshold=seqpare_positive_threshold,
+        clusters_amnt=eval_clusters_amnt,
+        groups_per_cluster=cluster_size,
+        intervals_per_group=centroid_size,
+        allowed_rme_names=eval_rme_names,
+        seed=seed + 1,  # Different seed for evaluation
+    )
 
     train_step = IntervalClusterTripletFT(world_size, rank, device, emodel, loss)
     # Use fabric.setup to wrap the components. This prepares them for the
@@ -207,86 +253,157 @@ def main():
     checkpoint_path = checkpoint_dir / "latest-checkpoint.pt"
 
     start_epoch = 0
-    if checkpoint_path.is_file():
-        fabric.print(f"Resuming from checkpoint: {checkpoint_path}")
+    if checkpoint_path.is_file() and (is_training_mode or is_test_only):
+        fabric.print(f"Loading checkpoint: {checkpoint_path}")
         # Load checkpoint on all ranks to ensure model/optimizer sync
         state = fabric.load(checkpoint_path)
         model.load_state_dict(state["model"])
-        optimizer.load_state_dict(state["optimizer"])
-        dataset = RmeSeqpareClusters.load_dict(
-            state["train_dataset_state"],
-            seqpare_db,
-        )
-        if val_dataset and state["val_dataset_state"]:
-            val_dataset = RmeSeqpareClusters.load_dict(
-                state["val_dataset_state"],
-                seqpare_db,
-            )
-        start_epoch = state["epoch"] + 1
+        if is_training_mode:  # Only load optimizer state for training modes
+            optimizer.load_state_dict(state["optimizer"])
+            # Only load dataset state for train mode (not val mode) to avoid memory issues during hparam search
+            if mode == "train":
+                if train_dataset and state.get("train_dataset_state"):
+                    train_dataset = RmeSeqpareClusters.load_dict(
+                        state["train_dataset_state"],
+                        seqpare_db,
+                    )
+                if eval_dataset and state.get("eval_dataset_state"):
+                    eval_dataset = RmeSeqpareClusters.load_dict(
+                        state["eval_dataset_state"],
+                        seqpare_db,
+                    )
+                start_epoch = state["epoch"] + 1
 
     # INFO: ---------------------------
-    #       Training Loop
+    #       Training/Evaluation Loop
     # ---------------------------------
-    data = iter(dataset)
+    
+    if is_training_mode:
+        # Training mode: train on the training dataset
+        train_data = iter(train_dataset)
+        final_eval_loss = None
+        final_eval_accuracy = None
 
-    for epoch in range(start_epoch, epochs):
-        # Training phase
-        model.train()
-        optimizer.zero_grad()
+        for epoch in range(start_epoch, epochs):
+            # Training phase
+            model.train()
+            optimizer.zero_grad()
 
-        batch = next(data)
+            batch = next(train_data)
+            batch_tensor = embed_batch(pipeline, emodel.embed_dim, batch, fasta)
+            batch_tensor: Tensor = cast(Tensor, fabric.all_gather(batch_tensor))
+            batch_tensor = batch_tensor.reshape(
+                clusters_per_batch * world_size, cluster_size, emodel.embed_dim
+            ).to(device)
+
+            loss = train_step.training_step(batch_tensor)
+            fabric.backward(loss)
+            optimizer.step()
+
+            train_loss = loss.item()
+            fabric.print(f"Epoch {epoch} / {epochs} | Train Loss: {train_loss:.4f}")
+            fabric.log("train_loss", train_loss, step=epoch)
+
+            # Evaluation phase (on eval_dataset)
+            if eval_dataset and (epoch + 1) % validation_freq == 0:
+                try:
+                    model.eval()
+                    eval_data = iter(eval_dataset)
+                    eval_batch = next(eval_data)
+                    eval_batch_tensor = embed_batch(
+                        pipeline, emodel.embed_dim, eval_batch, fasta
+                    )
+                    eval_batch_tensor: Tensor = cast(
+                        Tensor, fabric.all_gather(eval_batch_tensor)
+                    )
+                    eval_batch_tensor = eval_batch_tensor.reshape(
+                        eval_clusters_amnt, cluster_size, emodel.embed_dim
+                    ).to(device)
+
+                    eval_loss, eval_accuracy = train_step.validation_step(eval_batch_tensor)
+                    final_eval_loss = eval_loss
+                    final_eval_accuracy = eval_accuracy
+                    
+                    eval_split_name = "Val" if mode == "val" else "Test"
+                    fabric.print(
+                        f"Epoch {epoch} / {epochs} | {eval_split_name} Loss: {eval_loss:.4f} | {eval_split_name} Acc: {eval_accuracy:.4f}"
+                    )
+                    fabric.log(f"{eval_split_name.lower()}_loss", eval_loss, step=epoch)
+                    fabric.log(f"{eval_split_name.lower()}_accuracy", eval_accuracy, step=epoch)
+                    model.train()  # Switch back to training mode
+                except StopIteration:
+                    fabric.print("Evaluation data exhausted, skipping evaluation")
+
+            # INFO: ---------------------------
+            #       Save Checkpoint
+            # ---------------------------------
+            # Only save checkpoints in train mode
+            if save_checkpoints:
+                # Fabric ensures this only happens on the main process to prevent race conditions.
+                state = {
+                    "model": model,
+                    "optimizer": optimizer,
+                    "epoch": epoch,
+                    "train_dataset_state": train_dataset.save_dict() if train_dataset else None,
+                    "eval_dataset_state": eval_dataset.save_dict() if eval_dataset else None,
+                }
+                fabric.save(checkpoint_path, state)
+                fabric.print(f"Checkpoint saved at epoch {epoch} to {checkpoint_path}")
+
+        fabric.print("Training finished!")
+
+        # Ensure we have evaluation metrics for training mode
+        if final_eval_loss is None or final_eval_accuracy is None:
+            raise RuntimeError("Evaluation metrics not available - evaluation may not have run")
+
+        return final_eval_loss, final_eval_accuracy
+        
+    else:
+        # Test-only mode: evaluate on test set only
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Test mode requires a checkpoint file at {checkpoint_path}")
+            
+        model.eval()
+        eval_data = iter(eval_dataset)
+        
+        fabric.print(f"Evaluating on test split...")
+        
+        # Run evaluation on a single batch
+        batch = next(eval_data)
         batch_tensor = embed_batch(pipeline, emodel.embed_dim, batch, fasta)
         batch_tensor: Tensor = cast(Tensor, fabric.all_gather(batch_tensor))
         batch_tensor = batch_tensor.reshape(
-            clusters_per_batch * world_size, cluster_size, emodel.embed_dim
+            eval_clusters_amnt, cluster_size, emodel.embed_dim
         ).to(device)
 
-        loss = train_step.training_step(batch_tensor)
-        fabric.backward(loss)
-        optimizer.step()
+        eval_loss, eval_accuracy = train_step.validation_step(batch_tensor)
+        fabric.print(f"Test Loss: {eval_loss:.4f} | Test Acc: {eval_accuracy:.4f}")
+        
+        return eval_loss, eval_accuracy
 
-        fabric.print(f"Epoch {epoch} / {epochs} | Train Loss: {loss.item():.4f}")
-        fabric.log("train_loss", loss.item(), step=epoch)
 
-        # Validation phase
-        if val_dataset and (epoch + 1) % args.validation_freq == 0:
-            try:
-                val_data = iter(val_dataset)
-                val_batch = next(val_data)
-                val_batch_tensor = embed_batch(
-                    pipeline, emodel.embed_dim, val_batch, fasta
-                )
-                val_batch_tensor: Tensor = cast(
-                    Tensor, fabric.all_gather(val_batch_tensor)
-                )
-                val_batch_tensor = val_batch_tensor.reshape(
-                    -1, *val_batch_tensor.shape[2:]
-                ).to(device)
+def main():
+    args = parse_args()
 
-                val_loss, val_accuracy = train_step.validation_step(val_batch_tensor)
-                fabric.print(
-                    f"Epoch {epoch} / {epochs} | Val Loss: {val_loss:.4f} | Val Acc: {val_accuracy:.4f}"
-                )
-                fabric.log("val_loss", val_loss, step=epoch)
-                fabric.log("val_accuracy", val_accuracy, step=epoch)
-            except StopIteration:
-                fabric.print("Validation data exhausted, skipping validation")
-
-        # INFO: ---------------------------
-        #       Save Checkpoint
-        # ---------------------------------
-        # Fabric ensures this only happens on the main process to prevent race conditions.
-        state = {
-            "model": model,
-            "optimizer": optimizer,
-            "epoch": epoch,
-            "train_dataset_state": dataset.save_dict(),
-            "val_dataset_state": val_dataset.save_dict() if val_dataset else None,
-        }
-        fabric.save(checkpoint_path, state)
-        fabric.print(f"Checkpoint saved at epoch {epoch} to {checkpoint_path}")
-
-    fabric.print("Training finished!")
+    primary_loss, primary_accuracy = run_training(
+        use_cv=args.use_cv,
+        mode=args.mode,
+        learning_rate=args.learning_rate,
+        margin=args.margin,
+        clusters_per_batch=args.clusters_per_batch,
+        cluster_size=args.cluster_size,
+        density=args.density,
+        positive_threshold=args.positive_threshold,
+        epochs=args.epochs,
+        beta1=args.beta1,
+        beta2=args.beta2,
+        weight_decay=args.weight_decay,
+        validation_freq=args.validation_freq,
+        seed=args.seed,
+        resume_from_epoch=args.resume_from_epoch,
+    )
+    
+    print(f"Final results - Loss: {primary_loss:.4f}, Accuracy: {primary_accuracy:.4f}")
 
 
 if __name__ == "__main__":

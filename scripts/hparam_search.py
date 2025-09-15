@@ -3,8 +3,6 @@
 Hyperparameter search script for HyenaDNA fine-tuning.
 """
 
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +11,14 @@ from giggleml.train.hparam_config import (
     HyperparameterSearchResults,
     ValidationResult,
 )
+from giggleml.train.train_orchestrator import run_training
 
 
-def run_training(
+def run_training_with_hyperparams(
     hyperparams: dict[str, Any], results_dir: Path, resume_from_epoch: int | None = None
-) -> tuple[float, float, float]:
+) -> tuple[float, float]:
     """
-    Run training with given hyperparameters and return validation metrics.
+    Run training on validation set with given hyperparameters for hyperparameter optimization.
 
     Args:
         hyperparams: Dictionary of hyperparameters
@@ -27,92 +26,34 @@ def run_training(
         resume_from_epoch: Epoch to resume from (for partial runs)
 
     Returns:
-        (val_loss, val_accuracy, train_loss)
+        (val_loss, val_accuracy)
     """
-    # Build command to run training script
-    cmd = [
-        sys.executable,
-        "src/giggleml/train/train_orchestrator.py",
-        "--use_cv",
-        "--cv_split",
-        "val",
-        "--learning_rate",
-        str(hyperparams["learning_rate"]),
-        "--margin",
-        str(hyperparams["margin"]),
-        "--clusters_per_batch",
-        str(hyperparams["clusters_per_batch"]),
-        "--cluster_size",
-        str(hyperparams["cluster_size"]),
-        "--density",
-        str(hyperparams["density"]),
-        "--epochs",
-        str(hyperparams["epochs"]),
-        "--beta1",
-        str(hyperparams["beta1"]),
-        "--beta2",
-        str(hyperparams["beta2"]),
-        "--weight_decay",
-        str(hyperparams["weight_decay"]),
-        "--validation_freq",
-        "2",  # Validate more frequently during search
-        "--seed",
-        str(hyperparams.get("seed", 42)),
-    ]
+    try:
+        print(f"Running hyperparameter optimization with hyperparams: {hyperparams}")
 
-    # Add resumption if specified
-    if resume_from_epoch is not None:
-        cmd.extend(["--resume_from_epoch", str(resume_from_epoch)])
+        val_loss, val_accuracy = run_training(
+            use_cv=True,
+            mode="val",
+            learning_rate=hyperparams["learning_rate"],
+            margin=hyperparams["margin"],
+            clusters_per_batch=hyperparams["clusters_per_batch"],
+            cluster_size=hyperparams["cluster_size"],
+            density=hyperparams["density"],
+            epochs=hyperparams["epochs"],
+            beta1=hyperparams["beta1"],
+            beta2=hyperparams["beta2"],
+            weight_decay=hyperparams["weight_decay"],
+            validation_freq=1,  # Validate every epoch during search
+            seed=hyperparams.get("seed", 42),
+            resume_from_epoch=resume_from_epoch,
+        )
 
-    print(f"Running: {' '.join(cmd)}")
+        return val_loss, val_accuracy
 
-    # Run training subprocess
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        print(f"Training failed with error: {result.stderr}")
-        # Return poor metrics to skip this combination
-        return 999.0, 0.0, 999.0
-
-    # Parse output to extract final validation metrics
-    # This is a simple approach - could be improved with structured logging
-    lines = result.stdout.split("\n")
-    val_loss = None
-    val_accuracy = None
-    train_loss = None
-
-    for line in reversed(lines):
-        if "Val Loss:" in line and "Val Acc:" in line:
-            try:
-                parts = line.split("|")
-                val_part = [p for p in parts if "Val Loss:" in p][0]
-                acc_part = [p for p in parts if "Val Acc:" in p][0]
-
-                val_loss = float(val_part.split("Val Loss:")[1].strip())
-                val_accuracy = float(acc_part.split("Val Acc:")[1].strip())
-            except (IndexError, ValueError) as e:
-                print(f"Could not parse validation metrics: {e}")
-                continue
-        elif "Train Loss:" in line and train_loss is None:
-            try:
-                parts = line.split("|")
-                train_part = [p for p in parts if "Train Loss:" in p][0]
-                train_loss = float(train_part.split("Train Loss:")[1].strip())
-            except (IndexError, ValueError):
-                continue
-
-        if val_loss is not None and val_accuracy is not None and train_loss is not None:
-            break
-
-    # Default values if parsing failed
-    if val_loss is None:
-        val_loss = 999.0
-    if val_accuracy is None:
-        val_accuracy = 0.0
-    if train_loss is None:
-        train_loss = 999.0
-
-    return val_loss, val_accuracy, train_loss
+    except Exception as e:
+        print(f"Hyperparameter optimization failed with error: {e}")
+        # Re-raise the exception to fail explicitly
+        raise
 
 
 def main():
@@ -181,28 +122,26 @@ def main():
                     break
 
         try:
-            val_loss, val_accuracy, train_loss = run_training(
+            val_loss, val_accuracy = run_training_with_hyperparams(
                 hyperparams, results_dir, resume_from_epoch
             )
 
-            # Save result
+            # Save result (train_loss set to 0.0 since we're only evaluating)
             result = ValidationResult(
                 hyperparams=hyperparams,
                 val_loss=val_loss,
                 val_triplet_accuracy=val_accuracy,
-                train_loss=train_loss,
+                train_loss=0.0,  # Not applicable for evaluation-only mode
                 epoch=hyperparams["epochs"],
                 completed_epoch=hyperparams["epochs"],  # Mark as fully completed
             )
 
             search_results.add_result(result)
-            print(
-                f"Result: Val Loss={val_loss:.4f}, Val Acc={val_accuracy:.4f}, Train Loss={train_loss:.4f}"
-            )
+            print(f"Result: Val Loss={val_loss:.4f}, Val Acc={val_accuracy:.4f}")
 
         except Exception as e:
             print(f"Error running combination {hyperparams}: {e}")
-            continue
+            raise
 
     # Print best results
     best = search_results.get_best_result()
@@ -211,7 +150,6 @@ def main():
         print(f"Hyperparameters: {best.hyperparams}")
         print(f"Validation Loss: {best.val_loss:.4f}")
         print(f"Validation Accuracy: {best.val_triplet_accuracy:.4f}")
-        print(f"Train Loss: {best.train_loss:.4f}")
 
         # Save best hyperparameters separately for easy access
         best_path = results_dir / "best_hyperparams.json"
@@ -235,4 +173,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
