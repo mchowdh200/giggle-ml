@@ -1,2 +1,7 @@
 - Seqpare
   - Self-consistent metric. Due to the triangle inequality holding, I can make assumptions about the relative similarity between A and C where A and C are both independently close to B. This lets me trivially sample clusters seqpare-based KNN results.
+- Triplet Loss vs Contrastive Loss. Both are applicable to learn the metric.
+  - Expensive: training on embed **sets**, with a foundation model (hyena DNA) that embeds individual elements. To compute the loss, we have embed repeatedly on a sample to approximate the mean embeddings of the set.
+  - Mining triplets within the batch allows us to reuse set embeddings (expensive).
+  - Triplet loss theoretical benefits. Due to all items in the batch being mutually related, the loss more directly reflects the intended structure of the embedding space.
+  - Online, hard triplet mining focuses on important examples. Efficiently, because all set embeddings are used for at least one triplet.
