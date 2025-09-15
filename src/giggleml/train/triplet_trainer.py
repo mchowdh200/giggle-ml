@@ -72,6 +72,20 @@ class IntervalClusterTripletFT(Module):
 
         return positives, negatives
 
+    def _get_rank_subset(self, batch: Tensor, all_embeds: Tensor, all_labels: Tensor) -> tuple[Tensor, Tensor]:
+        """Get this rank's subset of embeddings and labels from the batch."""
+        splits = partition_integer(len(batch), self.world_size)
+        my_start_cluster = sum(splits[: self.rank])
+        my_amnt_clusters = splits[self.rank]
+        my_embeds = batch[my_start_cluster : my_start_cluster + my_amnt_clusters].view(
+            -1, self.model.embed_dim
+        )
+        my_labels = all_labels[
+            my_start_cluster * batch.shape[1] : (my_start_cluster + my_amnt_clusters)
+            * batch.shape[1]
+        ]
+        return my_embeds, my_labels
+
     def _compute_loss_and_accuracy(
         self, anchors: Tensor, positives: Tensor, negatives: Tensor
     ) -> tuple[float, float]:
@@ -98,16 +112,7 @@ class IntervalClusterTripletFT(Module):
         all_embeds, all_labels = self._prepare_embeddings_and_labels(batch)
 
         # This rank operates on a subset of the batch
-        splits = partition_integer(len(batch), self.world_size)
-        my_start_cluster = sum(splits[: self.rank])
-        my_amnt_clusters = splits[self.rank]
-        my_embeds = batch[my_start_cluster : my_start_cluster + my_amnt_clusters].view(
-            -1, self.model.embed_dim
-        )
-        my_labels = all_labels[
-            my_start_cluster * batch.shape[1] : (my_start_cluster + my_amnt_clusters)
-            * batch.shape[1]
-        ]
+        my_embeds, my_labels = self._get_rank_subset(batch, all_embeds, all_labels)
 
         # Mine hard triplets using the shared method
         positives, negatives = self._mine_hard_triplets(
@@ -119,21 +124,24 @@ class IntervalClusterTripletFT(Module):
     def validation_step(self, batch: Tensor) -> tuple[float, float]:
         """
         Run validation on a batch and return loss and triplet accuracy.
-        Similar to training_step but with evaluation metrics.
+        Uses the same distributed strategy as training_step.
         """
         self.model.trainable_model.eval()
 
         with torch.no_grad():
             all_embeds, all_labels = self._prepare_embeddings_and_labels(batch)
 
+            # This rank operates on a subset of the batch (same as training_step)
+            my_embeds, my_labels = self._get_rank_subset(batch, all_embeds, all_labels)
+
             # Mine hard triplets using the shared method
             positives, negatives = self._mine_hard_triplets(
-                all_embeds, all_embeds, all_labels, all_labels
+                my_embeds, all_embeds, my_labels, all_labels
             )
 
             # Compute loss and accuracy using the shared method
             avg_loss, accuracy = self._compute_loss_and_accuracy(
-                all_embeds, positives, negatives
+                my_embeds, positives, negatives
             )
 
         self.model.trainable_model.train()
