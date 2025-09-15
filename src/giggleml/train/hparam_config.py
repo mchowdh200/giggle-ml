@@ -43,33 +43,34 @@ class HyperparameterConfig:
     def default(cls) -> "HyperparameterConfig":
         """Default hyperparameter search space."""
         return cls(
-            learning_rates=[1e-6, 1e-5, 2e-5, 5e-5, 1e-4],
+            learning_rates=[6e-4, 8e-4, 1e-3, 1.2e-3],
             margins=[0.5, 1.0, 1.5, 2.0, 3.0],
             batch_sizes=[8, 10, 12],  # Expand if memory allows
-            cluster_sizes=[8, 10, 12],  # Intervals per cluster
-            densities=[20, 30, 40],  # Intervals per candidate
-            positive_threshold=0.7,  # Fixed
-            epochs=[8, 10, 12],  # Training epochs
+            cluster_sizes=[8, 10, 12],  # Groups per cluster
+            densities=[20, 30, 40],  # Intervals per group
+            positive_threshold=0.05,  # Fixed
+            epochs=[10],  # Fixed
             # AdamW hyperparameters
-            betas_1=[0.85, 0.9, 0.95],  # AdamW beta1
-            betas_2=[0.99, 0.999, 0.9999],  # AdamW beta2
-            weight_decays=[0.0, 1e-4, 1e-3],  # Weight decay
+            betas_1=[0.9],  # Standard
+            betas_2=[0.999],  # Standard
+            weight_decays=[0.1],  # As used in HyenaDNA pre-training
         )
 
     @classmethod
     def conservative(cls) -> "HyperparameterConfig":
         """Conservative search space for faster experimentation."""
         return cls(
-            learning_rates=[1e-5, 2e-5, 5e-5],
-            margins=[1.0, 1.5, 2.0],
-            batch_sizes=[10],  # Keep fixed for memory
-            cluster_sizes=[10],  # Keep standard
-            densities=[30],  # Keep standard
-            positive_threshold=0.7,  # Fixed
-            epochs=[10],  # Keep standard
+            learning_rates=[6e-4, 8e-4, 1e-3, 1.2e-3],
+            margins=[0.5, 1.0, 1.5, 2.0, 3.0],
+            batch_sizes=[3],  # Fixed for speed
+            cluster_sizes=[3],  # Fixed for speed
+            densities=[20, 30, 40],  # Intervals per group
+            positive_threshold=0.05,  # Fixed
+            epochs=[2],  # Fixed
+            # AdamW hyperparameters
             betas_1=[0.9],  # Standard
             betas_2=[0.999],  # Standard
-            weight_decays=[0.0, 1e-4],  # Light regularization only
+            weight_decays=[0.1],  # As used in HyenaDNA pre-training
         )
 
     def grid_search_combinations(self) -> list[dict[str, Any]]:
