@@ -67,8 +67,13 @@ def get_available_rme_names(rme_dir: Path) -> list[str]:
     bed_files = itertools.chain(rme_dir.glob("*.bed"), rme_dir.glob("*.bed.gz"))
 
     for bed_file in bed_files:
-        # Remove .bed extension
-        name = bed_file.stem
+        # Remove .bed or .bed.gz extension
+        name = bed_file.name
+        if name.endswith('.bed.gz'):
+            name = name[:-7]  # Remove .bed.gz
+        elif name.endswith('.bed'):
+            name = name[:-4]  # Remove .bed
+        
         # Validate it's a proper tissue+chromatin state combination
         try:
             _ = cell_type_chrm_state_split(name)
