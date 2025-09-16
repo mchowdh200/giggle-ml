@@ -6,3 +6,4 @@
   - Triplet loss theoretical benefits. Due to all items in the batch being mutually related, the loss more directly reflects the intended structure of the embedding space.
   - Online, hard triplet mining focuses on important examples. Efficiently, because all set embeddings are used for at least one triplet.
 - Permutation invariant. Giggle, the inspiration, is permutation invariant to intervals. As is seqpare. And, a permutation invariant embedding architecture.
+- Naive set level triplet mining is too expensive. Already exceeding A100 80GB memory limits with a batch size of 16 and 20 intervals per item. 20 intervals is questionable because CLT kicks in at 40 as a rule of thumb. And 16 is very small for proper triplet mining. Additionally, maxing out GPU memory incurs a strong performance penalty because we have no reserve space for triplet mining over the overall combined batch between all GPUs. Changing strategies...
