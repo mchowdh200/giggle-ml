@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import cast, overload
+from typing import Any, cast, overload
 
 
 def fix_bed_ext[T: str | Path](path: T) -> T:
@@ -49,3 +49,8 @@ def as_path(path: str | Path | None) -> Path | None:
     if isinstance(path, str):
         return Path(path)
     return path
+
+
+def is_path_like(path: Any) -> bool:
+    """because isinstance(x, PathLike) doesn't work in general case"""
+    return isinstance(path, (str, bytes, os.PathLike))
