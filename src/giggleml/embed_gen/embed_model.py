@@ -171,37 +171,37 @@ class HyenaDNA(TrainableEmbedModel):
             # INFO: 2. inference
             outputs = self._model(**inputs, output_hidden_states=True).hidden_states
 
-        hidden: torch.Tensor = outputs[-1]  # shape (batch, seqMax, eDim)
-        batch_size, max_seq_len, hidden_dim = hidden.shape
+            hidden: torch.Tensor = outputs[-1]  # shape (batch, seqMax, eDim)
+            batch_size, max_seq_len, hidden_dim = hidden.shape
 
-        # sanity
-        assert batch_size == len(batch)
-        assert max_seq_len == self.max_seq_len
-        assert hidden_dim == self.embed_dim
+            # sanity
+            assert batch_size == len(batch)
+            assert max_seq_len == self.max_seq_len
+            assert hidden_dim == self.embed_dim
 
-        # INFO: 3. masked mean pooling
+            # INFO: 3. masked mean pooling
 
-        # [ 1, 2, 3 ]
-        seq_lens = torch.Tensor([len(item) for item in batch]).to(dev)
-        # -> [ [1], [2], [3] ]
-        seq_lens = seq_lens.unsqueeze(dim=1)
-        # [ 0 1 2 3 4 ... maxLen ]
-        indices = torch.arange(max_seq_len, device=dev)
-        # [ [10000...], [11000...], [11100...] ]
-        mask = (indices < seq_lens).float()
-        # to match the hidden dimension along the sequence length
-        mask = mask.unsqueeze(-1).expand(hidden.shape)
-        mask = mask.flip(dims=[1])  # because HyenaDNA pre-pads
+            # [ 1, 2, 3 ]
+            seq_lens = torch.tensor([len(item) for item in batch], dtype=torch.float32, device=dev, requires_grad=False)
+            # -> [ [1], [2], [3] ]
+            seq_lens = seq_lens.unsqueeze(dim=1)
+            # [ 0 1 2 3 4 ... maxLen ]
+            indices = torch.arange(max_seq_len, dtype=torch.float32, device=dev, requires_grad=False)
+            # [ [10000...], [11000...], [11100...] ]
+            mask = (indices < seq_lens).float()
+            # to match the hidden dimension along the sequence length
+            mask = mask.unsqueeze(-1).expand(hidden.shape)
+            mask = mask.flip(dims=[1])  # because HyenaDNA pre-pads
 
-        # zero values corresponding to padded regions
-        hidden = hidden * mask
-        # mean aggregation, removes seqMax dimension
-        hidden = torch.sum(hidden, dim=1)
-        # clamp ensures no divide by zero issue
-        hidden /= torch.clamp(seq_lens, min=1e-9)
+            # zero values corresponding to padded regions
+            hidden = hidden * mask
+            # mean aggregation, removes seqMax dimension
+            hidden = torch.sum(hidden, dim=1)
+            # clamp ensures no divide by zero issue
+            hidden /= torch.clamp(seq_lens, min=1e-9)
 
-        # hidden = torch.mean(hidden.float(), dim=1)
-        return hidden  # pyright: ignore[reportReturnType]
+            # hidden = torch.mean(hidden.float(), dim=1)
+            return hidden  # pyright: ignore[reportReturnType]
 
     @override
     def __repr__(self):

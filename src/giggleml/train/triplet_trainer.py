@@ -126,7 +126,9 @@ class IntervalClusterTripletFT(Module):
         Run validation on a batch and return loss and triplet accuracy.
         Uses the same distributed strategy as training_step.
         """
-        self.model.trainable_model.eval()
+        # Use wrapped model if available, otherwise fall back to unwrapped
+        model_to_control = getattr(self, 'wrapped_model', self.model.trainable_model)
+        model_to_control.eval()
 
         with torch.no_grad():
             all_embeds, all_labels = self._prepare_embeddings_and_labels(batch)
@@ -144,5 +146,5 @@ class IntervalClusterTripletFT(Module):
                 my_embeds, positives, negatives
             )
 
-        self.model.trainable_model.train()
+        model_to_control.train()
         return avg_loss, accuracy

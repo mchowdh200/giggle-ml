@@ -11,7 +11,7 @@
 
 #SBATCH --job-name=giggleML
 #SBATCH --output=jobOutput
-#SBATCH --time=0-10:00:00
+#SBATCH --time=1-00:00:00
 
 clear
 echo Starting job.
@@ -25,6 +25,6 @@ uv pip install -e .
 data="data"
 # time python3 scripts/roadmapEpigenomicsEmbeds.py $data/roadmap_epigenomics $data/hg/hg19.fa
 # time snakemake --cores 1 all
-time uv run scripts/temp.py
+time uv run scripts/hparam_search.py
 
 echo Complete.

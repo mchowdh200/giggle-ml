@@ -103,7 +103,7 @@ def run_training(
     # ---------------------------------
 
     # paths
-    rme_dir = Path("data/rme_small")
+    rme_dir = Path("data/roadmap_epigenomics")
     rme_beds = Path(rme_dir, "beds")
     seqpare_dir = Path(rme_dir, "seqpareRanks")
     training_dir = Path("models/hdna_seqpare_08092025")
@@ -180,7 +180,7 @@ def run_training(
     beta2 = beta2 or 0.999
     weight_decay = weight_decay or 0.0
 
-    emodel: EmbedModel = HyenaDNA("1k", training=True)
+    emodel: EmbedModel = HyenaDNA("16k", training=True)
     optimizer = optim.AdamW(
         lr=learning_rate,
         params=emodel.trainable_model.parameters(),
