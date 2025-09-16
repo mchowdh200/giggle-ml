@@ -51,7 +51,7 @@ class HyenaDNA(TrainableEmbedModel):
 
     def __init__(self, size: str = "1k", training=False):
         """
-        Supported sizes: { 1k, 32k, 160k, 450k, 1m } corresponding to:
+        Supported sizes: { 1k, 16k, 32k, 160k, 450k, 1m } corresponding to:
             hyenadna-tiny-1k-seqlen: 1024,
             hyenadna-small-32k-seqlen: 32768,
             hyenadna-medium-160k-seqlen: 160000,
@@ -60,14 +60,24 @@ class HyenaDNA(TrainableEmbedModel):
         """
 
         details = {
-            "1k": (1024, "LongSafari/hyenadna-tiny-1k-seqlen-hf", 128, "e8c1eff"),
+            "1k": (
+                1024,
+                "LongSafari/hyenadna-tiny-1k-seqlen-hf",
+                128,
+                "e8c1eff",
+            ),
             "16k": (
                 16386,
                 "LongSafari/hyenadna-tiny-16k-seqlen-d128-hf",
                 128,
                 "d79fa37",
             ),
-            "32k": (32768, "LongSafari/hyenadna-small-32k-seqlen-hf", 256, "8fe770c"),
+            "32k": (
+                32768,
+                "LongSafari/hyenadna-small-32k-seqlen-hf",
+                256,
+                "8fe770c",
+            ),
             "160k": (
                 160000,
                 "LongSafari/hyenadna-medium-160k-seqlen-hf",
@@ -80,7 +90,12 @@ class HyenaDNA(TrainableEmbedModel):
                 256,
                 "42dedd4",
             ),
-            "1m": (1_000_000, "LongSafari/hyenadna-large-1m-seqlen-hf", 256, "0a629ab"),
+            "1m": (
+                1_000_000,
+                "LongSafari/hyenadna-large-1m-seqlen-hf",
+                256,
+                "0a629ab",
+            ),
         }
 
         if size not in details:
