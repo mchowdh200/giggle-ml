@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+from pathlib import Path
 
 from giggleml.data_wrangling import fasta
 from giggleml.data_wrangling.interval_dataset import BedDataset
@@ -63,3 +65,57 @@ def test_unified_dataset():
     for i in walk:
         # tests random access
         assert expect[i] == uni_set[i]
+
+
+def test_to_gpu_serializable_with_dict():
+    """Test to_gpu_serializable with fasta dict input"""
+    fasta_dict = {'chr1': 'ATCG', 'chr2': 'GCTA'}
+    
+    def tokenizer(seq):
+        mapping = {'A': 0, 'T': 1, 'C': 2, 'G': 3}
+        return torch.tensor([mapping[c] for c in seq], dtype=torch.long)
+    
+    tokens, offsets, sizes, chr_to_idx = fasta.to_gpu_serializable(fasta_dict, tokenizer)
+    
+    # Check shapes and types
+    assert isinstance(tokens, torch.Tensor)
+    assert isinstance(offsets, torch.Tensor)
+    assert isinstance(sizes, torch.Tensor)
+    assert isinstance(chr_to_idx, dict)
+    
+    # Check values
+    expected_tokens = torch.tensor([0, 1, 2, 3, 3, 2, 1, 0], dtype=torch.long)
+    expected_offsets = torch.tensor([0, 4], dtype=torch.long)
+    expected_sizes = torch.tensor([4, 4], dtype=torch.long)
+    expected_chr_to_idx = {'chr1': 0, 'chr2': 1}
+    
+    assert torch.equal(tokens, expected_tokens)
+    assert torch.equal(offsets, expected_offsets)
+    assert torch.equal(sizes, expected_sizes)
+    assert chr_to_idx == expected_chr_to_idx
+
+
+def test_to_gpu_serializable_with_path():
+    """Test to_gpu_serializable with file path input"""
+    def tokenizer(seq):
+        mapping = {'A': 0, 'T': 1, 'C': 2, 'G': 3}
+        return torch.tensor([mapping[c] for c in seq], dtype=torch.long)
+    
+    # Test with string path
+    tokens_str, offsets_str, sizes_str, chr_to_idx_str = fasta.to_gpu_serializable("tests/test.fa", tokenizer)
+    
+    # Test with Path object
+    path_obj = Path("tests/test.fa")
+    tokens_path, offsets_path, sizes_path, chr_to_idx_path = fasta.to_gpu_serializable(path_obj, tokenizer)
+    
+    # Check that both approaches produce equivalent results
+    assert torch.equal(tokens_str, tokens_path)
+    assert torch.equal(offsets_str, offsets_path)
+    assert torch.equal(sizes_str, sizes_path)
+    assert chr_to_idx_str == chr_to_idx_path
+    
+    # Check basic properties
+    assert isinstance(tokens_str, torch.Tensor)
+    assert len(chr_to_idx_str) > 0  # Should have chromosomes
+    assert len(offsets_str) == len(sizes_str)  # Should be aligned
+    assert len(offsets_str) == len(chr_to_idx_str)  # One per chromosome
