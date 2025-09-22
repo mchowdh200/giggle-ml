@@ -17,22 +17,25 @@ from giggleml.data_wrangling.unified_dataset import UnifiedDataset
 
 from ..data_wrangling.interval_dataset import IntervalDataset
 from ..utils.guess_device import guess_device
-from ..utils.types import GenomicInterval
+from ..utils.types import GenomicInterval, lazy
 from .block_distributed_sampler import BlockDistributedSampler
 from .embed_model import EmbedModel
 
 
 @final
-class FastaCollate:
-    def __init__(self, fasta: Path):
-        self.fasta = fasta
+@lazy
+class _Collate[T, U]:
+    def __init__(self, fasta_path: Path | None, post: Callable[[T], U]):
+        self.fasta_path: Path | None = fasta_path
+        self.post = post
 
-    def __call__(self, batch: Sequence[GenomicInterval]):
-        return fasta.map(batch, self.fasta)
+    def __call__(self, batch: Sequence[GenomicInterval]) -> U:
+        if self.fasta_path is not None:
+            inputs = fasta.map(batch, self.fasta_path)
+        else:
+            inputs = batch
 
-
-def pass_collate(batch: Sequence[GenomicInterval]):
-    return batch
+        return self.post(inputs)  # pyright: ignore[reportArgumentType]
 
 
 @final
@@ -131,14 +134,14 @@ class BatchInfer:
 
         rprint = lambda *args: print(f"[{rank}]:", *args)
 
-        fasta: Path | None = None
+        fasta_path: Path | None = None
 
         for dataset in datasets:
             dataset_fasta = dataset.associated_fasta_path
 
-            if fasta is None:
-                fasta = dataset_fasta
-            elif fasta != dataset_fasta:
+            if fasta_path is None:
+                fasta_path = dataset_fasta
+            elif fasta_path != dataset_fasta:
                 # TODO: this constraint could be avoided
                 raise ValueError("Expecting all datasets to have same fasta path")
 
@@ -149,12 +152,12 @@ class BatchInfer:
         wants_seq = self.model.wants == "sequences"
         e_dim = self.model.embed_dim
 
-        if wants_seq:
-            if fasta is None:
-                raise ValueError("Unable to map to fasta; missing associatedFastaPath")
-            collate = FastaCollate(fasta)
-        else:
-            collate = pass_collate
+        # INFO: compose the  collate function
+
+        if wants_seq and fasta_path is None:
+            raise ValueError("Unable to map to fasta; missing associatedFastaPath")
+
+        collate = _Collate(fasta_path, self.model.collate)
 
         # INFO: In-memory only case:
         # processes the entire input disregarded potential concurrent workers

@@ -9,7 +9,7 @@ from transformers import AutoTokenizer
 from transformers.models.auto.modeling_auto import AutoModel
 from typing_extensions import override
 
-from ..utils.types import GenomicInterval
+from giggleml.utils.types import GenomicInterval
 
 # INFO: !! Currently all modules assume "embedding vectors" are float32.
 
@@ -23,10 +23,16 @@ class EmbedModel(ABC):
     max_seq_len: int | None  # Maximum sequence length the model can handle
     embed_dim: int  # Dimension of the output embeddings
 
-    def embed(self, batch: Sequence[Any]) -> torch.FloatTensor:
+    def collate(self, batch: Sequence[Any]) -> Any:
+        """Pre-process the batch of inputs before it reaches the embed call"""
+        return batch
+
+    @abstractmethod
+    def embed(self, batch: Any) -> torch.FloatTensor:
         """Embed a batch of inputs and return tensor embeddings."""
         ...
 
+    @abstractmethod
     def to(self, device: Device) -> Self: ...
 
     @abstractmethod
@@ -121,6 +127,10 @@ class HyenaDNA(TrainableEmbedModel):
     def trainable_model(self):
         return self._model
 
+    @property
+    def dev(self):
+        return self._model.device
+
     @cached_property
     def _model(self):
         model: Any = AutoModel.from_pretrained(
@@ -142,7 +152,7 @@ class HyenaDNA(TrainableEmbedModel):
         return AutoTokenizer.from_pretrained(self.checkpoint, trust_remote_code=True)
 
     @override
-    def embed(self, batch: Sequence[str]) -> torch.FloatTensor:
+    def collate(self, batch: Sequence[str]) -> dict[str, torch.Tensor]:
         if self.max_seq_len is None:
             raise ValueError("How did this HyenaDNA instance get a None maxSeqLen?")
 
@@ -165,33 +175,56 @@ class HyenaDNA(TrainableEmbedModel):
                 return_tensors="pt",
             )
 
-            dev = self._model.device
-            inputs = {k: v.to(dev, non_blocking=True) for k, v in tokenized.items()}
+            inputs: dict[str, torch.Tensor] = {
+                k: v.to(self.dev, non_blocking=True) for k, v in tokenized.items()
+            }
 
+            # INFO: 2. create attention mask for masked mean pooling
+            input_ids = inputs["input_ids"]
+            seq_lens = torch.tensor(
+                [len(item) for item in batch],
+                dtype=torch.float32,
+                device=self.dev,
+                requires_grad=False,
+            )
+            seq_lens = seq_lens.unsqueeze(dim=1)
+            indices = torch.arange(
+                self.max_seq_len,
+                dtype=torch.float32,
+                device=self.dev,
+                requires_grad=False,
+            )
+            mask = (indices < seq_lens).float()
+            mask = mask.unsqueeze(-1)
+            mask = mask.flip(dims=[1])  # because HyenaDNA pre-pads
+
+            inputs["attention_mask"] = mask
+
+            return inputs
+
+    @override
+    def embed(self, batch: dict[str, torch.Tensor]) -> torch.FloatTensor:
+        with torch.set_grad_enabled(self.training):
             # INFO: 2. inference
-            outputs = self._model(**inputs, output_hidden_states=True).hidden_states
+            inputs = batch["input_ids"]
+            outputs = self._model(
+                input_ids=inputs, output_hidden_states=True
+            ).hidden_states
 
             hidden: torch.Tensor = outputs[-1]  # shape (batch, seqMax, eDim)
             batch_size, max_seq_len, hidden_dim = hidden.shape
 
             # sanity
-            assert batch_size == len(batch)
+            assert batch_size == len(inputs)
             assert max_seq_len == self.max_seq_len
             assert hidden_dim == self.embed_dim
 
-            # INFO: 3. masked mean pooling
+            # INFO: 3. masked mean pooling using precomputed mask
+            mask = batch["attention_mask"]
+            mask = mask.expand(hidden.shape)
 
-            # [ 1, 2, 3 ]
-            seq_lens = torch.tensor([len(item) for item in batch], dtype=torch.float32, device=dev, requires_grad=False)
-            # -> [ [1], [2], [3] ]
-            seq_lens = seq_lens.unsqueeze(dim=1)
-            # [ 0 1 2 3 4 ... maxLen ]
-            indices = torch.arange(max_seq_len, dtype=torch.float32, device=dev, requires_grad=False)
-            # [ [10000...], [11000...], [11100...] ]
-            mask = (indices < seq_lens).float()
-            # to match the hidden dimension along the sequence length
-            mask = mask.unsqueeze(-1).expand(hidden.shape)
-            mask = mask.flip(dims=[1])  # because HyenaDNA pre-pads
+            # calculate sequence lengths from mask for normalization
+            seq_lens = mask.sum(dim=1)[:, 0].unsqueeze(1)
 
             # zero values corresponding to padded regions
             hidden = hidden * mask
@@ -200,7 +233,6 @@ class HyenaDNA(TrainableEmbedModel):
             # clamp ensures no divide by zero issue
             hidden /= torch.clamp(seq_lens, min=1e-9)
 
-            # hidden = torch.mean(hidden.float(), dim=1)
             return hidden  # pyright: ignore[reportReturnType]
 
     @override
@@ -277,13 +309,17 @@ class CountACGT(EmbedModel):
         return self
 
     @override
-    def embed(self, batch: Sequence[str]):
-        results = list()
-
+    def collate(self, batch: Sequence[str]) -> Sequence[str]:
         for item in batch:
             if self.max_seq_len is not None and len(item) > self.max_seq_len:
                 raise ValueError("Sequence exceeds max length; refusing to truncate.")
+        return batch
 
+    @override
+    def embed(self, batch: Sequence[str]) -> torch.FloatTensor:
+        results = list()
+
+        for item in batch:
             counts = [0, 0, 0, 0]
 
             for char in item:
@@ -317,13 +353,17 @@ class TrivialModel(EmbedModel):
         return self
 
     @override
+    def collate(self, batch: Sequence[GenomicInterval]) -> Sequence[GenomicInterval]:
+        for item in batch:
+            if self.max_seq_len is not None and len(item) > self.max_seq_len:
+                raise ValueError("Sequence exceeds max length; refusing to truncate.")
+        return batch
+
+    @override
     def embed(self, batch: Sequence[GenomicInterval]) -> torch.FloatTensor:
         results = list()
 
         for item in batch:
-            if self.max_seq_len is not None and len(item) > self.max_seq_len:
-                raise ValueError("Sequence exceeds max length; refusing to truncate.")
-
             _, start, end = item
             results.append(end - start)
 

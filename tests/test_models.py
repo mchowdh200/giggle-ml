@@ -7,7 +7,7 @@ from giggleml.utils.guess_device import guess_device
 def test_hyena_dna():
     model = HyenaDNA("1k")
     model.to(guess_device())
-    results = model.embed(["ACGTTGCA", "ACT"]).cpu()
+    results = model.embed(model.collate(["ACGTTGCA", "ACT"])).cpu()
 
     assert len(results) == 2
 
