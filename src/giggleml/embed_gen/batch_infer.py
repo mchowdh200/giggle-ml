@@ -221,7 +221,7 @@ class BatchInfer:
                 timeout=timedelta(
                     seconds=len(master_dataset) / self.worker_count * 0.5
                 ),
-                device_id=(device if device.type == "cuda" else None),
+                device_id=(device if device.type == "cuda" else None),  # pyright: ignore
             )
 
             if not dist.is_initialized():
