@@ -1,11 +1,11 @@
-import math
 from abc import ABC
 from collections.abc import Iterable
+from math import floor, log2
 from typing import Any, final, override
 
 import numpy as np
 
-from giggleml.utils.interval_arithmetic import intersect
+from giggleml.utils.interval_arithmetic import overlap_degree
 
 from .utils.types import GenomicInterval
 
@@ -129,73 +129,76 @@ class Slide(IntervalTransform):
 
 @final
 class Tiling(IntervalTransform):
-    """
-    Simulates a tiling. Implemented for a new embedding procedure where intervals
-    are broken down into representative tiles that would have been pre-embedded.
-    """
-
-    def __init__(self, tile_size: int, octaves: int = 1):
-        """
-        @param octaves: the second octave is twice the size as the fundamental
-        """
-
+    def __init__(
+        self,
+        tile_size: int,
+        octaves: int = 1,
+        offsets: int = 1,
+    ):
         if octaves < 1:
             raise ValueError(f"Expecting octaves ({octaves}) >= 1")
 
         self.octave_amnt = octaves
-        self.tile_sizes = [tile_size * int(2**i) for i in range(octaves)]
+        self._base_size = tile_size
 
-    def tile(self, interval: GenomicInterval, level: int | None = None) -> Iterable[list[int]]:
+        if offsets < 1:
+            raise ValueError(f"Expecting at least 1 offset, got {offsets}")
+        self.offsets = offsets
+
+    def _tile(self, interval: GenomicInterval) -> Iterable[GenomicInterval]:
+        """
+        Recursively tiles an interval using the Greedy Midpoint Snapping algorithm.
+        """
         chrm, start, end = interval
+        length = end - start
 
-        level = self.octave_amnt - 1 if level is None else level
-        assert level < self.octave_amnt
+        # --- STEP 1: SELECT TILE SIZE ---
+        if length < self._base_size:
+            octave_size = self._base_size
+        else:
+            octave_idx = floor(log2(length / self._base_size))
+            octave_idx = min(octave_idx, self.octave_amnt - 1)
+            octave_size = self._base_size * (2**octave_idx)
 
-        if end - start == 0:
-            yield from [list() for _ in range(level + 1)]
-            return
-
-        if level > 0:
-            # --- case 1)  greedily take biggest tiles -within- the target
-            octave_size = self.tile_sizes[level]
-            # round start/end to fundamental to give larger octaves more opportunity,
-            #  but don't round start/end in general so that the final layer can
-            #  interpolate properly
-            round_start = round(start / self.tile_sizes[0]) * self.tile_sizes[0]
-            round_end = round(end / self.tile_sizes[0]) * self.tile_sizes[0]
-            start_idx = math.ceil(round_start / octave_size)
-            end_idx = math.floor(round_end / octave_size)
-
-            if start_idx >= end_idx:
-                yield from self.tile(interval, level - 1)
-                yield list()
+            if octave_idx < 0:
                 return
 
-            # attempt to tile the tips with smaller tiles
-            for list1, list2 in zip(
-                self.tile((chrm, start, start_idx * octave_size), level - 1),
-                self.tile((chrm, end_idx * octave_size, end), level - 1),
-            ):
-                yield list1 + list2
+        # --- STEP 2: FIND BEST POSITION (THE "SNAP") ---
+        interval_mid = start + length / 2
+        midpoint_grid_spacing = octave_size / self.offsets
+        snapped_midpoint = (
+            round(interval_mid / midpoint_grid_spacing) * midpoint_grid_spacing
+        )
 
-            yield list(range(start_idx, end_idx))
-        else:
-            # --- case 2)  force fill the remainder with smallest tiles
-            octave_size = self.tile_sizes[level]
-            start_idx = start // octave_size
-            end_idx = (end - 1) // octave_size
-            yield list(range(start_idx, end_idx + 1))
+        # --- STEP 3: PLACE TILE ---
+        tile_start = round(snapped_midpoint - octave_size / 2)
+        tile_end = tile_start + octave_size
+        tile = (chrm, tile_start, tile_end)
+
+        # --- Don't yield small tiles with <50% overlap ---
+        overlap_length = overlap_degree(interval, tile)
+
+        if overlap_length < (tile_end - tile_start) / 2:
+            return
+
+        # Yield the greedily chosen best-fit tile
+        yield (chrm, tile_start, tile_end)
+
+        # --- STEP 4: RECURSE on the tips ---
+        # Left tip
+        left_tip_interval = (chrm, start, tile_start)
+        yield from self._tile(left_tip_interval)
+
+        # Right tip
+        right_tip_interval = (chrm, tile_end, end)
+        yield from self._tile(right_tip_interval)
 
     @override
     def __call__(self, interval: GenomicInterval) -> Iterable[GenomicInterval]:
-        chrm, _, _ = interval
-
-        for i, chunks in enumerate(self.tile(interval)):
-            octave_size = self.tile_sizes[i]
-
-            for tile_idx in chunks:
-                tile_start = tile_idx * octave_size
-                yield (chrm, tile_start, tile_start + octave_size)
+        """
+        Generates the set of tiles covering the interval using the greedy algorithm.
+        """
+        yield from self._tile(interval)
 
     def weights(
         self, intervals: Iterable[GenomicInterval]
@@ -208,9 +211,7 @@ class Tiling(IntervalTransform):
             chunk_weight = 0
 
             for term in terms:
-                overlap = intersect(term, base)
-                assert overlap is not None
-                amnt = overlap[2] - overlap[1]
+                amnt = overlap_degree(term, base)
                 chunk_weight += amnt
                 chunk.append(amnt)
 

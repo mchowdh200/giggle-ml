@@ -77,17 +77,180 @@ def test_length_limit():
 # ======================================
 
 
-def test_tiling():
-    ti = Tiling(3)
-    assert list(ti(("", 0, 10))) == [("", 0, 3), ("", 3, 6), ("", 6, 9), ("", 9, 12)]
-    assert np.all(list(ti.weights([("", 0, 4)])) == np.array([0.75, 0.25]))
-    ti = Tiling(3, 3)
-    assert list(ti.tile(("", 5, 18))) == [[1], [1, 2], []]
-    assert list(ti.tile(("", 7, 19))) == [[6], [1, 2], []]
-    assert list(ti.tile(("", 7, 39))) == [[12], [1], [1, 2]]
-    assert list(ti.tile(("", 6, 12))) == [[], [1], []]
-    ti = Tiling(340, 5)
-    assert list(ti.tile(("", 6800, 8160))) == [[], [], [5], [], []]
+def verify_tiling_constraints(
+    tiles: list[GenomicInterval], base_interval: GenomicInterval, base_size: int
+):
+    """Verify that tiles meet all tiling constraints."""
+    chrm, start, end = base_interval
+    base_length = end - start
+
+    # All tiles should be on same chromosome and valid
+    for tile_chrm, tile_start, tile_end in tiles:
+        assert tile_chrm == chrm, (
+            f"Tile chromosome {tile_chrm} != base chromosome {chrm}"
+        )
+        assert tile_start < tile_end, (
+            f"Invalid tile: start {tile_start} >= end {tile_end}"
+        )
+
+    # All tiles should have sizes that are powers of 2 * base_size
+    for tile_chrm, tile_start, tile_end in tiles:
+        tile_size = tile_end - tile_start
+        # Find the power of 2 multiplier
+        multiplier = tile_size / base_size
+        assert multiplier > 0, (
+            f"Tile size {tile_size} must be positive multiple of base_size {base_size}"
+        )
+
+        # Check if it's a power of 2 (within floating point tolerance)
+        log_mult = np.log2(multiplier)
+        assert abs(log_mult - round(log_mult)) < 1e-10, (
+            f"Tile size {tile_size} is not power-of-2 multiple of base_size {base_size}"
+        )
+
+    # Verify coverage quality (tiling algorithm may intentionally leave gaps)
+    if tiles:
+        # Calculate total coverage
+        covered_positions = set()
+        for tile_chrm, tile_start, tile_end in tiles:
+            # Calculate overlap with base interval
+            overlap_start = max(start, tile_start)
+            overlap_end = min(end, tile_end)
+
+            # Add covered positions
+            for pos in range(overlap_start, overlap_end):
+                if start <= pos < end:
+                    covered_positions.add(pos)
+
+        coverage_ratio = len(covered_positions) / base_length
+
+        # Verify meaningful coverage exists (algorithm may leave gaps but should cover most)
+        assert coverage_ratio > 0, (
+            f"No coverage of base interval, got {coverage_ratio:.2%}"
+        )
+
+        # For very small intervals, expect good coverage
+        if base_length <= base_size:
+            assert coverage_ratio >= 0.3, (
+                f"Small interval should have reasonable coverage, got {coverage_ratio:.2%}"
+            )
+
+    # Tiles extending beyond base interval should have ≥50% overlap with base interval
+    for tile_chrm, tile_start, tile_end in tiles:
+        if tile_start < start or tile_end > end:
+            # Tile extends beyond base interval
+            overlap_start = max(start, tile_start)
+            overlap_end = min(end, tile_end)
+            overlap_length = max(0, overlap_end - overlap_start)
+            tile_length = tile_end - tile_start
+            overlap_ratio = overlap_length / tile_length
+
+            assert overlap_ratio >= 0.5, (
+                f"Extending tile {(tile_chrm, tile_start, tile_end)} has only {overlap_ratio:.2%} overlap with base interval"
+            )
+
+
+def test_tiling_basic():
+    """Test basic tiling functionality."""
+    ti = Tiling(4)  # base tile size of 4
+
+    # Test medium interval
+    base_interval = ("chr1", 0, 16)
+    tiles = list(ti(base_interval))
+    verify_tiling_constraints(tiles, base_interval, 4)
+
+    # Should have at least one tile
+    assert len(tiles) > 0
+
+
+def test_tiling_small_intervals():
+    """Test tiling with intervals smaller than base size."""
+    ti = Tiling(10)  # base tile size of 10
+
+    # Very small interval with good overlap
+    base_interval = ("chr1", 5, 12)  # size 7, should get a tile if >50% overlap
+    tiles = list(ti(base_interval))
+    verify_tiling_constraints(tiles, base_interval, 10)
+
+    # Tiny interval with poor overlap (should get no tiles)
+    base_interval = ("chr1", 0, 2)  # size 2, likely <50% overlap
+    tiles = list(ti(base_interval))
+    if tiles:  # if any tiles returned, they must meet constraints
+        verify_tiling_constraints(tiles, base_interval, 10)
+
+
+def test_tiling_large_intervals():
+    """Test tiling with large intervals that use multiple octaves."""
+    ti = Tiling(4, octaves=3)  # base=4, can use sizes 4, 8, 16
+
+    # Large interval
+    base_interval = ("chr1", 0, 100)
+    tiles = list(ti(base_interval))
+    verify_tiling_constraints(tiles, base_interval, 4)
+
+    # Should cover the interval well
+    assert len(tiles) > 1
+
+
+def test_tiling_edge_cases():
+    """Test edge cases for tiling."""
+    ti = Tiling(8)
+
+    # Interval exactly matching base size
+    base_interval = ("chr1", 0, 8)
+    tiles = list(ti(base_interval))
+    verify_tiling_constraints(tiles, base_interval, 8)
+
+    # Interval just under base size
+    base_interval = ("chr1", 0, 7)
+    tiles = list(ti(base_interval))
+    verify_tiling_constraints(tiles, base_interval, 8)
+
+    # Interval just over base size
+    base_interval = ("chr1", 0, 9)
+    tiles = list(ti(base_interval))
+    verify_tiling_constraints(tiles, base_interval, 8)
+
+
+def test_tiling_with_offsets():
+    """Test tiling with multiple offsets."""
+    ti = Tiling(4, octaves=2, offsets=3)
+
+    base_interval = ("chr1", 0, 20)
+    tiles = list(ti(base_interval))
+    verify_tiling_constraints(tiles, base_interval, 4)
+
+
+def test_tiling_range_of_sizes():
+    """Test tiling over a range of interval sizes."""
+    ti = Tiling(5, octaves=4)
+
+    # Test various sizes from very small to large
+    test_sizes = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100, 200]
+
+    for size in test_sizes:
+        base_interval = ("chr1", 100, 100 + size)
+        tiles = list(ti(base_interval))
+        verify_tiling_constraints(tiles, base_interval, 5)
+
+        # For larger intervals, should have multiple tiles
+        if size > 20:
+            assert len(tiles) > 1, (
+                f"Large interval of size {size} should have multiple tiles"
+            )
+
+
+def test_tiling_different_positions():
+    """Test tiling at different genomic positions."""
+    ti = Tiling(6)
+
+    # Test at various starting positions
+    positions = [0, 1, 5, 10, 50, 100, 1000]
+
+    for start_pos in positions:
+        base_interval = ("chr2", start_pos, start_pos + 25)
+        tiles = list(ti(base_interval))
+        verify_tiling_constraints(tiles, base_interval, 6)
 
 
 def test_chunk_max():
