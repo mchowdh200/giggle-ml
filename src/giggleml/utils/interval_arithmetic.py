@@ -15,3 +15,12 @@ def intersect(x: GenomicInterval, y: GenomicInterval) -> GenomicInterval | None:
         return None
 
     return (ch1, start, end)
+
+
+def overlap_degree(x: GenomicInterval, y: GenomicInterval) -> int:
+    overlap = intersect(x, y)
+
+    if not overlap:
+        return 0
+
+    return overlap[2] - overlap[1]
