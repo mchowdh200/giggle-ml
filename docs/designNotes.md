@@ -24,7 +24,16 @@ Both are applicable to learn the metric.
   - There are (layers \* offsets per layer) full-genome tilings.
   - Interval -> Tile Composition Algorithm: greedy, picks the largest most centered tile within the interval first. Recursively tiles the remainder. Refuses to yield a tile that adds more "noise" than coverage.
 
-## Other
+## M Model
 
-- Permutation invariant. Giggle, the inspiration, is permutation invariant to intervals. As is seqpare. And, a permutation invariant embedding architecture.
-- Naive set level triplet mining is too expensive. Already exceeding A100 80GB memory limits with a batch size of 16 and 20 intervals per item. 20 intervals is questionable because CLT kicks in at 40 as a rule of thumb. And 16 is very small for proper triplet mining. Additionally, maxing out GPU memory incurs a strong performance penalty because we have no reserve space for triplet mining over the overall combined batch between all GPUs. Changing strategies...
+Why?
+
+- The system operates at set level; permutation invariant. Giggle, the inspiration, is permutation invariant to intervals. As is seqpare. And, a permutation invariant embedding architecture.
+- Naive set level triplet mining is too expensive. Already exceeding A100 80GB memory limits with a batch size of 16 and 20 intervals per item. 20 intervals is questionable because CLT kicks in at 40 as a rule of thumb. And 16 is very small for proper triplet mining. Additionally, maxing out GPU memory incurs a strong performance penalty because we have no reserve space for triplet mining over the combined batch between all GPUs.
+
+Deep sets architecture on HyenaDNA embeddings  
+`interval set --fasta--> sequence set --HyenaDNA--> sequence embeddings --M Model--> (a single) set embedding`
+
+HyenaDNA sequence embeddings across all sets in the batch are passed through $\phi$. We use gradient checkpointing over the $\phi$ MLP -- activations are thrown out, but inputs (into the MLP) cached. The loss can be calculated with a low memory footprint using this technique. The backward pass is efficient because gradient accumulation occurs automatically by pytorch. A running average over the $\phi$ gradients; no entire set of activations in memory at once. It's effectively no limit on the size of sets we can process because we've pushed the memory complexity into the time complexity and made the model lightweight.
+
+## Other
