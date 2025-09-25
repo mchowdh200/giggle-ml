@@ -6,7 +6,6 @@ import torch
 from torch.types import Device
 from typing_extensions import override
 
-
 # INFO: !! Currently all modules assume "embedding vectors" are float32.
 
 # ===================
@@ -24,7 +23,7 @@ class EmbedModel(ABC):
         return batch
 
     @abstractmethod
-    def embed(self, batch: Any) -> torch.FloatTensor:
+    def embed(self, batch: Any) -> torch.Tensor:
         """Embed a batch of inputs and return tensor embeddings."""
         ...
 
