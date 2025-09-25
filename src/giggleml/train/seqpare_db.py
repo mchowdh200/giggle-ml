@@ -66,7 +66,9 @@ class SeqpareDB:
                     continue  # skip unknown labels
 
                 item_id = self._labels[other_label]
-                positive = float(terms[4]) >= positive_threshold
+                # mapping into seqpare distance allows reasoning with the triangle inequality
+                distance = 1 - float(terms[4])
+                positive = distance <= positive_threshold
                 bits[item_id] = positive
 
             return bits
