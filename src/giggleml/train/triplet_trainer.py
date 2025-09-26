@@ -9,7 +9,7 @@ from torch import Tensor
 from torch.nn import Module
 from torch.types import Device
 
-from giggleml.embed_gen.embed_model import TrainableEmbedModel
+from giggleml.embed_gen.embed_model import EmbedModel
 from giggleml.utils.misc import partition_integer
 
 # Type alias for triplet loss function
@@ -22,14 +22,14 @@ class IntervalClusterTripletFT(Module):
         world_size: int,
         rank: int,
         device: Device,
-        model: TrainableEmbedModel,
+        model: EmbedModel,
         loss: Loss3,
     ):
         super().__init__()
         self.world_size: int = world_size
         self.rank: int = rank
         self.device: Device = device
-        self.model: TrainableEmbedModel = model
+        self.model: EmbedModel = model
         self.loss: Loss3 = loss
 
     def _create_cluster_labels(self, batch: Tensor) -> Tensor:
@@ -72,7 +72,9 @@ class IntervalClusterTripletFT(Module):
 
         return positives, negatives
 
-    def _get_rank_subset(self, batch: Tensor, all_embeds: Tensor, all_labels: Tensor) -> tuple[Tensor, Tensor]:
+    def _get_rank_subset(
+        self, batch: Tensor, all_embeds: Tensor, all_labels: Tensor
+    ) -> tuple[Tensor, Tensor]:
         """Get this rank's subset of embeddings and labels from the batch."""
         splits = partition_integer(len(batch), self.world_size)
         my_start_cluster = sum(splits[: self.rank])
@@ -126,9 +128,7 @@ class IntervalClusterTripletFT(Module):
         Run validation on a batch and return loss and triplet accuracy.
         Uses the same distributed strategy as training_step.
         """
-        # Use wrapped model if available, otherwise fall back to unwrapped
-        model_to_control = getattr(self, 'wrapped_model', self.model.trainable_model)
-        model_to_control.eval()
+        self.model.eval()
 
         with torch.no_grad():
             all_embeds, all_labels = self._prepare_embeddings_and_labels(batch)
@@ -146,5 +146,5 @@ class IntervalClusterTripletFT(Module):
                 my_embeds, positives, negatives
             )
 
-        model_to_control.train()
+        self.model.train()
         return avg_loss, accuracy

@@ -83,7 +83,7 @@ class BatchInfer:
         in_memory_results = []
 
         for i, batch in enumerate(data_loader):
-            outputs = self.model.embed(batch).to("cpu")
+            outputs = self.model(batch).to("cpu")
             final_idx = next_idx + len(outputs)
 
             if in_memory:

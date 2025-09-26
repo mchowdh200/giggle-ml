@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from functools import cached_property
-from typing import Any, Self, final
+from typing import final
 
 import torch
 from torch.types import Device
@@ -8,14 +8,16 @@ from transformers import AutoTokenizer
 from transformers.models.auto.modeling_auto import AutoModel
 from typing_extensions import override
 
-from giggleml.embed_gen.embed_model import TrainableEmbedModel
+from giggleml.embed_gen.embed_model import EmbedModel
 
 
 @final
-class HyenaDNA(TrainableEmbedModel):
+class HyenaDNA(EmbedModel):
     wants = "sequences"
 
-    def __init__(self, size: str = "1k", training=False):
+    def __init__(self, size: str = "1k"):
+        super().__init__()
+
         """
         Supported sizes: { 1k, 16k, 32k, 160k, 450k, 1m } corresponding to:
             hyenadna-tiny-1k-seqlen: 1024,
@@ -76,40 +78,27 @@ class HyenaDNA(TrainableEmbedModel):
         self.checkpoint = name
         self.embed_dim: int = e_dim
         self.size_type = size  # used for __repr__ only
-        self.training = training
-
-    @override
-    def to(self, device: Device) -> Self:
-        return self._model.to(device)
-
-    @property
-    @override
-    def trainable_model(self):
-        return self._model
-
-    @property
-    def dev(self):
-        return self._model.device
 
     @cached_property
     def _model(self):
-        model: Any = AutoModel.from_pretrained(
+        # WARN: HyenaDNA cannot be torch.compile(.)ed because the Hyena layers
+        # use FFT which is fundamentally based on complex numbers. TorchInductor
+        # does not support complex operators (4/30/2025)
+        # model = torch.compile(model)
+        return AutoModel.from_pretrained(
             self.checkpoint,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
             revision=self.rev,
         )
-        if not self.training:
-            model.eval()
-        # WARN: HyenaDNA cannot be torch.compile(.)ed because the Hyena layers
-        # use FFT which is fundamentally based on complex numbers. TorchInductor
-        # does not support complex operators (4/30/2025)
-        # model = torch.compile(model)
-        return model
 
     @cached_property
-    def tokenizer(self):
+    def _tokenizer(self):
         return AutoTokenizer.from_pretrained(self.checkpoint, trust_remote_code=True)
+
+    @property
+    def device(self) -> Device:
+        return self._model.device
 
     @override
     def collate(self, batch: Sequence[str]) -> dict[str, torch.Tensor]:
@@ -126,7 +115,7 @@ class HyenaDNA(TrainableEmbedModel):
             # INFO: 1. tokenization
 
             # WARN: this was a legacy method:   tokenized = self.tokenizer.batch_encode_plus(
-            tokenized = self.tokenizer(
+            tokenized = self._tokenizer(
                 batch,
                 max_length=self.max_seq_len,
                 padding="max_length",
@@ -136,7 +125,7 @@ class HyenaDNA(TrainableEmbedModel):
             )
 
             inputs: dict[str, torch.Tensor] = {
-                k: v.to(self.dev, non_blocking=True) for k, v in tokenized.items()
+                k: v.to(self.device, non_blocking=True) for k, v in tokenized.items()
             }
 
             # INFO: 2. create attention mask for masked mean pooling
@@ -144,14 +133,14 @@ class HyenaDNA(TrainableEmbedModel):
             seq_lens = torch.tensor(
                 [len(item) for item in batch],
                 dtype=torch.float32,
-                device=self.dev,
+                device=self.device,
                 requires_grad=False,
             )
             seq_lens = seq_lens.unsqueeze(dim=1)
             indices = torch.arange(
                 self.max_seq_len,
                 dtype=torch.float32,
-                device=self.dev,
+                device=self.device,
                 requires_grad=False,
             )
             mask = (indices < seq_lens).float()
@@ -163,7 +152,7 @@ class HyenaDNA(TrainableEmbedModel):
             return inputs
 
     @override
-    def embed(self, batch: dict[str, torch.Tensor]) -> torch.FloatTensor:
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.FloatTensor:
         with torch.set_grad_enabled(self.training):
             # INFO: 2. inference
             inputs = batch["input_ids"]

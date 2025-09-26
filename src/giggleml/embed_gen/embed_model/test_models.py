@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from typing import cast, final
 
 import torch
-from torch.types import Device
 from typing_extensions import override
 
 from giggleml.embed_gen.embed_model import EmbedModel
@@ -20,13 +19,9 @@ class CountACGT(EmbedModel):
     wants = "sequences"
 
     def __init__(self, max_seq_len: int = 10):
+        super().__init__()
         self.max_seq_len = max_seq_len
         self.embed_dim = 4
-
-    @override
-    def to(self, device: Device):
-        # CPU only
-        return self
 
     @override
     def collate(self, batch: Sequence[str]) -> Sequence[str]:
@@ -36,7 +31,7 @@ class CountACGT(EmbedModel):
         return batch
 
     @override
-    def embed(self, batch: Sequence[str]) -> torch.FloatTensor:
+    def forward(self, batch: Sequence[str]) -> torch.FloatTensor:
         results = list()
 
         for item in batch:
@@ -64,13 +59,9 @@ class TrivialModel(EmbedModel):
     wants = "intervals"
 
     def __init__(self, max_seq_len: int = 10):
+        super().__init__()
         self.max_seq_len = max_seq_len
         self.embed_dim = 1
-
-    @override
-    def to(self, device: Device):
-        # CPU only
-        return self
 
     @override
     def collate(self, batch: Sequence[GenomicInterval]) -> Sequence[GenomicInterval]:
@@ -80,7 +71,7 @@ class TrivialModel(EmbedModel):
         return batch
 
     @override
-    def embed(self, batch: Sequence[GenomicInterval]) -> torch.FloatTensor:
+    def forward(self, batch: Sequence[GenomicInterval]) -> torch.FloatTensor:
         results = list()
 
         for item in batch:

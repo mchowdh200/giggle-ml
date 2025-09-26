@@ -1,10 +1,8 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from collections.abc import Sequence
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar
 
-import torch
-from torch.types import Device
-from typing_extensions import override
+from torch import nn
 
 # INFO: !! Currently all modules assume "embedding vectors" are float32.
 
@@ -13,7 +11,7 @@ from typing_extensions import override
 # ===================
 
 
-class EmbedModel(ABC):
+class EmbedModel(ABC, nn.Module):
     wants: ClassVar[str]  # Type of data this model accepts: "sequences" or "intervals"
     max_seq_len: int | None  # Maximum sequence length the model can handle
     embed_dim: int  # Dimension of the output embeddings
@@ -21,24 +19,6 @@ class EmbedModel(ABC):
     def collate(self, batch: Sequence[Any]) -> Any:
         """Pre-process the batch of inputs before it reaches the embed call"""
         return batch
-
-    @abstractmethod
-    def embed(self, batch: Any) -> torch.Tensor:
-        """Embed a batch of inputs and return tensor embeddings."""
-        ...
-
-    @abstractmethod
-    def to(self, device: Device) -> Self: ...
-
-    @abstractmethod
-    @override
-    def __repr__(self) -> str: ...
-
-
-class TrainableEmbedModel(EmbedModel, ABC):
-    @property
-    @abstractmethod
-    def trainable_model(self) -> Any: ...
 
 
 # ===================
