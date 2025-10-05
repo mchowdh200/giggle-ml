@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 from functools import cached_property
-from typing import final
 
 import torch
 from torch.types import Device
@@ -11,7 +10,6 @@ from typing_extensions import override
 from giggleml.embed_gen.embed_model import EmbedModel
 
 
-@final
 class HyenaDNA(EmbedModel):
     wants = "sequences"
 
@@ -73,11 +71,11 @@ class HyenaDNA(EmbedModel):
 
         max_seq_len, name, e_dim, rev = details[size]
 
-        self.rev = rev
-        self.max_seq_len = max_seq_len
-        self.checkpoint = name
+        self.rev: str = rev
+        self.max_seq_len: int | None = max_seq_len
+        self.checkpoint: str = name
         self.embed_dim: int = e_dim
-        self.size_type = size  # used for __repr__ only
+        self.size_type: str = size  # used for __repr__ only
 
     @cached_property
     def _model(self):
