@@ -14,9 +14,9 @@ from torch.utils.data import DataLoader
 
 from giggleml.data_wrangling import fasta
 from giggleml.data_wrangling.unified_dataset import UnifiedDataset
+from giggleml.utils.torch_utils import guess_device
 
 from ..data_wrangling.interval_dataset import IntervalDataset
-from ..utils.guess_device import guess_device
 from ..utils.types import GenomicInterval, lazy
 from .block_distributed_sampler import BlockDistributedSampler
 from .embed_model import EmbedModel

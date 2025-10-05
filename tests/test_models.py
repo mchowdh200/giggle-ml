@@ -1,7 +1,7 @@
 import torch
 
 from giggleml.embed_gen.embed_model import HyenaDNA
-from giggleml.utils.guess_device import guess_device
+from giggleml.utils.torch_utils import guess_device
 
 
 def test_hyena_dna():
