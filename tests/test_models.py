@@ -13,7 +13,7 @@ def test_hyena_dna():
 
     for embed in results:
         assert len(embed) == model.embed_dim
-        assert embed.dtype == torch.float32
+        assert embed.dtype == torch.float16
 
     brief = results[:, ::10]
     brief = torch.round(brief * 10)
@@ -31,7 +31,7 @@ def test_hyena_dna():
             [-7.0, 3.0, 7.0, 8.0, -9.0, 5.0, 7.0, 6.0, -2.0, -10.0, -0.0, 3.0, 1.0],
             [-4.0, 7.0, 1.0, -0.0, -9.0, 14.0, 9.0, 8.0, -6.0, -9.0, -5.0, 1.0, 7.0],
         ]
-    )
+    ).to(torch.float16)
 
     assert torch.allclose(brief, expect, atol=1.0)
 

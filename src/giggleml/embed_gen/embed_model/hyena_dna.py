@@ -150,7 +150,7 @@ class HyenaDNA(EmbedModel):
             return inputs
 
     @override
-    def forward(self, batch: dict[str, torch.Tensor]) -> torch.FloatTensor:
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         with torch.set_grad_enabled(self.training):
             # INFO: 2. inference
             inputs = batch["input_ids"]
@@ -180,7 +180,7 @@ class HyenaDNA(EmbedModel):
             # clamp ensures no divide by zero issue
             hidden /= torch.clamp(seq_lens, min=1e-9)
 
-            return hidden  # pyright: ignore[reportReturnType]
+            return hidden.to(dtype=torch.float16)
 
     @override
     def __repr__(self):

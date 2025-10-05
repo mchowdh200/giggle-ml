@@ -31,7 +31,7 @@ class CountACGT(EmbedModel):
         return batch
 
     @override
-    def forward(self, batch: Sequence[str]) -> torch.FloatTensor:
+    def forward(self, batch: Sequence[str]) -> torch.Tensor:
         results = list()
 
         for item in batch:
@@ -47,7 +47,7 @@ class CountACGT(EmbedModel):
                 elif char == "T":
                     counts[3] += 1
             results.append(counts)
-        return torch.FloatTensor(results)
+        return torch.tensor(results, dtype=torch.float32)
 
     @override
     def __repr__(self):
@@ -71,14 +71,14 @@ class TrivialModel(EmbedModel):
         return batch
 
     @override
-    def forward(self, batch: Sequence[GenomicInterval]) -> torch.FloatTensor:
+    def forward(self, batch: Sequence[GenomicInterval]) -> torch.Tensor:
         results = list()
 
         for item in batch:
             _, start, end = item
             results.append(end - start)
 
-        return cast(torch.FloatTensor, torch.FloatTensor(results).unsqueeze(-1))
+        return torch.tensor(results, dtype=torch.float32).unsqueeze(-1)
 
     @override
     def __repr__(self):
