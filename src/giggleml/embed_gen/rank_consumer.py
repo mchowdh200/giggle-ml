@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import zarr
 
+from giggleml.iter_utils.rank_iter import RankIter
 from giggleml.utils.torch_utils import get_rank
 
 # INFO: ----------------
@@ -68,6 +69,91 @@ class RankConsumerTarget:
     ThisRank = _ThisRank()
     Global = _Global()
     SpecificRank = _SpecificRank
+
+
+# INFO: ----------------
+#        RankCache
+# ----------------------
+
+
+class _RankCacheWriter[T]:
+    def __init__(self, cache: list[T]):
+        self.cache: list[T] = cache
+
+    def __call__(self, items: Iterable[T]):
+        self.cache.extend(items)
+
+
+class RankCache[T]:
+    def __init__(self):
+        """Initializes a cache that stores data locally for the current rank."""
+        self._local_cache: list[T] = []
+
+    def writer(
+        self, rank: _Target = RankConsumerTarget.ThisRank
+    ) -> _RankCacheWriter[T]:
+        """
+        Returns a writer object for the current rank.
+
+        Note: Writing is only permitted for `ThisRank`.
+        """
+        if rank is not RankConsumerTarget.ThisRank:
+            raise ValueError(
+                "Writers for RankCache can only be created for the current process (ThisRank)."
+            )
+        return _RankCacheWriter(self._local_cache)
+
+    @overload
+    def read(self, rank: _AllRanks) -> list[list[T]]: ...
+
+    @overload
+    def read(self, rank: _Target) -> list[T]: ...
+
+    def read(
+        self, rank: _Target = RankConsumerTarget.ThisRank
+    ) -> list[T] | list[list[T]]:
+        """
+        Reads data from the specified rank(s).
+
+        If the target is `ThisRank`, it returns the local data directly.
+        If the target is `AllRanks` or a different `SpecificRank`, it performs
+        a gather operation across all processes.
+        If the target is `Global`, it gathers data from all ranks and deshards it
+        using RankIter.inverse to reconstruct the original order.
+        """
+        if isinstance(rank, _Global):
+            # Recursively call with AllRanks and then apply inverse to deshard the data
+            all_ranks_data = self.read(RankConsumerTarget.AllRanks)
+            return list(RankIter.inverse(all_ranks_data))
+
+        # Local read is now a direct return of the instance's list.
+        if rank.rank_ordinal == get_rank():
+            return self._local_cache
+
+        # Cross-rank read requires a distributed environment.
+        if not dist.is_initialized():
+            if isinstance(rank, _AllRanks):
+                return [self._local_cache]
+            raise ValueError(
+                f"Cannot read from rank {rank.rank_ordinal} in a non-distributed environment."
+            )
+
+        # Perform the distributed gather operation using the local cache.
+        world_size = dist.get_world_size()
+        gathered_caches: list[list[T]] = [[] for _ in range(world_size)]
+        dist.all_gather_object(gathered_caches, self._local_cache)
+
+        if isinstance(rank, _AllRanks):
+            return gathered_caches
+
+        if isinstance(rank, _SpecificRank):
+            if 0 <= rank.rank_ordinal < world_size:
+                return gathered_caches[rank.rank_ordinal]
+            raise ValueError(
+                f"Target rank {rank.rank_ordinal} is out of bounds for world size {world_size}."
+            )
+
+        raise TypeError(f"Unhandled target type for cross-rank read: {type(rank)}")
 
 
 # INFO: ----------------
