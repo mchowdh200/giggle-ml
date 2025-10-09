@@ -15,6 +15,9 @@ Key Design Principles:
   * Postprocessor: Iterable[U] -> T (many-to-one)
 - Environment-agnostic: uses Consumer interface instead of direct returns
 - Supports distributed execution with PyTorch distributed
+
+The collate function is called after the batch boundaries have been set, preprocess
+can be used to extend the dataset because its called prior to fixed batch boundaries.
 """
 
 import itertools
@@ -120,9 +123,6 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         4. Decollate: Batch_out -> Iterable[V_post]
         5. Postprocess: Iterable[V_post] -> W_out
         6. Consume: W_out -> None
-
-        The collate function is called after the batch boundaries have been set, preprocess
-        can be used to extend the dataset because its called prior to fixed batch boundaries.
     """
 
     def __init__(
