@@ -1,6 +1,6 @@
 import itertools
-from collections.abc import Iterable, Iterator, Sequence
-from typing import cast, overload
+from collections.abc import Iterable, Iterator
+from typing import overload
 
 import torch
 import torch.distributed as dist
@@ -26,76 +26,61 @@ class RankIter[T](Iterable[T]):
         """Iterate through rank-appropriate elements.
 
         Yields:
-            Elements assigned to current rank
+            Elements assigned to the current rank
         """
         if dist.is_available() and dist.is_initialized():
             world_size = dist.get_world_size()
             rank = dist.get_rank()
-            # Each worker processes every world_size-th element starting from rank
+            # Each worker processes every world_size-th element starting from its rank
             yield from itertools.islice(self.data, rank, None, world_size)
         else:
             yield from self.data
 
     @overload
     @staticmethod
-    def inverse(splits: Iterable[torch.Tensor]) -> torch.Tensor: ...
+    def inverse(splits: Iterable[torch.Tensor]) -> Iterator[torch.Tensor]: ...
 
     @overload
     @staticmethod
-    def inverse(splits: Iterable[Iterable[T]]) -> list[T]: ...
+    def inverse(splits: Iterable[Iterable[T]]) -> Iterator[T]: ...
 
     @staticmethod
     def inverse(
         splits: Iterable[Iterable[T] | torch.Tensor],
-    ) -> list[T] | torch.Tensor:
+    ) -> Iterator[T | torch.Tensor]:
+        """Inverts rank splitting, recombining splits into a single lazy iterator.
+
+        This method takes the separated iterables from all ranks and interleaves
+        their elements in a streaming fashion to reconstruct the original order.
+
+        If the iterables contain Tensors, it efficiently interleaves their rows.
+        Otherwise, it interleaves the elements of the generic iterables.
+
+        Args:
+            splits: An iterable containing the distributed data splits from each rank.
+
+        Yields:
+            Elements from the splits, interleaved in their original order.
         """
-        Inverts the rank splitting, recombining into a single iterable or tensor.
-        Takes the total set of iterables across all ranks and interleaves them.
-
-        If contains Tensors, it efficiently interleaves their rows.
-        Otherwise, it interleaves the elements of the iterables.
-        """
-
-        # Eagerly convert to a list to check the type and get the length.
-        # This is necessary for both logic paths.
-        splits_list: Sequence[torch.Tensor | Iterable[T]] = list(splits)
-
+        # Eagerly convert the outer container of splits. This is a reasonable
+        # compromise as the number of splits (world_size) is typically small.
+        # The inner iterables, which contain the actual data, will be streamed.
+        splits_list = list(splits)
         if not splits_list:
-            # Handle empty input gracefully for both cases
-            if isinstance(splits, Iterable) and not isinstance(
-                next(iter(splits), None), torch.Tensor
-            ):
-                # Return an empty iterator for the generic case
-                return iter(list())  # pyright: ignore[reportReturnType]
-            return torch.tensor([])  # Return an empty tensor otherwise
+            return  # A generator function returns an empty iterator by default
 
-        # --- Tensor Path ---
-        if isinstance(splits_list[0], torch.Tensor):
-            splits_list = [cast(torch.Tensor, s) for s in splits_list]
-
-            # Check if all tensors have the same shape (the common, fast case)
-            first_shape = splits_list[0].shape
-            is_even = all(s.shape == first_shape for s in splits_list[1:])
-
-            if is_even:
-                # 1. Stack along a new dimension. Shape: (world_size, n_rows, *features)
-                # 2. Transpose the first two dims. Shape: (n_rows, world_size, *features)
-                #    This groups the rows from each rank together.
-                # 3. Reshape to flatten the first two dims. Shape: (n_rows * world_size, *features)
-                stacked_tensors = torch.stack(splits_list, dim=0)
-                transposed = stacked_tensors.transpose(0, 1)
-                return transposed.reshape(-1, *first_shape[1:])
-
-            else:
-                max_rows = max(s.size(0) for s in splits_list)
-                interleaved_rows = (
-                    s[i] for i in range(max_rows) for s in splits_list if i < s.size(0)
-                )
-                return torch.stack(list(interleaved_rows), dim=0)
-
-        # --- Pure Iterables Path ---
+        # The logic is identical for generic iterables and for Tensors, where
+        # a Tensor is treated as an iterable of its rows.
         sentinel = object()  # Unique object to detect the end of shorter iterables
-        zipped = itertools.zip_longest(*splits_list, fillvalue=sentinel)
-        chained: Iterator[T | object] = iter(itertools.chain.from_iterable(zipped))
-        # Filter out the sentinel values for iterables that finished early
-        return cast(list[T], list(filter(lambda x: x is not sentinel, chained)))
+
+        # 1. `zip_longest` gets the i-th element (or row) from each split in lockstep.
+        #    e.g., (rank0_item0, rank1_item0), (rank0_item1, rank1_item1), ...
+        interleaved_groups = itertools.zip_longest(*splits_list, fillvalue=sentinel)
+
+        # 2. `chain.from_iterable` flattens these groups into a single stream.
+        #    e.g., rank0_item0, rank1_item0, rank0_item1, rank1_item1, ...
+        flat_stream = itertools.chain.from_iterable(interleaved_groups)
+
+        # 3. `filter` removes the sentinel padding from shorter iterables and yields.
+        #    The entire pipeline is lazy and processes one item at a time.
+        yield from filter(lambda x: x is not sentinel, flat_stream)  # pyright: ignore[reportReturnType]
