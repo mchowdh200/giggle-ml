@@ -17,5 +17,9 @@ class Nothing:
     def __call__[T](self, arg: T | None = None, *args: object) -> T | None:
         return arg
 
+    def __iter__(self):
+        """Generator that yields nothing."""
+        return
+        yield  # unreachable, but makes this a generator
 
 nothing = Nothing()
