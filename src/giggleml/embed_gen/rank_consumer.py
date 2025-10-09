@@ -14,9 +14,9 @@ import zarr
 from giggleml.iter_utils.rank_iter import RankIter
 from giggleml.utils.torch_utils import get_rank
 
-# INFO: ----------------
-#         Targets
-# ----------------------
+# INFO: -----------------
+#        Targets
+# -----------------------
 
 
 class _Target(ABC):
@@ -71,9 +71,9 @@ class RankConsumerTarget:
     SpecificRank = _SpecificRank
 
 
-# INFO: ----------------
-#        RankCache
-# ----------------------
+# INFO: --------------------
+#         RankCache
+# --------------------------
 
 
 class _RankCacheWriter[T]:
@@ -156,9 +156,9 @@ class RankCache[T]:
         raise TypeError(f"Unhandled target type for cross-rank read: {type(rank)}")
 
 
-# INFO: ----------------
-#        RankZarr
-# ----------------------
+# INFO: -------------------
+#         RankZarr
+# -------------------------
 
 
 class _RankZarrWriter:
