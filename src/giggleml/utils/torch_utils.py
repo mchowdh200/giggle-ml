@@ -1,4 +1,24 @@
 import torch
+import torch.distributed as dist
+
+
+def is_distributed() -> bool:
+    """Check if distributed training is available and initialized."""
+    return dist.is_available() and dist.is_initialized()
+
+
+def get_rank() -> int:
+    """Get the rank of the current process in distributed training."""
+    if is_distributed():
+        return dist.get_rank()
+    return 0
+
+
+def get_world_size() -> int:
+    """Get the total number of processes in distributed training."""
+    if is_distributed():
+        return dist.get_world_size()
+    return 1
 
 
 def guess_device(rank: int = 0) -> torch.device:
