@@ -1,4 +1,4 @@
-from typing import overload
+from typing import Iterable, Iterator, overload
 
 
 # it does nothing
@@ -22,4 +22,13 @@ class Nothing:
         return
         yield  # unreachable, but makes this a generator
 
+
+class YieldThrough[T]:
+    """A callable that yields all items from an iterable unchanged."""
+
+    def __call__(self, iterable: Iterable[T]) -> Iterator[T]:
+        yield from iterable
+
+
 nothing = Nothing()
+yield_through = YieldThrough()
