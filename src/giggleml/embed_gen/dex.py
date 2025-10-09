@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader, IterableDataset
 
 # Assumes these local utility imports exist
 from giggleml.iter_utils.rank_iter import RankIter
+from giggleml.utils.nothing import nothing, yield_through
 from giggleml.utils.torch_utils import guess_device
 
 # Type aliases for pipeline components
@@ -99,10 +100,10 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
     def __init__(
         self,
         model: torch.nn.Module,
-        preprocessor_fn: PreprocessorFn[T_in, U_pre],
-        postprocessor_fn: PostprocessorFn[V_post, W_out],
-        collate_fn: CollateFn[U_pre, Batch_in],
-        decollate_fn: DecollateFn[Batch_out, V_post],
+        preprocessor_fn: PreprocessorFn[T_in, U_pre] = yield_through,
+        postprocessor_fn: PostprocessorFn[V_post, W_out] = nothing,
+        collate_fn: CollateFn[U_pre, Batch_in] = nothing,
+        decollate_fn: DecollateFn[Batch_out, V_post] = yield_through,
     ):
         """Initialize Dex with model and pipeline functions."""
         self.model: torch.nn.Module = model
