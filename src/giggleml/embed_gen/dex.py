@@ -95,6 +95,8 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
     Dex: Distributed Executor
 
     A flexible, streaming model execution pipeline supporting distributed processing.
+
+    @param collate_fn must be picklable for DataLoader compatibility.
     """
 
     def __init__(
