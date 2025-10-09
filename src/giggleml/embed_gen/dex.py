@@ -24,9 +24,12 @@ import itertools
 from collections.abc import Callable, Iterable, Iterator
 
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, IterableDataset
 
 from giggleml.iter_utils.rank_iter import RankIter
+from giggleml.utils.torch_utils import guess_device
 
 # Type aliases for pipeline components
 type PreprocessorFn[T_in, U_pre] = Callable[[T_in], Iterable[U_pre]]
@@ -153,7 +156,6 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         data: Iterable[T_in],
         consumer_fn: ConsumerFn[W_out],
         batch_size: int,
-        device: torch.device,
         num_workers: int = 0,
     ) -> None:
         """Execute the full pipeline on input data.
@@ -162,9 +164,22 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
             data: Input data iterable
             consumer_fn: Function to handle final outputs
             batch_size: Number of items per batch
-            device: Target device for model execution
             num_workers: Number of DataLoader workers
         """
+        # Check if we're in a distributed environment and wrap model with DDP
+        model = self.model
+        current_rank = 0
+        
+        if dist.is_available() and dist.is_initialized():
+            current_rank = dist.get_rank()
+        
+        # Automatically infer device based on current rank
+        device = guess_device(current_rank)
+        
+        if dist.is_available() and dist.is_initialized():
+            if not isinstance(model, DDP):
+                model = DDP(model, device_ids=[device] if device.type == "cuda" else None)
+        
         # Create dataset that handles preprocessing and distributed sharding
         dataset = _StreamingPreprocessorDataset(data, self.preprocessor_fn)
 
@@ -194,7 +209,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
                 full_batch_for_model = (batch_input[0], *moved_batch_components)
 
                 # Execute model
-                output = self.model(full_batch_for_model)
+                output = model(full_batch_for_model)
                 yield output, boundary_flags
 
         # Execute model on all batches
