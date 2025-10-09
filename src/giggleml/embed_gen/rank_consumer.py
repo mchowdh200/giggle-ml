@@ -259,6 +259,26 @@ class RankZarr:
                     # Skips empty or corrupted Zarr directories.
                     continue
 
+    def consolidate(self, chunk_rows: int | None = None):
+        """
+        Consolidates all rank-specific zarr files into the global zarr file.
+        
+        Reads from all rank-specific files, uses RankIter.inverse to deshard
+        the data in streaming fashion, and writes to the global zarr file.
+        
+        Args:
+            chunk_rows: The number of rows to store per chunk in the global Zarr array.
+        """
+        # Get iterators for all ranks using existing read method
+        all_ranks_iterators = self.read(RankConsumerTarget.AllRanks)
+        
+        # Use RankIter.inverse to deshard the data in streaming fashion
+        desharded_tensors = RankIter.inverse(all_ranks_iterators)
+        
+        # Write consolidated data to global zarr file
+        global_writer = self.writer(RankConsumerTarget.Global, chunk_rows)
+        global_writer(desharded_tensors)
+
     def delete(self, rank: _Target = RankConsumerTarget.ThisRank):
         """
         Deletes the Zarr store(s) for the given rank target.
