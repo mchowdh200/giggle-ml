@@ -41,7 +41,7 @@ class SetFlatIter[T, U]:
             # After each inner group is exhausted, we now know its length.
             self._group_lengths.append(count)
 
-    def set_indices(self) -> list[int]:
+    def set_indices(self) -> Iterator[int]:
         "Provides the set indices mapping for the flattened structure."
 
         if not self._group_lengths:
@@ -50,11 +50,8 @@ class SetFlatIter[T, U]:
                 "The group structure is not yet known."
             )
 
-        def iterate():
-            for i, count in enumerate(self._group_lengths):
-                yield from [i] * count
-
-        return list(iterate())
+        for i, count in enumerate(self._group_lengths):
+            yield from [i] * count
 
     def regroup(self, flat_iterable: Iterable[U]) -> Iterator[list[U]]:
         """
