@@ -1,24 +1,4 @@
-"""
-Dex: Distributed Executor
-
-An optimized, distributed model execution utility designed for flexible composition
-across various use cases. Provides streaming processing from Iterable[T] -> Iterable[Tensor].
-
-Pipeline Flow:
-    input element -> [pre-processor] -> [DataLoader, collate] -> model -> [post-processor] -> output element
-
-Key Design Principles:
-- Pre-processor runs before DataLoader/collate to allow element multiplication.
-- DataLoader defines batch boundaries after pre-processing. The user's collate
-  function is called after these boundaries are set, whereas the pre-processor is
-  called before, allowing it to expand one input into many processed items.
-- Pre/post processors can add or remove elements:
-  * Preprocessor: T -> Iterable[U] (one-to-many)
-  * Postprocessor: Iterable[U] -> T (many-to-one)
-- Environment-agnostic: uses Consumer interface instead of direct returns.
-- Supports distributed execution with PyTorch distributed.
-"""
-
+import itertools
 from collections.abc import Callable, Iterable, Iterator
 
 import torch
@@ -29,7 +9,7 @@ from torch.utils.data import DataLoader, IterableDataset
 # Assumes these local utility imports exist
 from giggleml.iter_utils.rank_iter import RankIter
 from giggleml.utils.nothing import nothing, yield_through
-from giggleml.utils.torch_utils import guess_device
+from giggleml.utils.torch_utils import guess_device, is_distributed
 
 # Type aliases for pipeline components
 type PreprocessorFn[T_in, U_pre] = Callable[[T_in], Iterable[U_pre]]
@@ -38,7 +18,7 @@ type PreprocessorFn[T_in, U_pre] = Callable[[T_in], Iterable[U_pre]]
 type PostprocessorFn[V_post, W_out] = Callable[[Iterable[V_post]], W_out]
 """Aggregates multiple model outputs back into a single result."""
 
-type ConsumerFn[W_out] = Callable[[W_out], None]
+type ConsumerFn[W_out] = Callable[[Iterable[W_out]], None]
 """Handles final outputs (e.g., caching, writing to files)."""
 
 type CollateFn[U_pre, Batch_in] = Callable[[list[U_pre]], Batch_in]
@@ -56,11 +36,15 @@ class _StreamingPreprocessorDataset[T_in, U_pre](IterableDataset):
     """
 
     def __init__(
-        self, data: Iterable[T_in], preprocessor_fn: PreprocessorFn[T_in, U_pre]
+        self,
+        data: Iterable[T_in],
+        batch_size: int,
+        preprocessor_fn: PreprocessorFn[T_in, U_pre],
     ):
         """Initialize dataset with data source and preprocessing function."""
         super().__init__()
         self.data = data
+        self.batch_size = batch_size
         self.preprocessor_fn = preprocessor_fn
 
     def __iter__(self) -> Iterator[tuple[U_pre, bool]]:
@@ -70,12 +54,16 @@ class _StreamingPreprocessorDataset[T_in, U_pre](IterableDataset):
         (preprocessed_item, is_last_in_group) to track element boundaries,
         which are used internally by the Dex executor for regrouping.
         """
-        # Distributed data sharding
-        rank_data = RankIter(self.data)
 
-        for item in rank_data:
+        # Distributed data sharding
+        blocks = itertools.batched(self.data, self.batch_size)
+        rank_data = RankIter(blocks)
+
+        for block in rank_data:
             # Apply preprocessing - may produce multiple outputs per input
-            sub_items_iter = iter(self.preprocessor_fn(item))
+            sub_items_iter = itertools.chain.from_iterable(
+                self.preprocessor_fn(item) for item in block
+            )
 
             # Use a lookahead to mark the last sub-item from an original input
             try:
@@ -94,7 +82,24 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
     """
     Dex: Distributed Executor
 
-    A flexible, streaming model execution pipeline supporting distributed processing.
+    Distributed model execution utility designed for flexible composition across
+    various use cases. Provides streaming processing from Iterable[T] -> Iterable[Tensor].
+
+    Pipeline Flow:
+        input element -> [pre-processor] -> [DataLoader, collate] -> [model] -> [post-processor] -> output element
+
+    Iterates the data in blocks to allow subsequent systems to write outputs in blocks, such as zarr chunks.
+
+    Key Design Principles:
+    - Pre-processor runs before DataLoader/collate to allow element multiplication.
+    - DataLoader defines batch boundaries after pre-processing. The user's collate
+      function is called after these boundaries are set, whereas the pre-processor is
+      called before, allowing it to expand one input into many processed items.
+    - Pre/post processors can add or remove elements:
+      * Preprocessor: T -> Iterable[U] (one-to-many)
+      * Postprocessor: Iterable[U] -> T (many-to-one)
+    - Environment-agnostic: uses Consumer interface instead of direct returns.
+    - Supports distributed execution with PyTorch distributed.
 
     @param collate_fn must be picklable for DataLoader compatibility.
     """
@@ -124,26 +129,33 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         user_batch = self.collate_fn(items)
         return user_batch, flags
 
+    def simulate(
+        self, data: Iterable[T_in], batch_size: int
+    ) -> Iterator[Iterable[T_in]]:
+        """Pass data through, without executing the pipeline, for indices tracking"""
+        blocks = itertools.batched(data, batch_size)
+        rank_data = RankIter(blocks)
+        yield from rank_data
+
     def execute(
         self,
         data: Iterable[T_in],
         consumer_fn: ConsumerFn[W_out],
         batch_size: int,
         num_workers: int = 0,
-    ) -> None:
+    ):
         """Execute the full pipeline on input data."""
         # Setup device and distributed model if applicable
         model = self.model
-        is_distributed = dist.is_available() and dist.is_initialized()
-        current_rank = dist.get_rank() if is_distributed else 0
+        current_rank = dist.get_rank() if is_distributed() else 0
         device = guess_device(current_rank)
         model.to(device)
 
-        if is_distributed and not isinstance(model, DDP):
+        if is_distributed() and not isinstance(model, DDP):
             model = DDP(model, device_ids=[device] if device.type == "cuda" else None)
 
         # Create dataset that handles preprocessing and distributed sharding
-        dataset = _StreamingPreprocessorDataset(data, self.preprocessor_fn)
+        dataset = _StreamingPreprocessorDataset(data, batch_size, self.preprocessor_fn)
 
         # Setup DataLoader with the internal (picklable) collation method
         data_loader = DataLoader(
@@ -164,8 +176,8 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         final_results = self._regroup_and_postprocess(output_item_stream)
 
         # 4. Send results to the consumer
-        for result in final_results:
-            consumer_fn(result)
+        for block in itertools.batched(final_results, batch_size):
+            consumer_fn(block)
 
     def _model_pass(
         self, loader: DataLoader, model: torch.nn.Module, device: torch.device
