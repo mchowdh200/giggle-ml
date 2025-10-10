@@ -4,7 +4,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from typing import cast, final, overload, override
+from typing import Protocol, cast, final, overload, override
 
 import numpy as np
 import torch
@@ -69,6 +69,21 @@ class RankConsumerTarget:
     ThisRank = _ThisRank()
     Global = _Global()
     SpecificRank = _SpecificRank
+
+
+# INFO: --------------------
+#         Interfaces
+# --------------------------
+
+
+class RankConsumerWriter[T](Protocol):
+    def __call__(self, items: Iterable[T]) -> None: ...
+
+
+class RankConsumer[T](Protocol):
+    def writer(self, rank: _Target = RankConsumerTarget.ThisRank) -> RankConsumerWriter[T]: ...
+    
+    def read(self, rank: _Target = RankConsumerTarget.ThisRank) -> list[T] | list[list[T]] | Iterator[T]: ...
 
 
 # INFO: --------------------
