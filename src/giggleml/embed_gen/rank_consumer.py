@@ -262,19 +262,19 @@ class RankZarr:
     def consolidate(self, chunk_rows: int | None = None):
         """
         Consolidates all rank-specific zarr files into the global zarr file.
-        
+
         Reads from all rank-specific files, uses RankIter.inverse to deshard
         the data in streaming fashion, and writes to the global zarr file.
-        
+
         Args:
             chunk_rows: The number of rows to store per chunk in the global Zarr array.
         """
         # Get iterators for all ranks using existing read method
         all_ranks_iterators = self.read(RankConsumerTarget.AllRanks)
-        
+
         # Use RankIter.inverse to deshard the data in streaming fashion
         desharded_tensors = RankIter.inverse(all_ranks_iterators)
-        
+
         # Write consolidated data to global zarr file
         global_writer = self.writer(RankConsumerTarget.Global, chunk_rows)
         global_writer(desharded_tensors)
@@ -294,3 +294,61 @@ class RankZarr:
         for path in paths_to_delete:
             if path.exists() and path.is_dir():
                 shutil.rmtree(path)
+
+    @overload
+    def get_zarr_array(
+        self, rank: _AllRanks = RankConsumerTarget.AllRanks
+    ) -> list[zarr.Array]: ...
+
+    @overload
+    def get_zarr_array(self, rank: _Target) -> zarr.Array | None: ...
+
+    def get_zarr_array(
+        self, rank: _Target = RankConsumerTarget.ThisRank
+    ) -> zarr.Array | None | list[zarr.Array]:
+        """
+        Returns the underlying Zarr array(s) for direct access.
+
+        Args:
+            rank: The target rank to get the Zarr array for.
+
+        Returns:
+            - For ThisRank, Global, or SpecificRank: The Zarr array if it exists, None otherwise.
+            - For AllRanks: A list of Zarr arrays from all available rank files.
+
+        Raises:
+            ValueError: If SpecificRank is out of bounds in distributed environment.
+            RuntimeError: If Zarr file is corrupted or cannot be opened.
+        """
+        if isinstance(rank, _AllRanks):
+            # Return arrays from all available rank files
+            arrays = []
+            for path in self._get_all_rank_paths():
+                if path.exists() and path.is_dir():
+                    try:
+                        arrays.append(zarr.open(str(path), mode="r"))
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"Failed to open Zarr array at {path}: {e}"
+                        ) from e
+            return arrays
+
+        # Validate SpecificRank bounds in distributed environment
+        if isinstance(rank, _SpecificRank) and dist.is_initialized():
+            world_size = dist.get_world_size()
+            if not (0 <= rank.rank_ordinal < world_size):
+                raise ValueError(
+                    f"Target rank {rank.rank_ordinal} is out of bounds for world size {world_size}."
+                )
+
+        path = self._get_path(rank)
+        if not path.exists():
+            return None
+
+        if not path.is_dir():
+            return None
+
+        try:
+            return cast(zarr.Array, zarr.open(str(path), mode="r"))
+        except Exception as e:
+            raise RuntimeError(f"Failed to open Zarr array at {path}: {e}") from e
