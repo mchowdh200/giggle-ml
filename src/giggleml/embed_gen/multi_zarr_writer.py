@@ -1,5 +1,6 @@
 """Direct zarr writer for efficient distributed embedding storage."""
 
+import os
 from collections.abc import Iterable, Sequence
 from typing import Any, final
 
@@ -113,17 +114,21 @@ class MultiZarrWriter:
     def _open_or_create_zarr_file(self, output_path: str) -> zarr.Array:
         """Open existing zarr file or create new one safely."""
         # This method remains unchanged from your version.
-        try:
+
+        # concurrency-safe because in the event of double-initialization, the processes
+        # write the same information
+
+        if os.path.exists(output_path):
             zarr_array = zarr.open(output_path, mode="a")
-        except FileNotFoundError:
-            initial_shape = (0,) + self.shape[1:]
+        else:
             zarr_array = zarr.open(
                 output_path,
                 mode="w",
-                shape=initial_shape,
+                shape=(0,) + self.shape[1:],
                 chunks=self.chunks,
                 dtype=self.dtype,
                 **self.kwargs,
             )
+
         assert isinstance(zarr_array, zarr.Array)
         return zarr_array
