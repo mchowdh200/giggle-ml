@@ -154,11 +154,11 @@ class HyenaDNA(EmbedModel):
         with torch.set_grad_enabled(self.training):
             # INFO: 2. inference
             inputs = batch["input_ids"]
-            outputs = self._model(
-                input_ids=inputs, output_hidden_states=True
-            ).hidden_states
 
-            hidden: torch.Tensor = outputs[-1]  # shape (batch, seqMax, eDim)
+            hidden: torch.Tensor = self._model(
+                input_ids=inputs
+            ).last_hidden_state  # shape (batch, seqMax, eDim)
+
             batch_size, max_seq_len, hidden_dim = hidden.shape
 
             # sanity
