@@ -13,8 +13,8 @@ from torch import nn
 
 class EmbedModel(ABC, nn.Module):
     wants: ClassVar[str]  # Type of data this model accepts: "sequences" or "intervals"
-    max_seq_len: int | None  # Maximum sequence length the model can handle
-    embed_dim: int  # Dimension of the output embeddings
+    max_seq_len: ClassVar[int | None]  # Maximum sequence length the model can handle
+    embed_dim: ClassVar[int]  # Dimension of the output embeddings
 
     def collate(self, batch: Sequence[Any]) -> Any:
         """Pre-process the batch of inputs before it reaches the embed call"""
