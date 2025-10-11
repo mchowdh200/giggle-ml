@@ -81,9 +81,13 @@ class RankConsumerWriter[T](Protocol):
 
 
 class RankConsumer[T](Protocol):
-    def writer(self, rank: _Target = RankConsumerTarget.ThisRank) -> RankConsumerWriter[T]: ...
-    
-    def read(self, rank: _Target = RankConsumerTarget.ThisRank) -> list[T] | list[list[T]] | Iterator[T]: ...
+    def writer(
+        self, rank: _Target = RankConsumerTarget.ThisRank
+    ) -> RankConsumerWriter[T]: ...
+
+    def read(
+        self, rank: _Target = RankConsumerTarget.ThisRank
+    ) -> list[T] | list[list[T]] | Iterator[T]: ...
 
 
 # INFO: --------------------
@@ -177,12 +181,16 @@ class RankCache[T]:
 
 
 class _RankZarrWriter:
-    """A callable object that appends tensors to a specific Zarr array."""
+    """A callable object that appends tensors to a specific Zarr array.
+    
+    The zarr_array attribute will be None until the first call to __call__ with data.
+    After the first write operation, zarr_array will contain the underlying Zarr array.
+    """
 
     def __init__(self, path: PathLike, chunk_rows: int | None = None):
         self.path = str(path)
         self.chunk_rows = chunk_rows
-        self._zarr_array: zarr.Array | None = None
+        self.zarr_array: zarr.Array | None = None
 
     def __call__(self, tensors: Iterable[torch.Tensor]):
         """Appends an iterable of tensors to the Zarr array."""
@@ -190,7 +198,7 @@ class _RankZarrWriter:
         if not numpy_tensors:
             return
 
-        if self._zarr_array is None:
+        if self.zarr_array is None:
             # First write op: create the Zarr array based on the first tensor.
             first_tensor = numpy_tensors[0]
             shape = (0, *first_tensor.shape[1:])
@@ -199,7 +207,7 @@ class _RankZarrWriter:
                 if self.chunk_rows
                 else True
             )
-            self._zarr_array = cast(
+            self.zarr_array = cast(
                 zarr.Array,
                 zarr.open(
                     self.path,
@@ -209,7 +217,7 @@ class _RankZarrWriter:
                     dtype=first_tensor.dtype,
                 ),
             )
-        self._zarr_array.append(np.array(numpy_tensors))
+        self.zarr_array.append(np.array(numpy_tensors))
 
 
 class RankZarr:
@@ -310,60 +318,3 @@ class RankZarr:
             if path.exists() and path.is_dir():
                 shutil.rmtree(path)
 
-    @overload
-    def get_zarr_array(
-        self, rank: _AllRanks = RankConsumerTarget.AllRanks
-    ) -> list[zarr.Array]: ...
-
-    @overload
-    def get_zarr_array(self, rank: _Target) -> zarr.Array | None: ...
-
-    def get_zarr_array(
-        self, rank: _Target = RankConsumerTarget.ThisRank
-    ) -> zarr.Array | None | list[zarr.Array]:
-        """
-        Returns the underlying Zarr array(s) for direct access.
-
-        Args:
-            rank: The target rank to get the Zarr array for.
-
-        Returns:
-            - For ThisRank, Global, or SpecificRank: The Zarr array if it exists, None otherwise.
-            - For AllRanks: A list of Zarr arrays from all available rank files.
-
-        Raises:
-            ValueError: If SpecificRank is out of bounds in distributed environment.
-            RuntimeError: If Zarr file is corrupted or cannot be opened.
-        """
-        if isinstance(rank, _AllRanks):
-            # Return arrays from all available rank files
-            arrays = []
-            for path in self._get_all_rank_paths():
-                if path.exists() and path.is_dir():
-                    try:
-                        arrays.append(zarr.open(str(path), mode="r"))
-                    except Exception as e:
-                        raise RuntimeError(
-                            f"Failed to open Zarr array at {path}: {e}"
-                        ) from e
-            return arrays
-
-        # Validate SpecificRank bounds in distributed environment
-        if isinstance(rank, _SpecificRank) and dist.is_initialized():
-            world_size = dist.get_world_size()
-            if not (0 <= rank.rank_ordinal < world_size):
-                raise ValueError(
-                    f"Target rank {rank.rank_ordinal} is out of bounds for world size {world_size}."
-                )
-
-        path = self._get_path(rank)
-        if not path.exists():
-            return None
-
-        if not path.is_dir():
-            return None
-
-        try:
-            return cast(zarr.Array, zarr.open(str(path), mode="r"))
-        except Exception as e:
-            raise RuntimeError(f"Failed to open Zarr array at {path}: {e}") from e
