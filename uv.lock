@@ -453,6 +453,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
+    { name = "filelock" },
     { name = "lightning" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -473,6 +474,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.6.0" },
+    { name = "filelock", specifier = ">=3.18.0" },
     { name = "lightning", specifier = ">=2.5.2" },
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "numpy", specifier = ">=2.2.5" },
