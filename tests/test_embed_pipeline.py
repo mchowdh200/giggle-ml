@@ -1,5 +1,6 @@
 import contextlib
 import os
+import shutil
 
 import numpy as np
 import torch
@@ -10,9 +11,12 @@ from giggleml.embed_gen.embed_pipeline import DirectPipeline
 
 
 def test_pipeline():
-    with contextlib.suppress(FileNotFoundError):
-        os.remove("tests/test_out.tmp.npy")
-        os.remove("tests/test_out.tmp.npy.meta")
+    with contextlib.suppress(FileNotFoundError, OSError):
+        if os.path.isdir("tests/test_out.tmp"):
+            shutil.rmtree("tests/test_out.tmp")
+        else:
+            os.remove("tests/test_out.tmp")
+        os.remove("tests/test_out.tmp.meta")
 
     assert CountACGT(10).max_seq_len == 10  # to keep tests consistent
 
@@ -25,7 +29,7 @@ def test_pipeline():
         embed_model=CountACGT(), batch_size=2, worker_count=worker_count
     )
     bed = BedDataset("tests/test.bed", "tests/test.fa")
-    embed = pipeline.embed(bed, "tests/test_out.tmp.npy")
+    embed = pipeline.embed(bed, "tests/test_out.tmp")
 
     assert len(embed.data) == len(bed)
     # the second item 0-40 should have been split into
