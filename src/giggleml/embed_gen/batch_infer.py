@@ -1,41 +1,16 @@
-import os
-from collections.abc import Sequence
-from datetime import timedelta
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
-from time import time
-from typing import Callable, final, overload
+from typing import final
 
-import numpy as np
-import torch
-import torch.distributed as dist
 from torch import Tensor
-from torch import multiprocessing as mp
-from torch.utils.data import DataLoader
 
-from giggleml.data_wrangling import fasta
-from giggleml.data_wrangling.unified_dataset import UnifiedDataset
-from giggleml.utils.torch_utils import guess_device
+from giggleml.embed_gen.multi_zarr_writer import MultiZarrWriter
+from giggleml.iter_utils.set_flat_iter import SetFlatIter
 
 from ..data_wrangling.interval_dataset import IntervalDataset
-from ..utils.types import GenomicInterval, lazy
-from .block_distributed_sampler import BlockDistributedSampler
+from .dex import ConsumerFn, Dex
 from .embed_model import EmbedModel
-
-
-@final
-@lazy
-class _Collate[T, U]:
-    def __init__(self, fasta_path: Path | None, post: Callable[[T], U]):
-        self.fasta_path: Path | None = fasta_path
-        self.post = post
-
-    def __call__(self, batch: Sequence[GenomicInterval]) -> U:
-        if self.fasta_path is not None:
-            inputs = fasta.map(batch, self.fasta_path)
-        else:
-            inputs = batch
-
-        return self.post(inputs)  # pyright: ignore[reportArgumentType]
+from .genomic_dex import GenomicDex
 
 
 @final
@@ -44,316 +19,122 @@ class BatchInfer:
         self,
         model: EmbedModel,
         batch_size: int,
-        worker_count: int,
-        sub_worker_count: int,
+        num_workers: int = 0,
     ):
         """
-        @param workerCount: should be <= gpu count
-        @param subWorkerCount: corresponds to pytorch::DataLoader::num_worker
-        argument -- used to prepare subprocesses for batch construction. Can be
-        zero.
+        @param num_workers: Number of DataLoader workers for batch construction
         """
-
-        if worker_count == 0:
-            raise ValueError("No workers; no work.")
-
         self.model = model
         self.batch_size = batch_size
-        self.worker_count = worker_count
-        self.sub_worker_count = sub_worker_count
+        self.num_workers = num_workers
         self.embed_dim = model.embed_dim
 
-    @overload
-    def _infer_loop(self, rank: int, data_loader: DataLoader) -> Tensor: ...
-
-    @overload
-    def _infer_loop(
-        self, rank: int, data_loader: DataLoader, out_file: np.memmap
-    ) -> None: ...
-
-    def _infer_loop(
-        self, rank: int, data_loader: DataLoader, out_file: np.memmap | None = None
-    ) -> Tensor | None:
-        """inference loop."""
-        rprint = lambda *args: print(f"[{rank}]:", *args)
-
-        time0 = time()
-        next_idx = 0
-        in_memory = out_file is None
-        in_memory_results = []
-
-        for i, batch in enumerate(data_loader):
-            outputs = self.model(batch).to("cpu")
-            final_idx = next_idx + len(outputs)
-
-            if in_memory:
-                in_memory_results.append(outputs)
-            else:
-                assert out_file is not None
-                assert final_idx <= len(out_file)
-                out_file[next_idx:final_idx] = outputs.detach().numpy()
-
-            next_idx += len(outputs)
-
-            if i % 50 == 0:
-                rprint(f"Batch: {i + 1}\t/ {len(data_loader)}")
-            if i % 150 == 1 and rank == 0:
-                elapsed = time() - time0
-                eta = timedelta(
-                    seconds=((elapsed / (i + 1)) * len(data_loader)) - elapsed
-                )
-                elapsed_dt = timedelta(seconds=elapsed)
-                rprint(f"== {str(elapsed_dt)}, ETA: {str(eta)}")
-
-        rprint(f"Batch: {len(data_loader)}\t/ {len(data_loader)}")
-
-        if in_memory:
-            return (
-                torch.cat(in_memory_results, dim=0)
-                if in_memory_results
-                else torch.tensor([])
-            )
-        else:
-            # "close" the memmap
-            assert out_file is not None
-            out_file.flush()
-            del out_file
-            return None
-
-    def _worker(
+    def raw(
         self,
-        rank: int,
         datasets: Sequence[IntervalDataset],
-        out_paths: Sequence[str] | None,
-        post: Sequence[Callable[[np.memmap], None]] | None,
-    ) -> list[Tensor] | None:
-        device = guess_device(rank)
+        consumer: ConsumerFn[Tensor],
+    ) -> None:
+        """Process datasets with a generic consumer function.
 
-        if rank == 0:
-            print("Starting inference.")
+        The consumer receives individual tensors in the order they are processed,
+        without any regrouping or post-processing.
+        """
+        dex, set_flat_iter = self._create_dex_pipeline(datasets)
+        self._execute_pipeline(dex, set_flat_iter, consumer)
 
-        rprint = lambda *args: print(f"[{rank}]:", *args)
+    def to_disk(
+        self,
+        datasets: Sequence[IntervalDataset],
+        output_paths: Sequence[str],
+    ) -> None:
+        """Process datasets and write results to zarr files with direct writing.
 
+        Results are written directly to final zarr files using lock-based initialization
+        and rank-specific output mapping for efficient parallel processing.
+        """
+        if not datasets:
+            raise ValueError("At least one dataset is required")
+        if not output_paths:
+            raise ValueError("At least one output path is required")
+        if len(datasets) != len(output_paths):
+            raise ValueError(
+                f"Number of datasets ({len(datasets)}) must match "
+                f"number of output paths ({len(output_paths)})"
+            )
+
+        # Create pipeline and get streaming indices iterator
+        dex, set_flat_iter = self._create_dex_pipeline(datasets)
+        rank_indices_iterator = dex.simulate(set_flat_iter.indices(), self.batch_size)
+
+        # Create direct zarr consumer with streaming indices
+        zarr_consumer = self._create_direct_zarr_consumer(
+            output_paths, rank_indices_iterator
+        )
+
+        # Execute pipeline with direct writing
+        self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
+
+    def _create_dex_pipeline(
+        self, datasets: Sequence[IntervalDataset]
+    ) -> tuple[Dex, SetFlatIter]:
+        """Create and configure the Dex pipeline for processing datasets."""
+        fasta_path = self._validate_fasta_paths(datasets)
+        dex = GenomicDex.create_pipeline(self.model, fasta_path)
+        set_flat_iter = SetFlatIter(datasets)
+        return dex, set_flat_iter
+
+    def _execute_pipeline(
+        self, dex: Dex, set_flat_iter: SetFlatIter, consumer: ConsumerFn[Tensor]
+    ) -> None:
+        """Execute the Dex pipeline with the given consumer."""
+        dex.execute(
+            data=set_flat_iter,
+            consumer_fn=consumer,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+        )
+
+    def _validate_fasta_paths(self, datasets: Sequence[IntervalDataset]) -> Path | None:
+        """Validate that all datasets have the same FASTA path."""
         fasta_path: Path | None = None
-
         for dataset in datasets:
             dataset_fasta = dataset.associated_fasta_path
-
             if fasta_path is None:
                 fasta_path = dataset_fasta
             elif fasta_path != dataset_fasta:
-                # TODO: this constraint could be avoided
-                raise ValueError("Expecting all datasets to have same fasta path")
+                raise ValueError("All datasets must have the same FASTA path")
+        return fasta_path
 
-        master_dataset = UnifiedDataset[GenomicInterval](datasets)
+    def _create_direct_zarr_consumer(
+        self,
+        output_paths: Sequence[str],
+        rank_indices_iterator: Iterator[Iterable[tuple[int, int]]],
+    ) -> ConsumerFn[Tensor]:
+        """Create a consumer that writes directly to final zarr files with streaming indices."""
 
-        model = self.model.to(device)
-        model.to(device)
-        wants_seq = self.model.wants == "sequences"
-        e_dim = self.model.embed_dim
+        # Convert torch dtype to zarr-compatible string
+        model_dtype = self.model.embed_dtype
+        zarr_dtype = str(model_dtype)[6:]  # "torch.float32" -> "float32"
 
-        # INFO: compose the  collate function
-
-        if wants_seq and fasta_path is None:
-            raise ValueError("Unable to map to fasta; missing associatedFastaPath")
-
-        collate = _Collate(fasta_path, self.model.collate)
-
-        # INFO: In-memory only case:
-        # processes the entire input disregarded potential concurrent workers
-        in_memory = out_paths is None
-
-        if in_memory:
-            data_loader = DataLoader(
-                master_dataset,
-                batch_size=self.batch_size,
-                shuffle=False,
-                pin_memory=True,
-                num_workers=self.sub_worker_count,
-                persistent_workers=self.sub_worker_count != 0,
-                collate_fn=collate,
-            )
-
-            embeddings = self._infer_loop(rank, data_loader)
-
-            # Split embeddings back into separate tensors for each dataset
-            results = []
-            start_idx = 0
-            for dataset in datasets:
-                end_idx = start_idx + len(dataset)
-                results.append(embeddings[start_idx:end_idx])
-                start_idx = end_idx
-
-            return results
-
-        # INFO: Distributed memmap case:
-        # assumes a series of concurrent workers
-
-        block_sampler = BlockDistributedSampler(master_dataset, self.worker_count, rank)
-        sample_count = len(block_sampler)
-        offset = block_sampler.lower * e_dim * 4  # (4 bytes per float32)
-        master_out_path = Path(out_paths[0]).parent / "wip.tmp.npy"
-        master_out_file = np.memmap(
-            master_out_path, np.float32, "r+", offset, shape=(sample_count, e_dim)
+        zarr_writer = MultiZarrWriter(
+            output_paths=output_paths,
+            shape=(0, self.embed_dim),
+            chunks=(self.batch_size, self.embed_dim),
+            dtype=zarr_dtype,
         )
 
-        data_loader = DataLoader(
-            master_dataset,
-            batch_size=self.batch_size,
-            sampler=block_sampler,
-            shuffle=False,
-            pin_memory=True,
-            num_workers=self.sub_worker_count,
-            persistent_workers=self.sub_worker_count != 0,  # (usually True) -- crucial
-            collate_fn=collate,
-        )
+        def zarr_consumer(embeddings: Iterable[Tensor]) -> None:
+            # Get the indices iterator for this batch
+            try:
+                batch_indices_iterator = next(rank_indices_iterator)
+            except StopIteration:
+                raise RuntimeError("No more indices available from rank simulation")
 
-        try:
-            # INFO: init process group
+            # Materialize only the indices for this batch
+            batch_indices = list(batch_indices_iterator)
 
-            os.environ["MASTER_ADDR"] = "localhost"
-            os.environ["MASTER_PORT"] = "12356"
-            dist.init_process_group(
-                backend="nccl" if torch.cuda.is_available() else "gloo",
-                rank=rank,
-                world_size=self.worker_count,
-                # it seems to be about 1.2 seconds per batch 5/27/2025
-                timeout=timedelta(
-                    seconds=len(master_dataset) / self.worker_count * 0.5
-                ),
-                device_id=(device if device.type == "cuda" else None),  # pyright: ignore
-            )
+            # Convert tensors to numpy arrays and write using the dedicated zarr writer
+            numpy_embeddings = [tensor.cpu().numpy() for tensor in embeddings]
+            zarr_writer.write_batch(numpy_embeddings, batch_indices)
 
-            if not dist.is_initialized():
-                raise RuntimeError("Process group could not initialized")
-
-            dist.barrier()
-
-            # INFO: big step
-
-            self._infer_loop(
-                rank,
-                data_loader,
-                master_out_file,
-            )
-
-            dist.barrier()  # INFO: inference complete.
-            #                 now beginning separation of outputs
-            if rank == 0:
-                print("Starting post-processing.")
-
-            # we are splitting up embeds from masterOutFile into separate memmaps
-            # based on the distribution of datasets. Each worker is responsible for
-            # the datasets they implicitly completed.
-
-            set_idx_start = (
-                master_dataset.list_idx_of(block_sampler.lower)
-                if block_sampler.lower < len(master_dataset)
-                else len(master_dataset.lists)
-            )
-            set_idx_end = (
-                master_dataset.list_idx_of(block_sampler.upper)
-                if block_sampler.upper < len(master_dataset)
-                else len(master_dataset.lists)
-            )
-
-            #                                     (1)     (2)     (3)
-            # for datasets full of intervals,   [----] [-------] [---]
-            # the sampler can split datasets:   |==========|=========|
-            # so memmap init works like:        (rank1)(    rank2    )
-
-            # since sometimes a rank might need to write some intervals preparred by
-            # rank-1, we need to remap masterOutFile
-            master_out_file.flush()
-            del master_out_file
-            master_size = (
-                master_dataset.sums[set_idx_end] - master_dataset.sums[set_idx_start]
-            )
-            master_out_file = np.memmap(
-                master_out_path,
-                np.float32,
-                "r",
-                offset=master_dataset.sums[set_idx_start] * e_dim * 4,
-                shape=(master_size, e_dim),
-            )
-
-            for set_idx in range(set_idx_start, set_idx_end):
-                size = len(datasets[set_idx])
-                out_path = out_paths[set_idx]
-
-                # reorganize data
-                i = master_dataset.sums[set_idx] - master_dataset.sums[set_idx_start]
-                content = master_out_file[i : i + size]
-                mmap = np.memmap(out_path, np.float32, "w+", shape=(size, e_dim))
-                mmap[:] = content
-                mmap.flush()
-
-                if post is not None:
-                    # post processing
-                    post_call = post[set_idx]
-                    post_call(mmap)
-
-                if rank == 0:
-                    if (100 * set_idx // len(out_paths)) % 10 == 0:  # roughly every 10%
-                        rprint(f"{set_idx + 1} / {len(out_paths)}")
-
-            rprint(f"{len(out_paths)} / {len(out_paths)}")
-            dist.barrier()
-        finally:
-            dist.destroy_process_group()
-
-        return None
-
-    @overload
-    def batch(
-        self,
-        datasets: Sequence[IntervalDataset],
-        out_paths: Sequence[str],
-        post: Sequence[Callable[[np.memmap], None]] | None = None,
-    ) -> None: ...
-
-    @overload
-    def batch(
-        self,
-        datasets: Sequence[IntervalDataset],
-    ) -> list[Tensor]: ...
-
-    def batch(
-        self,
-        datasets: Sequence[IntervalDataset],
-        out_paths: Sequence[str] | None = None,
-        post: Sequence[Callable[[np.memmap], None]] | None = None,
-    ) -> list[Tensor] | None:
-        """
-        @param post: Is a list of processing Callable to apply to completed memmaps after inference is completed.
-        """
-
-        in_memory = out_paths is None
-
-        if in_memory:
-            if out_paths is not None or post is not None:
-                raise ValueError(
-                    "In-memory mode does not support outPaths or post processing"
-                )
-            return self._worker(0, datasets, None, None)
-
-        assert len(datasets) == len(out_paths)
-
-        e_dim = self.model.embed_dim
-        total_len = sum([len(dataset) for dataset in datasets])
-        master_out = Path(out_paths[0]).parent.mkdir(parents=True, exist_ok=True)
-        master_out = Path(out_paths[0]).parent / "wip.tmp.npy"
-        mm_total = np.memmap(master_out, np.float32, "w+", shape=(total_len, e_dim))
-        mm_total[:] = 0
-        mm_total.flush()
-        del mm_total
-
-        # big operation
-        args = (datasets, out_paths, post)
-        mp.spawn(
-            self._worker, args=args, nprocs=self.worker_count, join=True
-        )  # spawn method
-
-        # working file space
-        os.remove(master_out)
-        return None
+        return zarr_consumer
