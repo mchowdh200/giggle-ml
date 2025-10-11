@@ -150,7 +150,10 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         model.to(device)
 
         if is_distributed() and not isinstance(model, DDP):
-            model = DDP(model, device_ids=[device] if device.type == "cuda" else None)
+            # Only wrap in DDP if the model has trainable parameters
+            has_trainable_params = any(p.requires_grad for p in model.parameters())
+            if has_trainable_params:
+                model = DDP(model, device_ids=[device] if device.type == "cuda" else None)
 
         # Create dataset that handles preprocessing and distributed sharding
         dataset = _StreamingPreprocessorDataset(data, batch_size, self.preprocessor_fn)
