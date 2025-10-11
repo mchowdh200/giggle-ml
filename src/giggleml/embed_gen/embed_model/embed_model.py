@@ -5,6 +5,8 @@ from typing import Any, ClassVar
 import torch
 from torch import nn
 
+from giggleml.utils.types import lazy
+
 # INFO: !! Currently all modules assume "embedding vectors" are float32.
 
 # ===================
@@ -12,6 +14,7 @@ from torch import nn
 # ===================
 
 
+@lazy
 class EmbedModel(ABC, nn.Module):
     wants: ClassVar[str]  # Type of data this model accepts: "sequences" or "intervals"
     max_seq_len: ClassVar[int | None]  # Maximum sequence length the model can handle

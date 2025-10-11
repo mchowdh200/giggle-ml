@@ -8,8 +8,10 @@ from transformers.models.auto.modeling_auto import AutoModel
 from typing_extensions import override
 
 from giggleml.embed_gen.embed_model import EmbedModel
+from giggleml.utils.types import lazy
 
 
+@lazy
 class HyenaDNA(EmbedModel):
     wants = "sequences"
 

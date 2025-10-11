@@ -9,6 +9,7 @@ import torch
 from torch import Tensor
 
 from giggleml.embed_gen.batch_infer import BatchInfer
+from giggleml.utils.types import lazy
 
 from ..data_wrangling import fasta
 from ..data_wrangling.interval_dataset import IntervalDataset
@@ -19,6 +20,7 @@ from .embed_io import Embed, EmbedMeta
 from .embed_model import EmbedModel
 
 
+@lazy
 class EmbedPipeline(ABC):
     @overload
     def embed(

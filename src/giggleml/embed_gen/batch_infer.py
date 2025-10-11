@@ -6,6 +6,7 @@ from torch import Tensor
 
 from giggleml.embed_gen.multi_zarr_writer import MultiZarrWriter
 from giggleml.iter_utils.set_flat_iter import SetFlatIter
+from giggleml.utils.types import lazy
 
 from ..data_wrangling.interval_dataset import IntervalDataset
 from .dex import ConsumerFn, Dex
@@ -13,6 +14,7 @@ from .embed_model import EmbedModel
 from .genomic_dex import GenomicDex
 
 
+@lazy
 @final
 class BatchInfer:
     def __init__(
