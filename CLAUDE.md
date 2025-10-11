@@ -1,4 +1,3 @@
 - This is a uv project, so wrap related commands accordingly.
-- basedpyright can be used for type checking
+- This project uses basedpyright and pytest.
 - Always, feel free to ask questions!
-
