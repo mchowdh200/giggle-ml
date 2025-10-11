@@ -129,9 +129,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         user_batch = self.collate_fn(items)
         return user_batch, flags
 
-    def simulate(
-        self, data: Iterable[T_in], batch_size: int
-    ) -> Iterator[Iterable[T_in]]:
+    def simulate[T](self, data: Iterable[T], batch_size: int) -> Iterator[Iterable[T]]:
         """Pass data through, without executing the pipeline, for indices tracking"""
         blocks = itertools.batched(data, batch_size)
         rank_data = RankIter(blocks)
