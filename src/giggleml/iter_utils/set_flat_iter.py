@@ -53,6 +53,18 @@ class SetFlatIter[T, U]:
         for i, count in enumerate(self._group_lengths):
             yield from [i] * count
 
+    def indices(self) -> Iterator[tuple[int, int]]:
+        "Provides the (set index, index within set) mapping for the flattened structure."
+
+        if not self._group_lengths:
+            raise RuntimeError(
+                "Must fully iterate over the object before calling regroup(). "
+                "The group structure is not yet known."
+            )
+
+        for i, count in enumerate(self._group_lengths):
+            yield from ((i, j) for j in range(count))
+
     def regroup(self, flat_iterable: Iterable[U]) -> Iterator[list[U]]:
         """
         Provides the inverse functionality: Iterable[U] -> Iterable[Iterable[U]].
