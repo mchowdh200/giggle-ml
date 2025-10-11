@@ -1,9 +1,11 @@
 import contextlib
 import os
+import shutil
 from dataclasses import dataclass
-from typing import cast, final, Optional
+from typing import final
 
 import numpy as np
+import zarr
 from numpy.typing import DTypeLike
 
 from ..utils.path_pickle import pickle, unpickle
@@ -20,7 +22,7 @@ class EmbedMeta:
 class Embed(EmbedMeta):
     """
     Used to store single (vector) embeddings or (tensor collections of
-    embeddings. Can be file-backed (memmap) or in-memory (numpy array).
+    embeddings. Can be zarr-backed or in-memory (numpy array).
     """
 
     def __init__(
@@ -31,96 +33,89 @@ class Embed(EmbedMeta):
         data_path: str | None = None,
     ):
         """
-        Should not be used directly: create with embedIO.writeMeta for file-backed
+        Should not be used directly: create with write_meta for zarr-backed
         Embeds, or by passing an in-memory numpy array.
 
         @param data: for an in-memory embedding
-        @param dataPath: for a file-backed memmap embedding
+        @param data_path: for a zarr-backed embedding directory
         """
         super().__init__(meta.embed_dim, meta.dtype, meta.model_info)
 
         if data is not None and data_path is not None:
-            raise ValueError("Provide either `data` or `dataPath`, not both.")
+            raise ValueError("Provide either `data` or `data_path`, not both.")
         if data is None and data_path is None:
-            raise ValueError("Provide either `data` or `dataPath`.")
+            raise ValueError("Provide either `data` or `data_path`.")
 
         self._data: np.ndarray | None = data
+        self._zarr_array: zarr.Array | None = None
         self.data_path: str | None = data_path
 
     @property
     def data(self) -> np.ndarray:
         """
         Returns the embedding data as a numpy array.
-        If file-backed, this will load the data as a memmap on first access.
+        If zarr-backed, this will load the data from zarr on first access.
         """
         if self._data is None:
             if self.data_path is None:
                 # This state should be unreachable due to __init__ checks
                 raise RuntimeError("Embed is not initialized correctly.")
 
-            self._data = cast(
-                np.memmap,
-                np.memmap(self.data_path, dtype=self.dtype, mode="r").reshape(
-                    -1, self.embed_dim
-                ),
-            )
+            # Load from zarr directory
+            if self._zarr_array is None:
+                zarr_store = zarr.open(self.data_path, mode="r")
+                if isinstance(zarr_store, zarr.Array):
+                    self._zarr_array = zarr_store
+                else:
+                    raise ValueError(f"Expected zarr.Array, got {type(zarr_store)}")
+            self._data = np.asarray(self._zarr_array)
         return self._data
 
     def unload(self):
         """
-        Unloads self.data from memory if it's a memmap.
+        Unloads self.data from memory if it's zarr-backed.
         Accessing the data field after unload() is fine and would trigger reloading.
         For in-memory embeds, this is a no-op.
         """
-        if self.data_path is not None and self._data is not None:
-            if isinstance(self._data, np.memmap):
-                self._data.flush()
-            # To allow reloading, we must clear the cached data
+        if self.data_path is not None:
+            # Clear cached data to allow reloading
             self._data = None
+            self._zarr_array = None
 
     def delete(self):
         """
-        Deletes the associated files of this Embed if it is file-backed.
+        Deletes the associated zarr directory of this Embed if it is zarr-backed.
         For in-memory embeds, it clears the data from the object.
         This instance should not be used after delete()
         """
         if self.data_path is not None:
-            # unload will set self._data to None
+            # unload will clear cached data
             self.unload()
             _delete(self.data_path)
         else:
             self._data = None
 
 
-def write_meta(mmap: np.memmap | str, meta: EmbedMeta) -> Embed:
+def write_meta(zarr_path: str, meta: EmbedMeta) -> Embed:
     """
     Should be used often in place of the Embed constructor directly. This
-    ensures `Embed`s come with an associated .npy.meta file.
+    ensures `Embed`s come with an associated .meta file.
+    
+    @param zarr_path: Path to the zarr directory
+    @param meta: Metadata to associate with the zarr array
     """
-
-    if not isinstance(mmap, str):
-        if mmap.filename is None:
-            raise ValueError("mmap is expected to have a non-None filename")
-        mmap_path = mmap.filename
-    else:
-        mmap_path = mmap
-
-    path = mmap_path + ".meta"
-    pickle(path, meta)
-    return Embed(meta=meta, data_path=mmap_path)
+    meta_path = zarr_path + ".meta"
+    pickle(meta_path, meta)
+    return Embed(meta=meta, data_path=zarr_path)
 
 
 def _check_paths(path: str) -> str:
-    if path.endswith(".npy"):
-        path = path[:-4]
-    elif path.endswith(".npy.meta"):
-        path = path[:-9]
-    else:
-        raise ValueError("Expected path to be either .npy or .npy.meta")
-
-    if not (os.path.isfile(f"{path}.npy") and os.path.isfile(f"{path}.npy.meta")):
+    if path.endswith(".meta"):
+        path = path[:-5]
+    
+    if not (os.path.isdir(path) and os.path.isfile(f"{path}.meta")):
         raise ValueError(
-            "The embed data (.npy) cannot be parsed without its metadata (.npy.meta)"
+            "The embed data (zarr directory) cannot be parsed without its metadata (.meta)"
         )
 
     return path
@@ -128,22 +123,25 @@ def _check_paths(path: str) -> str:
 
 def parse(path: str) -> Embed:
     """
-    @param path: To either the .npy (data) or, which must exist, the .npy.meta
+    @param path: To either the zarr directory (data) or the .meta
     (metadata) file.
     """
 
     path = _check_paths(path)
-    meta: EmbedMeta = unpickle(f"{path}.npy.meta")
-    return Embed(meta=meta, data_path=f"{path}.npy")
+    meta: EmbedMeta = unpickle(f"{path}.meta")
+    return Embed(meta=meta, data_path=path)
 
 
 def _delete(path: str):
     """
-    @param path: To either the .npy (data) or, which must exist, the .npy.meta
+    @param path: To either the zarr directory (data) or the .meta
     (metadata) file.
     """
 
-    with contextlib.suppress(FileNotFoundError):
+    with contextlib.suppress(FileNotFoundError, OSError):
         path = _check_paths(path)
-        os.remove(f"{path}.npy")
-        os.remove(f"{path}.npy.meta")
+        # Remove zarr directory and metadata file
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        if os.path.isfile(f"{path}.meta"):
+            os.remove(f"{path}.meta")
