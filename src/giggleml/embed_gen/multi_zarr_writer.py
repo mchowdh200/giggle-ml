@@ -100,16 +100,27 @@ class MultiZarrWriter:
         if self.current_zarr_array is None:
             raise RuntimeError("Cannot ensure size of a non-existent zarr array.")
 
-        current_size = self.current_zarr_array.shape[0]
-        if required_size > current_size:
-            lock_path = f"{self.output_paths[set_idx]}.resize.lock"
-            with FileLock(lock_path):
-                # Re-check size after acquiring lock (another process may have resized)
-                current_size = self.current_zarr_array.shape[0]
-                if required_size > current_size:
-                    # Resize to accommodate new position along the first dimension
-                    new_shape = (required_size,) + self.shape[1:]
-                    self.current_zarr_array.resize(new_shape)
+        # First check (optimistic, no lock)
+        if required_size <= self.current_zarr_array.shape[0]:
+            return
+
+        lock_path = f"{self.output_paths[set_idx]}.resize.lock"
+        with FileLock(lock_path, timeout=30):
+            # After acquiring the lock, we MUST get the ground truth from disk
+            # by re-opening the array. The existing self.current_zarr_array
+            # could be stale.
+
+            z_refreshed = zarr.open(self.output_paths[set_idx], mode="a")
+            assert isinstance(z_refreshed, zarr.Array)
+
+            current_size = z_refreshed.shape[0]
+            if required_size > current_size:
+                # Resize to accommodate new position along the first dimension
+                new_shape = (required_size,) + self.shape[1:]
+                z_refreshed.resize(new_shape)
+
+            # Crucially, update the instance's array to the refreshed one
+            self.current_zarr_array = z_refreshed
 
     def _open_or_create_zarr_file(self, output_path: str) -> zarr.Array:
         """Open existing zarr file or create new one safely."""
