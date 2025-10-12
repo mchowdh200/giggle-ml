@@ -29,11 +29,7 @@ type DecollateFn[Batch_out, V_post] = Callable[[Batch_out], Iterable[V_post]]
 
 
 class _StreamingPreprocessorDataset[T_in, U_pre](IterableDataset):
-    """Dataset that applies preprocessing and handles distributed data sharding.
-
-    Automatically distributes data across workers in distributed settings and
-    internally tracks element boundaries for proper postprocessing.
-    """
+    """Dataset that applies preprocessing and handles distributed data sharding."""
 
     def __init__(
         self,
@@ -48,34 +44,27 @@ class _StreamingPreprocessorDataset[T_in, U_pre](IterableDataset):
         self.preprocessor_fn = preprocessor_fn
 
     def __iter__(self) -> Iterator[tuple[U_pre, bool]]:
-        """Iterate through preprocessed data with boundary flags.
-
-        Uses RankIter for distributed data sharding. Yields tuples of
-        (preprocessed_item, is_last_in_group) to track element boundaries,
-        which are used internally by the Dex executor for regrouping.
-        """
-
-        # Distributed data sharding
+        """Iterate through preprocessed data with correct boundary flags."""
         blocks = itertools.batched(self.data, self.batch_size)
         rank_data = RankIter(blocks)
 
         for block in rank_data:
-            # Apply preprocessing - may produce multiple outputs per input
-            sub_items_iter = itertools.chain.from_iterable(
-                self.preprocessor_fn(item) for item in block
-            )
+            # Process each item in the block individually to create
+            # distinct groups for the postprocessor.
+            for item in block:
+                sub_items_iter = iter(self.preprocessor_fn(item))
 
-            # Use a lookahead to mark the last sub-item from an original input
-            try:
-                prev_item = next(sub_items_iter)
-            except StopIteration:
-                continue  # Preprocessor produced no items
+                try:
+                    prev_sub_item = next(sub_items_iter)
+                except StopIteration:
+                    continue  # Preprocessor produced no items for this input
 
-            for sub_item in sub_items_iter:
-                yield (prev_item, False)  # Not the last in the group
-                prev_item = sub_item
+                for sub_item in sub_items_iter:
+                    yield (prev_sub_item, False)
+                    prev_sub_item = sub_item
 
-            yield (prev_item, True)  # The last in the group
+                # Mark the end of the group for this specific 'item'.
+                yield (prev_sub_item, True)
 
 
 class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
@@ -153,7 +142,9 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
             # Only wrap in DDP if the model has trainable parameters
             has_trainable_params = any(p.requires_grad for p in model.parameters())
             if has_trainable_params:
-                model = DDP(model, device_ids=[device] if device.type == "cuda" else None)
+                model = DDP(
+                    model, device_ids=[device] if device.type == "cuda" else None
+                )
 
         # Create dataset that handles preprocessing and distributed sharding
         dataset = _StreamingPreprocessorDataset(data, batch_size, self.preprocessor_fn)
