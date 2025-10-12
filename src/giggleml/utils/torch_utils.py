@@ -37,3 +37,9 @@ def freeze_model[T: torch.nn.Module](model: T, unfreeze: bool = False) -> T:
         param.requires_grad = unfreeze
 
     return model
+
+
+def rprint(*args, **kwargs):
+    """rank print"""
+    rank = get_rank()
+    print(f"[rank {rank}]", *args, **kwargs)
