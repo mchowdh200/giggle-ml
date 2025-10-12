@@ -1,4 +1,5 @@
-from typing import Any, Protocol, SupportsIndex, TypeVar
+from collections.abc import Iterable, Sized
+from typing import Any, Protocol, TypeVar
 
 import numpy as np
 
@@ -23,3 +24,7 @@ TCo = TypeVar("T_co", covariant=True)
 class ListLike[TCo](Protocol):
     def __getitem__(self, idx: int) -> TCo: ...
     def __len__(self) -> int: ...
+
+
+class SizedIterable[T](Sized, Iterable[T], Protocol):
+    pass
