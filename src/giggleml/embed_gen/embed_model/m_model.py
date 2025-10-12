@@ -68,17 +68,17 @@ class MModel(HyenaDNA):
 
     @override
     def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
-        # Step 1: Get sequence embeddings from HyenaDNA
-        hyena_embeddings = super().forward(batch)
-        # Step 2: Apply phi network to each sequence embedding
-        return self._phi_forward_with_checkpointing(hyena_embeddings)
+        # INFO: only includes element-wise operations
 
-    def _phi_forward_with_checkpointing(self, x: torch.Tensor) -> torch.Tensor:
+        # Step 1: Get sequence embeddings from HyenaDNA
+        hdna_embeds = super().forward(batch)
+
+        # Step 2: Apply phi network to each sequence embedding
         if self.use_gradient_checkpointing and self.training:
             # prevent None
-            assert (activs := checkpoint(self.phi, x, use_reentrant=False))
+            assert (activs := checkpoint(self.phi, hdna_embeds, use_reentrant=False))
             return activs
-        return self.phi(x)
+        return self.phi(hdna_embeds)
 
     @override
     def __repr__(self) -> str:
