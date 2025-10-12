@@ -1,6 +1,8 @@
 import itertools
 from collections.abc import Collection, Iterable, Iterator
 
+from giggleml.utils.types import SizedIterable
+
 
 class SetFlatIter[T, U]:
     """
@@ -12,7 +14,7 @@ class SetFlatIter[T, U]:
     between its methods.
     """
 
-    def __init__(self, data: Collection[Collection[T]]):
+    def __init__(self, data: SizedIterable[SizedIterable[T]]):
         """
         Initializes and consumes the input to learn the structure and cache data.
         """
