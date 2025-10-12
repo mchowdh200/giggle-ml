@@ -26,7 +26,13 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 from typing_extensions import override
 
+from giggleml.data_wrangling.interval_dataset import IntervalDataset
+from giggleml.embed_gen.batch_infer import BatchInfer
+from giggleml.embed_gen.dex import Dex
 from giggleml.embed_gen.embed_model import HyenaDNA
+from giggleml.iter_utils.distributed_scatter_mean import distributed_scatter_mean_iter
+from giggleml.iter_utils.set_flat_iter import SetFlatIter
+from giggleml.utils.torch_utils import freeze_model
 
 
 @final
@@ -79,6 +85,48 @@ class MModel(HyenaDNA):
             assert (activs := checkpoint(self.phi, hdna_embeds, use_reentrant=False))
             return activs
         return self.phi(hdna_embeds)
+
+    def distributed_embed(
+        self, data: list[IntervalDataset], batch_size: int, sub_workers: int
+    ) -> torch.Tensor:
+        """
+        Generate set-level embeddings using distributed processing.
+
+        This method should be called on all ranks in a distributed setting.
+        It processes interval datasets through the complete M Model pipeline:
+        1. Freezes HyenaDNA parameters for efficiency
+        2. Generates phi embeddings for all sequences using batch inference
+        3. Computes set-level means using distributed scatter operations
+        4. Applies rho network to produce final set embeddings
+
+        Args:
+            data: List of IntervalDataset objects to process
+            batch_size: Batch size for inference operations
+            sub_workers: Number of sub-workers for parallel processing
+
+        Returns:
+            Tensor of final set embeddings for this rank's portion of the data only
+        """
+
+        # 1. freeze HyenaDNA parameters
+        freeze_model(super()._model)
+
+        # 2. create element-wise embeddings
+        phi_embeds = list()
+        # BatchInfer is a Dex that handles genomic nuances like FASTA mapping & interval chunking
+        BatchInfer(self, batch_size, sub_workers).raw(data, phi_embeds.extend)
+
+        # 3. set-level mean
+        set_indices = SetFlatIter(data).set_indices()
+        set_means = torch.stack(
+            [i for (_, i) in distributed_scatter_mean_iter(set_indices, phi_embeds)]
+        )
+
+        # 3. rho pass
+        rho_embeds = list()
+        Dex(self.rho).execute(set_means, rho_embeds.extend, batch_size, sub_workers)
+        # note that this is only this rank's data
+        return torch.stack(rho_embeds)
 
     @override
     def __repr__(self) -> str:
