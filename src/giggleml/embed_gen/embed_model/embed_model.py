@@ -1,6 +1,6 @@
 from abc import ABC
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import Any
 
 import torch
 from torch import nn
@@ -16,12 +16,10 @@ from giggleml.utils.types import lazy
 
 @lazy
 class EmbedModel(ABC, nn.Module):
-    wants: ClassVar[str]  # Type of data this model accepts: "sequences" or "intervals"
-    max_seq_len: ClassVar[int | None]  # Maximum sequence length the model can handle
-    embed_dim: ClassVar[int]  # Dimension of the output embeddings
-    embed_dtype: ClassVar[torch.dtype] = (
-        torch.float32
-    )  # Data type of the output embeddings
+    wants: str  # Type of data this model accepts: "sequences" or "intervals"
+    max_seq_len: int | None  # Maximum sequence length the model can handle
+    embed_dim: int  # Dimension of the output embeddings
+    embed_dtype: torch.dtype = torch.float32  # Data type of the output embeddings
 
     def collate(self, batch: Sequence[Any]) -> Any:
         """Pre-process the batch of inputs before it reaches the embed call"""
