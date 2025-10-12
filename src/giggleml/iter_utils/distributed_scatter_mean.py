@@ -7,7 +7,7 @@ import torch.distributed as dist
 from giggleml.utils.torch_utils import get_world_size, is_distributed
 
 
-def rank_scatter_mean(
+def distributed_scatter_mean(
     set_indices: Iterable[int],
     rank_data: Iterable[torch.Tensor],
 ) -> dict[int, torch.Tensor]:
