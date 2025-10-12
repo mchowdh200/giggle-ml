@@ -129,6 +129,15 @@ class MModel(HyenaDNA):
         return torch.stack(rho_embeds)
 
     @override
+    def train(self, mode: bool = True) -> "MModel":
+        super().train(mode)
+        super()._model.eval()
+        return self
+
+    def hot_parameters(self):
+        return [p for p in self.parameters() if p.requires_grad]
+
+    @override
     def __repr__(self) -> str:
         return (
             f"MModel(size={self.size_type}, "
