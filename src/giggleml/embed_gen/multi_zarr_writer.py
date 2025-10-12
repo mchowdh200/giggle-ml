@@ -1,7 +1,7 @@
 """Direct zarr writer for efficient distributed embedding storage."""
 
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from typing import Any, final
 
 import numpy as np
@@ -41,17 +41,17 @@ class MultiZarrWriter:
         self.current_set_idx: int | None = None
 
     def write_batch(
-        self, data: Iterable[np.ndarray[Any, Any]], batch_indices: list[tuple[int, int]]
+        self,
+        data: Sequence[np.ndarray[Any, Any]],
+        batch_indices: Sequence[tuple[int, int]],
     ) -> None:
         """Write a batch of data using optimized sliced writes for contiguous runs."""
-        if not batch_indices:
-            return
 
-        # Convert iterable to a list to allow slicing for chunking.
-        # This is a trade-off for performance, holding the batch in memory.
-        data_list = list(data)
-        if len(data_list) != len(batch_indices):
-            raise ValueError("Data and indices must have the same length.")
+        if len(data) != len(batch_indices):
+            raise ValueError(
+                f"Data and indices must have the same length. "
+                f"Got {len(data)} data items and {len(batch_indices)} indices."
+            )
 
         start_of_run_idx = 0
         while start_of_run_idx < len(batch_indices):
@@ -89,7 +89,7 @@ class MultiZarrWriter:
             self._ensure_zarr_size(run_set_idx, required_size=run_end_pos + 1)
 
             # 3. Stack the data for the run and perform a single sliced write.
-            data_chunk = np.vstack(data_list[start_of_run_idx : end_of_run_idx + 1])
+            data_chunk = np.vstack(data[start_of_run_idx : end_of_run_idx + 1])
             self.current_zarr_array[run_start_pos : run_end_pos + 1] = data_chunk
 
             # 4. Advance to the start of the next run.
@@ -113,7 +113,6 @@ class MultiZarrWriter:
 
     def _open_or_create_zarr_file(self, output_path: str) -> zarr.Array:
         """Open existing zarr file or create new one safely."""
-        # This method remains unchanged from your version.
 
         # concurrency-safe because in the event of double-initialization, the processes
         # write the same information
