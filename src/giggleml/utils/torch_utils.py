@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 import torch.distributed as dist
 
@@ -113,7 +115,7 @@ def all_gather_concat(tensor: torch.Tensor) -> torch.Tensor:
     return torch.cat(result_tensors, dim=0)
 
 
-def rprint(*args, **kwargs):
+def rprint(*args: Any, **kwargs: Any):
     """rank print"""
     rank = get_rank()
     print(f"[rank {rank}]", *args, **kwargs)
