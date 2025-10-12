@@ -1,24 +1,21 @@
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 import torch
 import torch.distributed as dist
 
 from giggleml.utils.torch_utils import get_world_size, is_distributed
 
-from ..embed_gen.rank_consumer import RankConsumer, RankConsumerTarget
 
-
-def rank_scatter_mean[T](
-    set_indices: Iterator[int],
-    rank_consumer: RankConsumer[T],
-    tensor_dtype: torch.dtype = torch.float32,
+def rank_scatter_mean(
+    set_indices: Iterable[int],
+    rank_data: Iterable[torch.Tensor],
 ) -> dict[int, torch.Tensor]:
     """
     Computes distributed set-wise means over scattered data.
 
     This function orchestrates a three-phase process:
-    1.  **Local Aggregation**: Each rank iterates through its slice of data,
+    1.  **Local Aggregation**: Each rank iterates through its slice of data (tensors),
         summing values and counting items for each set ID.
     2.  **Global Gathering**: The local sums and counts from all ranks are
         collected using a distributed `all_gather` operation.
@@ -28,20 +25,16 @@ def rank_scatter_mean[T](
     All ranks receive the identical, complete set of means.
 
     Args:
-        set_indices: An iterator that yields a flat sequence of set IDs,
-            corresponding to each data item.
-        rank_consumer: A consumer that provides an iterable of data items
-            for the current rank.
-        tensor_dtype: The desired data type for tensor conversions.
+        set_indices: An iterable that yields a flat sequence of set IDs,
+            corresponding to each tensor in `rank_data`.
+        rank_data: An iterable of tensors for the current rank.
 
     Returns:
         A dictionary mapping each set ID to its computed mean tensor. The
         result is identical across all ranks.
     """
     # Phase 1: Perform scatter-add on local data.
-    local_sums, local_counts = _local_aggregate(
-        set_indices, rank_consumer, tensor_dtype
-    )
+    local_sums, local_counts = _local_aggregate(set_indices, rank_data)
 
     # Phase 2: Gather results from all ranks if in a distributed environment.
     if is_distributed():
@@ -53,10 +46,9 @@ def rank_scatter_mean[T](
     return _compute_averages(global_sums, global_counts)
 
 
-def rank_scatter_mean_iter[T](
-    set_indices: Iterator[int],
-    rank_consumer: RankConsumer[T],
-    tensor_dtype: torch.dtype = torch.float32,
+def scatter_mean_iter(
+    set_indices: Iterable[int],
+    rank_data: Iterable[torch.Tensor],
 ) -> Iterator[tuple[int, torch.Tensor]]:
     """
     Computes all set means and yields them as an iterator.
@@ -66,36 +58,31 @@ def rank_scatter_mean_iter[T](
     interface to the final results.
 
     Args:
-        set_indices: An iterator that yields a flat sequence of set IDs,
-            corresponding to each data item.
-        rank_consumer: A consumer that provides an iterable of data items
-            for the current rank.
-        tensor_dtype: The desired data type for tensor conversions.
+        set_indices: An iterable that yields a flat sequence of set IDs,
+            corresponding to each tensor in `rank_data`.
+        rank_data: An iterable of tensors for the current rank.
 
     Yields:
         Tuples of (set_id, mean_tensor), sorted by set_id for determinism.
     """
-    means = rank_scatter_mean(set_indices, rank_consumer, tensor_dtype)
+    means = scatter_mean(set_indices, rank_data)
     # Yield results sorted by key for deterministic ordering.
     yield from sorted(means.items())
 
 
-def _local_aggregate[T](
-    set_indices: Iterator[int],
-    rank_consumer: RankConsumer[T],
-    tensor_dtype: torch.dtype,
+def _local_aggregate(
+    set_indices: Iterable[int],
+    rank_data: Iterable[torch.Tensor],
 ) -> tuple[dict[int, torch.Tensor], dict[int, int]]:
     """Aggregates sums and counts for data items on the local rank."""
     set_sums: dict[int, torch.Tensor] = {}
     # Use defaultdict for cleaner accumulation of counts.
     set_counts: dict[int, int] = defaultdict(int)
 
-    data_iter = rank_consumer.read(RankConsumerTarget.ThisRank)
-
-    for set_idx, item in zip(set_indices, data_iter):
-        # `torch.as_tensor` is more efficient as it avoids a data copy if
-        # the item is already a tensor-like object.
-        tensor = torch.as_tensor(item, dtype=tensor_dtype).cpu()
+    for set_idx, tensor in zip(set_indices, rank_data):
+        # Move tensor to CPU for aggregation to avoid cross-device issues
+        # and centralize data.
+        tensor = tensor.cpu()
 
         # Accumulate sum and count for the corresponding set.
         if set_idx in set_sums:
