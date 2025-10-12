@@ -12,52 +12,63 @@ from giggleml.embed_gen.embed_pipeline import DirectPipeline
 
 def test_pipeline():
     with contextlib.suppress(FileNotFoundError, OSError):
-        if os.path.isdir("tests/test_out.tmp"):
-            shutil.rmtree("tests/test_out.tmp")
-        else:
-            os.remove("tests/test_out.tmp")
+        shutil.rmtree("tests/test_out.tmp")
+    with contextlib.suppress(FileNotFoundError, OSError):
+        os.remove("tests/test_out.tmp.resize.lock")
+    with contextlib.suppress(FileNotFoundError, OSError):
         os.remove("tests/test_out.tmp.meta")
 
-    assert CountACGT(10).max_seq_len == 10  # to keep tests consistent
+    try:
+        assert CountACGT(10).max_seq_len == 10  # to keep tests consistent
 
-    # TODO: needs way more testing examples
+        # TODO: needs way more testing examples
 
-    # if not cuda.is_available(), workerCount is CPU count
-    worker_count = min(2, torch.cuda.device_count()) if torch.cuda.is_available() else 2
+        # if not cuda.is_available(), workerCount is CPU count
+        worker_count = (
+            min(2, torch.cuda.device_count()) if torch.cuda.is_available() else 2
+        )
 
-    pipeline = DirectPipeline(
-        embed_model=CountACGT(), batch_size=2, worker_count=worker_count
-    )
-    bed = BedDataset("tests/test.bed", "tests/test.fa")
-    embed = pipeline.embed(bed, "tests/test_out.tmp")
+        pipeline = DirectPipeline(
+            embed_model=CountACGT(), batch_size=2, worker_count=worker_count
+        )
+        bed = BedDataset("tests/test.bed", "tests/test.fa")
+        embed = pipeline.embed(bed, "tests/test_out.tmp")
 
-    assert len(embed.data) == len(bed)
-    # the second item 0-40 should have been split into
-    #   [0-10), [10-20), [20-30), [30-40)
-    #   that's
-    #     ACGTAGCTTA GACTACGCAG CATATAGCGC GCTAGCTACC
-    #   with ACGT counts
-    #     3223       3331       3322       2422
-    #   so after mean aggregation (perhaps not ideal for a counter)
-    #     2.75  3  2.25  2
-    expecting = [
-        [1, 0, 0, 0],
-        [2.75, 3, 2.25, 2],
-        [3.0, 2.0, 2.0, 3.0],
-        [3.0, 3.0, 3.0, 1.0],
-        [3.0, 3.0, 2.0, 2.0],
-        [3.0, 3.0, 2.5, 1.5],
-        [3.0, 2.0, 2.5, 2.5],
-        [5.0, 2.0, 1.0, 2.0],
-        [3.0, 0.0, 0.0, 2.0],
-        [5.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 5.0],
-    ]
+        assert len(embed.data) == len(bed)
+        # the second item 0-40 should have been split into
+        #   [0-10), [10-20), [20-30), [30-40)
+        #   that's
+        #     ACGTAGCTTA GACTACGCAG CATATAGCGC GCTAGCTACC
+        #   with ACGT counts
+        #     3223       3331       3322       2422
+        #   so after mean aggregation (perhaps not ideal for a counter)
+        #     2.75  3  2.25  2
+        expecting = [
+            [1, 0, 0, 0],
+            [2.75, 3, 2.25, 2],
+            [3.0, 2.0, 2.0, 3.0],
+            [3.0, 3.0, 3.0, 1.0],
+            [3.0, 3.0, 2.0, 2.0],
+            [3.0, 3.0, 2.5, 1.5],
+            [3.0, 2.0, 2.5, 2.5],
+            [5.0, 2.0, 1.0, 2.0],
+            [3.0, 0.0, 0.0, 2.0],
+            [5.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 5.0],
+        ]
 
-    for result, expect in zip(embed.data, expecting):
-        assert np.array_equal(result, np.array(expect))
+        for result, expect in zip(embed.data, expecting):
+            assert np.array_equal(result, np.array(expect))
 
-    embed.delete()
+        embed.delete()
+
+    finally:
+        with contextlib.suppress(FileNotFoundError, OSError):
+            shutil.rmtree("tests/test_out.tmp")
+        with contextlib.suppress(FileNotFoundError, OSError):
+            os.remove("tests/test_out.tmp.resize.lock")
+        with contextlib.suppress(FileNotFoundError, OSError):
+            os.remove("tests/test_out.tmp.meta")
 
 
 # INFO: disabled because the feature is no longer necessary. Support for this feature
