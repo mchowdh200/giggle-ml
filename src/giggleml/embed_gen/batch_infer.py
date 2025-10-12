@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import final
 
@@ -110,14 +110,13 @@ class BatchInfer:
     def _create_direct_zarr_consumer(
         self,
         output_paths: Sequence[str],
-        rank_indices_iterator: Iterator[Iterable[tuple[int, int]]],
+        rank_indices: Iterable[Iterable[tuple[int, int]]],
     ) -> ConsumerFn[Tensor]:
         """Create a consumer that writes directly to final zarr files with streaming indices."""
 
         # Convert torch dtype to zarr-compatible string
         model_dtype = self.model.embed_dtype
         zarr_dtype = str(model_dtype)[6:]  # "torch.float32" -> "float32"
-
         zarr_writer = MultiZarrWriter(
             output_paths=output_paths,
             shape=(0, self.embed_dim),
@@ -125,18 +124,18 @@ class BatchInfer:
             dtype=zarr_dtype,
         )
 
+        rank_indices_iterator = iter(rank_indices)
+
         def zarr_consumer(embeddings: Iterable[Tensor]) -> None:
             # Get the indices iterator for this batch
+
             try:
                 batch_indices_iterator = next(rank_indices_iterator)
             except StopIteration:
                 raise RuntimeError("No more indices available from rank simulation")
 
-            # Materialize only the indices for this batch
-            batch_indices = list(batch_indices_iterator)
-
             # Convert tensors to numpy arrays and write using the dedicated zarr writer
             numpy_embeddings = [tensor.cpu().numpy() for tensor in embeddings]
-            zarr_writer.write_batch(numpy_embeddings, batch_indices)
+            zarr_writer.write_batch(numpy_embeddings, list(batch_indices_iterator))
 
         return zarr_consumer
