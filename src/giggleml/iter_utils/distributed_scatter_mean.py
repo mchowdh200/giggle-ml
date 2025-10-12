@@ -46,7 +46,7 @@ def distributed_scatter_mean(
     return _compute_averages(global_sums, global_counts)
 
 
-def scatter_mean_iter(
+def distributed_scatter_mean_iter(
     set_indices: Iterable[int],
     rank_data: Iterable[torch.Tensor],
 ) -> Iterator[tuple[int, torch.Tensor]]:
@@ -65,7 +65,7 @@ def scatter_mean_iter(
     Yields:
         Tuples of (set_id, mean_tensor), sorted by set_id for determinism.
     """
-    means = scatter_mean(set_indices, rank_data)
+    means = distributed_scatter_mean(set_indices, rank_data)
     # Yield results sorted by key for deterministic ordering.
     yield from sorted(means.items())
 
