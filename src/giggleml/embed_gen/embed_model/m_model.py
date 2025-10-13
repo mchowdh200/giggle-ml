@@ -20,7 +20,6 @@ M Model, deep sets architecture, hyenaDNA pre-processing
 """
 
 from collections.abc import Sequence
-from typing import final
 from typing import Any, final
 
 import torch
@@ -83,21 +82,23 @@ class MModel(nn.Module):
             nn.Linear(rho_hidden_dim, self.final_embed_dim),
         )
 
-    def tokenize(self, item: Sequence[str]) -> dict[str, torch.Tensor]:
-        return self.hyena_dna.collate(item)
+    def tokenize(self, batch: Sequence[Sequence[str]]) -> list[dict[str, torch.Tensor]]:
+        return [self.hyena_dna.collate(item) for item in batch]
 
     @override
-    def forward(self, item: dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, batch: list[dict[str, torch.Tensor]]) -> torch.Tensor:
         # 1. phi pass
-        phi_embeds = self.set_contents_forward(item)
+        phi_embeds = torch.concat(
+            [torch.Tensor([self.set_contents_forward(item) for item in batch])]
+        )
 
         # 2. set-level mean
 
         dev = phi_embeds.device
-        set_indices = torch.Tensor(SetFlatIter(item).set_indices(), device=dev)
-        set_sizes = torch.Tensor([len(block) for block in item], device=dev)
+        set_indices = torch.Tensor(SetFlatIter(batch).set_indices(), device=dev)
+        set_sizes = torch.Tensor([len(block) for block in batch], device=dev)
 
-        set_means = torch.zeros(len(item), phi_embeds.shape[1]).scatter_add_(
+        set_means = torch.zeros(len(batch), phi_embeds.shape[1]).scatter_add_(
             0, set_indices.unsqueeze(1).expand_as(phi_embeds), phi_embeds
         ) / set_sizes.unsqueeze(1)
 
@@ -105,7 +106,10 @@ class MModel(nn.Module):
         return self.set_means_forward(set_means)
 
     def set_contents_forward(self, item: dict[str, torch.Tensor]) -> torch.Tensor:
-        """forward: only includes element-wise operations"""
+        """
+        Forward: only includes element-wise operations.
+        Takes a single, tokenized item (tokenized sequence set).
+        """
 
         # Step 1: Get sequence embeddings from HyenaDNA
         hdna_embeds = self.hyena_dna(item)
@@ -120,6 +124,7 @@ class MModel(nn.Module):
         return self.phi(hdna_embeds)
 
     def set_means_forward(self, batch: torch.Tensor) -> torch.Tensor:
+        """takes a batch of set means"""
         return self.rho(batch)
 
     def distributed_embed(
@@ -218,7 +223,7 @@ class RowMModel(EmbedModel):
 
     @override
     def collate(self, batch: Sequence[str]):
-        return self.mmodel.tokenize(batch)
+        return self.mmodel.tokenize([batch])
 
     @override
     def forward(self, batch: dict[str, torch.Tensor]):
