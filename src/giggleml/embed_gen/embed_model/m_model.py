@@ -21,6 +21,7 @@ M Model, deep sets architecture, hyenaDNA pre-processing
 
 from collections.abc import Sequence
 from typing import final
+from typing import Any, final
 
 import torch
 import torch.nn as nn
@@ -182,6 +183,11 @@ class MModel(nn.Module):
     @property
     def device(self):
         return next(self.hot_parameters()).device
+
+    @override
+    def to(self, *args: Any, **kwargs: Any) -> "MModel":
+        self.hyena_dna.to(*args, **kwargs)
+        return super().to(*args, **kwargs)
 
     @override
     def __repr__(self) -> str:
