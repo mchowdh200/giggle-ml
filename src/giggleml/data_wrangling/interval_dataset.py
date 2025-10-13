@@ -2,6 +2,7 @@ import gzip
 import random
 from collections.abc import Iterator, Sequence
 from functools import cached_property
+from os import PathLike
 from pathlib import Path
 from typing import Callable, Protocol, final, override
 
@@ -36,7 +37,7 @@ class LateIntervalDataset(KindDataset[GenomicInterval]):
         self,
         lazy_getter: Callable[[], list[GenomicInterval]],
         lazy_length: Callable[[], int] | int | None,
-        associated_fasta_path: str | Path | None,
+        associated_fasta_path: PathLike | None,
     ):
         self.lazy_getter: Callable[[], list[GenomicInterval]] = lazy_getter
         self.lazy_length: Callable[[], int] | int | None = lazy_length
@@ -69,7 +70,7 @@ class MemoryIntervalDataset(KindDataset[GenomicInterval]):
     def __init__(
         self,
         intervals: Sequence[GenomicInterval],
-        associated_fasta_path: str | Path | None = None,
+        associated_fasta_path: PathLike | None = None,
     ):
         super().__init__()
         self.intervals = intervals
@@ -88,8 +89,8 @@ class MemoryIntervalDataset(KindDataset[GenomicInterval]):
 class BedDataset(LateIntervalDataset):
     def __init__(
         self,
-        path: str | Path,
-        associated_fasta_path: str | Path | None = None,
+        path: PathLike,
+        associated_fasta_path: PathLike | None = None,
         limit: int | None = None,
         sampling_rate: float = 1,
     ):
