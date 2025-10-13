@@ -19,6 +19,7 @@ M Model, deep sets architecture, hyenaDNA pre-processing
 
 """
 
+from collections.abc import Sequence
 from typing import final
 
 import torch
@@ -87,7 +88,7 @@ class MModel(HyenaDNA):
         return self.phi(hdna_embeds)
 
     def distributed_embed(
-        self, data: list[IntervalDataset], batch_size: int, sub_workers: int
+        self, data: Sequence[IntervalDataset], batch_size: int, sub_workers: int
     ) -> torch.Tensor:
         """
         Generate set-level embeddings using distributed processing.
