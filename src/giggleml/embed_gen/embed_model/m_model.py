@@ -32,7 +32,7 @@ from giggleml.embed_gen.dex import Dex
 from giggleml.embed_gen.embed_model import HyenaDNA
 from giggleml.iter_utils.distributed_scatter_mean import distributed_scatter_mean_iter
 from giggleml.iter_utils.set_flat_iter import SetFlatIter
-from giggleml.utils.torch_utils import freeze_model
+from giggleml.utils.torch_utils import all_gather_concat, freeze_model
 
 
 @final
@@ -56,7 +56,7 @@ class MModel(HyenaDNA):
         hyena_embed_dim = self.embed_dim
         phi_hidden_dim = phi_hidden_dim_factor * hyena_embed_dim
         rho_hidden_dim = rho_hidden_dim_factor * hyena_embed_dim
-        final_embed_dim = final_embed_dim_factor * hyena_embed_dim
+        self.final_embed_dim = final_embed_dim_factor * hyena_embed_dim
 
         self.phi = nn.Sequential(
             nn.Linear(hyena_embed_dim, phi_hidden_dim),
@@ -69,7 +69,7 @@ class MModel(HyenaDNA):
         self.rho = nn.Sequential(
             nn.Linear(rho_hidden_dim, rho_hidden_dim),
             nn.Tanh(),
-            nn.Linear(rho_hidden_dim, final_embed_dim),
+            nn.Linear(rho_hidden_dim, self.final_embed_dim),
         )
 
     @override
@@ -117,16 +117,21 @@ class MModel(HyenaDNA):
         BatchInfer(self, batch_size, sub_workers).raw(data, phi_embeds.extend)
 
         # 3. set-level mean
-        set_indices = SetFlatIter(data).set_indices()
+        structure = SetFlatIter(data)
+        set_indices = structure.set_indices()
         set_means = torch.stack(
             [i for (_, i) in distributed_scatter_mean_iter(set_indices, phi_embeds)]
         )
 
         # 3. rho pass
-        rho_embeds = list()
-        Dex(self.rho).execute(set_means, rho_embeds.extend, batch_size, sub_workers)
-        # note that this is only this rank's data
-        return torch.stack(rho_embeds)
+        local_rho_embeds = list()
+        rho_dex = Dex(self.rho)
+        rho_dex.execute(set_means, local_rho_embeds.extend, batch_size, sub_workers)
+
+        # 4. regroup
+        total_rho_embeds = all_gather_concat(torch.stack(local_rho_embeds))
+        total_ordering = rho_dex.simulate_global_concat(range(len(data)), batch_size)
+        return total_rho_embeds[total_ordering]
 
     @override
     def train(self, mode: bool = True) -> "MModel":
