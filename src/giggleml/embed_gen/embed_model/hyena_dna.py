@@ -3,7 +3,6 @@ from functools import cached_property
 from typing import Any
 
 import torch
-from torch._prims_common import DeviceLikeType
 from torch.types import Device
 from transformers import AutoTokenizer
 from transformers.models.auto.modeling_auto import AutoModel
@@ -106,11 +105,28 @@ class HyenaDNA(EmbedModel):
         return self._device
 
     @override
-    def to(
-        self, device: DeviceLikeType | None, *args: Any, **kwargs: Any
-    ) -> "HyenaDNA":
+    def to(self, *args: Any, **kwargs: Any) -> "HyenaDNA":
+        device = None
+
+        # Check for the 'device' keyword argument
+        if "device" in kwargs:
+            device = kwargs.get("device")
+        # If not in kwargs, check positional arguments
+        elif args:
+            target = args[0]
+            # The argument could be a torch.Tensor, a device string, or a torch.device
+            if isinstance(target, torch.Tensor):
+                device = target.device
+            else:
+                # Handles cases like model.to('cuda') or model.to(torch.device('cuda')).
+                # It gracefully ignores other types like model.to(torch.float32).
+                try:
+                    device = torch.device(target)
+                except (TypeError, RuntimeError):
+                    pass
+
         self._device = device
-        return super().to(device, *args, **kwargs)
+        return super().to(*args, **kwargs)
 
     @override
     def collate(self, batch: Sequence[str]) -> dict[str, torch.Tensor]:
