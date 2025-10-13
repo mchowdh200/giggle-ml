@@ -82,6 +82,9 @@ class MModel(nn.Module):
             nn.Linear(rho_hidden_dim, self.final_embed_dim),
         )
 
+        # align with hyena dna dtype
+        self.to(dtype=self.hyena_dna.embed_dtype)
+
     def tokenize(self, batch: Sequence[Sequence[str]]) -> list[dict[str, torch.Tensor]]:
         return [self.hyena_dna.collate(item) for item in batch]
 
