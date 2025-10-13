@@ -32,6 +32,12 @@ class IntervalClusterTripletFT(Module):
         self.model: EmbedModel = model
         self.loss: Loss3 = loss
 
+    def _prepare_embeddings_and_labels(self, batch: Tensor) -> tuple[Tensor, Tensor]:
+        """Prepare embeddings and labels from batch."""
+        all_embeds = batch.reshape(-1, self.model.embed_dim)
+        all_labels = self._create_cluster_labels(batch)
+        return all_embeds, all_labels
+
     def _create_cluster_labels(self, batch: Tensor) -> Tensor:
         """Create labels for cluster assignment."""
         return (
@@ -40,12 +46,6 @@ class IntervalClusterTripletFT(Module):
             .expand(batch.shape[0], batch.shape[1])
             .reshape(-1)
         )
-
-    def _prepare_embeddings_and_labels(self, batch: Tensor) -> tuple[Tensor, Tensor]:
-        """Prepare embeddings and labels from batch."""
-        all_embeds = batch.reshape(-1, self.model.embed_dim)
-        all_labels = self._create_cluster_labels(batch)
-        return all_embeds, all_labels
 
     def _mine_hard_triplets(
         self, embeds: Tensor, all_embeds: Tensor, labels: Tensor, all_labels: Tensor
