@@ -83,7 +83,8 @@ class MModel(HyenaDNA):
         # Step 2: Apply phi network to each sequence embedding
         if self.use_gradient_checkpointing and self.training:
             # prevent None
-            assert (activs := checkpoint(self.phi, hdna_embeds, use_reentrant=False))
+            activs = checkpoint(self.phi, hdna_embeds, use_reentrant=False)
+            assert activs is not None
             return activs
         return self.phi(hdna_embeds)
 
