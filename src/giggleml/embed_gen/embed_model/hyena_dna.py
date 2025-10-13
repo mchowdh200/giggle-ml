@@ -1,7 +1,9 @@
 from collections.abc import Sequence
 from functools import cached_property
+from typing import Any
 
 import torch
+from torch._prims_common import DeviceLikeType
 from torch.types import Device
 from transformers import AutoTokenizer
 from transformers.models.auto.modeling_auto import AutoModel
@@ -79,6 +81,8 @@ class HyenaDNA(EmbedModel):
         self.embed_dim: int = e_dim
         self.size_type: str = size  # used for __repr__ only
 
+        self._device: Device | None = None
+
     @cached_property
     def _model(self):
         # WARN: HyenaDNA cannot be torch.compile(.)ed because the Hyena layers
@@ -90,7 +94,7 @@ class HyenaDNA(EmbedModel):
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
             revision=self.rev,
-        )
+        ).to(self._device)
 
     @cached_property
     def _tokenizer(self):
@@ -98,7 +102,14 @@ class HyenaDNA(EmbedModel):
 
     @property
     def device(self) -> Device:
-        return self._model.device
+        return self._device
+
+    @override
+    def to(
+        self, device: DeviceLikeType | None, *args: Any, **kwargs: Any
+    ) -> "HyenaDNA":
+        self._device = device
+        return super().to(device, *args, **kwargs)
 
     @override
     def collate(self, batch: Sequence[str]) -> dict[str, torch.Tensor]:
