@@ -9,13 +9,10 @@ from typing import cast
 
 from lightning_fabric import Fabric
 from lightning_fabric.loggers.tensorboard import TensorBoardLogger
-from lightning_fabric.wrappers import nn
 from torch import Tensor, optim
 from torch.nn.modules.loss import TripletMarginLoss
 
-from giggleml.embed_gen.embed_model import EmbedModel, HyenaDNA
-from giggleml.embed_gen.embed_pipeline import DirectPipeline
-from giggleml.train.embed_utils import embed_batch
+from giggleml.embed_gen.embed_model.m_model import MModel
 from giggleml.train.rme_clusters_dataset import RmeSeqpareClusters
 from giggleml.train.seqpare_db import SeqpareDB
 from giggleml.train.triplet_trainer import IntervalClusterTripletFT
@@ -180,17 +177,18 @@ def run_training(
     beta2 = beta2 or 0.999
     weight_decay = weight_decay or 0.0
 
-    emodel: EmbedModel = HyenaDNA("16k", training=True)
+    model = MModel("16k")
     optimizer = optim.AdamW(
         lr=learning_rate,
-        params=emodel.trainable_model.parameters(),
+        params=model.hot_parameters(),
         betas=(beta1, beta2),
         weight_decay=weight_decay,
     )
     loss = TripletMarginLoss(margin=margin)
 
     # the embed pipeline is used for inference
-    pipeline = DirectPipeline(emodel, 1)
+    dex_batch_size = 10
+    dex_sub_workers = 4
 
     # other
     seqpare_positive_threshold = positive_threshold or 0.7
@@ -261,10 +259,9 @@ def run_training(
         seed=seed + 1,  # Different seed for evaluation
     )
 
-    train_step = IntervalClusterTripletFT(world_size, rank, device, emodel, loss)
+    train_step = IntervalClusterTripletFT(world_size, rank, device, model, loss)
     # Use fabric.setup to wrap the components. This prepares them for the
     # chosen hardware and strategy (e.g., wraps model in DDP).
-    model: nn.Module = emodel.trainable_model
     model, optimizer = fabric.setup(model, optimizer)
 
     # INFO: ----------------------------
@@ -313,10 +310,12 @@ def run_training(
             optimizer.zero_grad()
 
             batch = next(train_data)
-            batch_tensor = embed_batch(pipeline, emodel.embed_dim, batch, fasta)
+            batch_tensor = model.distributed_embed(
+                batch, dex_batch_size, dex_sub_workers
+            )
             batch_tensor: Tensor = cast(Tensor, fabric.all_gather(batch_tensor))
             batch_tensor = batch_tensor.reshape(
-                clusters_per_batch * world_size, cluster_size, emodel.embed_dim
+                clusters_per_batch * world_size, cluster_size, model.embed_dim
             ).to(device)
 
             loss = train_step.training_step(batch_tensor)
@@ -333,14 +332,14 @@ def run_training(
                     model.eval()
                     eval_data = iter(eval_dataset)
                     eval_batch = next(eval_data)
-                    eval_batch_tensor = embed_batch(
-                        pipeline, emodel.embed_dim, eval_batch, fasta
+                    eval_batch_tensor = model.embed_distributed(
+                        eval_batch, dex_batch_size, dex_sub_workers
                     )
                     eval_batch_tensor: Tensor = cast(
                         Tensor, fabric.all_gather(eval_batch_tensor)
                     )
                     eval_batch_tensor = eval_batch_tensor.reshape(
-                        eval_clusters_amnt, cluster_size, emodel.embed_dim
+                        eval_clusters_amnt, cluster_size, model.embed_dim
                     ).to(device)
 
                     eval_loss, eval_accuracy = train_step.validation_step(
@@ -405,10 +404,10 @@ def run_training(
 
         # Run evaluation on a single batch
         batch = next(eval_data)
-        batch_tensor = embed_batch(pipeline, emodel.embed_dim, batch, fasta)
+        batch_tensor = model.embed_distributed(batch, dex_batch_size, dex_sub_workers)
         batch_tensor: Tensor = cast(Tensor, fabric.all_gather(batch_tensor))
         batch_tensor = batch_tensor.reshape(
-            eval_clusters_amnt, cluster_size, emodel.embed_dim
+            eval_clusters_amnt, cluster_size, model.embed_dim
         ).to(device)
 
         eval_loss, eval_accuracy = train_step.validation_step(batch_tensor)
