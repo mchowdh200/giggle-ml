@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, IterableDataset
 # Assumes these local utility imports exist
 from giggleml.iter_utils.rank_iter import RankIter
 from giggleml.utils.nothing import nothing, yield_through
-from giggleml.utils.torch_utils import guess_device, is_distributed
+from giggleml.utils.torch_utils import get_world_size, guess_device, is_distributed
 
 # Type aliases for pipeline components
 type PreprocessorFn[T_in, U_pre] = Callable[[T_in], Iterable[U_pre]]
@@ -123,6 +123,20 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         blocks = itertools.batched(data, batch_size)
         rank_data = RankIter(blocks)
         yield from rank_data
+
+    def simulate_global_concat[T](self, data: Iterable[T], batch_size: int) -> list[T]:
+        """
+        Simulate distributed batching and concatenate all ranks' data in order.
+        Outputs for each rank are individually concatenated, then those concatenated.
+        """
+        world_size = get_world_size()
+        ranks = [list() for _ in range(world_size)]
+
+        for i, block in enumerate(itertools.batched(data, batch_size)):
+            rank_idx = i % world_size
+            ranks[rank_idx].extend(block)
+
+        return sum(ranks, list())
 
     def execute(
         self,
