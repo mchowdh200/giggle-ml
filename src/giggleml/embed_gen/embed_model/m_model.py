@@ -177,7 +177,7 @@ class MModel(nn.Module):
         return self
 
     def hot_parameters(self):
-        return [p for p in self.parameters() if p.requires_grad]
+        return (p for p in self.parameters() if p.requires_grad)
 
     @override
     def __repr__(self) -> str:
