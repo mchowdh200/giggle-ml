@@ -38,17 +38,17 @@ def fix_bed_ext[T: str | Path](path: T) -> T:
 
 
 @overload
-def as_path(path: Path | None) -> Path: ...
+def as_path(path: os.PathLike) -> Path: ...
 
 
 @overload
-def as_path(path: str | None) -> Path: ...
+def as_path(path: None) -> None: ...
 
 
-def as_path(path: str | Path | None) -> Path | None:
-    if isinstance(path, str):
+def as_path(path: os.PathLike | None) -> Path | None:
+    if path:
         return Path(path)
-    return path
+    return None
 
 
 def is_path_like(path: Any) -> bool:
