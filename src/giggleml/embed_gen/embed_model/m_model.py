@@ -179,6 +179,10 @@ class MModel(nn.Module):
     def hot_parameters(self):
         return (p for p in self.parameters() if p.requires_grad)
 
+    @property
+    def device(self):
+        return next(self.hot_parameters()).device
+
     @override
     def __repr__(self) -> str:
         return (
