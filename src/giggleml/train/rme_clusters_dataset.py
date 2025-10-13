@@ -198,7 +198,7 @@ class RmeSeqpareClusters(IterableDataset):
             yield (next_anchor := self.sdb.idx_to_label(next_anchor_idx))
             available &= ~self.sdb.fetch_mask(next_anchor, self.positive_threshold)
 
-    def save_dict(self) -> dict:
+    def save_state(self) -> dict:
         """
         Save the current state of the dataset for resumption.
 
@@ -206,48 +206,21 @@ class RmeSeqpareClusters(IterableDataset):
             Dictionary containing all necessary state information for resumption.
         """
         return {
-            "rme_dir": str(self.rme_dir),
-            "world_size": self.world_size,
-            "rank": self.rank,
-            "positive_threshold": self.positive_threshold,
-            "clusters_amnt": self.clusters_amnt,
-            "groups_per_cluster": self.groups_per_cluster,
-            "intervals_per_group": self.intervals_per_group,
-            "allowed_rme_names": list(self.allowed_rme_names),
-            "seed": self.seed,
-            # Random number generator states
             "world_rng_state": self._world_rng.getstate(),
             "rank_rng_state": self._rank_rng.getstate(),
         }
 
-    @classmethod
-    def load_dict(cls, state_dict: dict, seqpare: SeqpareDB) -> "RmeSeqpareClusters":
+    def load_state(self, state_dict: dict) -> "RmeSeqpareClusters":
         """
         Load dataset from saved state for resumption.
 
         Args:
             state_dict: Dictionary containing saved state information.
-            seqpare: An instance of the SeqpareDB (not serialized due to complexity).
 
         Returns:
-            RmeSeqpareClusters instance restored from saved state.
+            self
         """
-        # Create instance with saved parameters
-        instance = cls(
-            road_epig_path=state_dict["rme_dir"],
-            seqpare=seqpare,
-            world_size=state_dict["world_size"],
-            rank=state_dict["rank"],
-            positive_threshold=state_dict["positive_threshold"],
-            clusters_amnt=state_dict["clusters_amnt"],
-            groups_per_cluster=state_dict["groups_per_cluster"],
-            intervals_per_group=state_dict["intervals_per_group"],
-            allowed_rme_names=state_dict["allowed_rme_names"],
-            seed=state_dict["seed"],
-        )
-
         # Restore random number generator states
-        instance._world_rng.setstate(state_dict["world_rng_state"])
-        instance._rank_rng.setstate(state_dict["rank_rng_state"])
-
-        return instance
+        self._world_rng.setstate(state_dict["world_rng_state"])
+        self._rank_rng.setstate(state_dict["rank_rng_state"])
+        return self
