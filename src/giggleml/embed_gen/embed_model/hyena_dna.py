@@ -16,6 +16,7 @@ from giggleml.utils.types import lazy
 @lazy
 class HyenaDNA(EmbedModel):
     wants = "sequences"
+    embed_dtype = torch.float16
 
     def __init__(self, size: str = "1k"):
         super().__init__()
