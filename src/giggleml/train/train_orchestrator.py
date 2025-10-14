@@ -15,7 +15,7 @@ from torch import Tensor, optim
 from torch.nn.modules.loss import TripletMarginLoss
 
 from giggleml.data_wrangling.interval_dataset import MemoryIntervalDataset
-from giggleml.embed_gen.embed_model.m_model import MModel
+from giggleml.models.m_model import MModel
 from giggleml.train.rme_clusters_dataset import Cluster, RmeSeqpareClusters
 from giggleml.train.seqpare_db import SeqpareDB
 from giggleml.train.triplet_trainer import IntervalClusterTripletFT

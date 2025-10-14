@@ -16,7 +16,7 @@ from ..data_wrangling import fasta
 from ..data_wrangling.interval_dataset import IntervalDataset
 from . import embed_io
 from .embed_io import Embed, EmbedMeta
-from .embed_model import EmbedModel
+from giggleml.models.genomic_model import GenomicModel
 
 
 @lazy
@@ -60,7 +60,7 @@ class EmbedPipeline(ABC):
 class DirectPipeline(EmbedPipeline):
     def __init__(
         self,
-        embed_model: EmbedModel,
+        embed_model: GenomicModel,
         batch_size: int,
         worker_count: int | None = None,
         sub_workers: int = 0,
@@ -68,7 +68,7 @@ class DirectPipeline(EmbedPipeline):
         """
         @param sub_workers: Number of DataLoader workers for batch construction
         """
-        self.model: EmbedModel = embed_model
+        self.model: GenomicModel = embed_model
         self.batch_size: int = batch_size
         self.worker_count: int | None = worker_count
         self.sub_workers: int = sub_workers

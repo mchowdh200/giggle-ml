@@ -6,8 +6,8 @@ import numpy as np
 import torch
 
 from giggleml.data_wrangling.interval_dataset import BedDataset
-from giggleml.embed_gen.embed_model import CountACGT
 from giggleml.embed_gen.embed_pipeline import DirectPipeline
+from giggleml.models.test_models import CountACGT
 
 
 def test_pipeline():

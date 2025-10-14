@@ -8,12 +8,12 @@ from transformers import AutoTokenizer
 from transformers.models.auto.modeling_auto import AutoModel
 from typing_extensions import override
 
-from giggleml.embed_gen.embed_model import EmbedModel
+from giggleml.models.genomic_model import GenomicModel
 from giggleml.utils.types import lazy
 
 
 @lazy
-class HyenaDNA(EmbedModel):
+class HyenaDNA(GenomicModel):
     wants = "sequences"
     embed_dtype = torch.float16
 

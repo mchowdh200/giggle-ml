@@ -16,7 +16,7 @@ from os.path import basename
 
 from giggleml.data_wrangling.interval_dataset import BedDataset
 from giggleml.embed_gen import mean_embed_dict
-from giggleml.embed_gen.embed_model import HyenaDNA
+from giggleml.models import HyenaDNA
 from giggleml.embed_gen.embed_pipeline import DirectPipeline
 
 

@@ -7,7 +7,7 @@ from giggleml.data_wrangling import fasta
 from giggleml.utils.types import GenomicInterval
 
 from .dex import Dex
-from .embed_model import EmbedModel
+from giggleml.models.genomic_model import GenomicModel
 
 
 class _PicklableCollateWithFASTA:
@@ -84,7 +84,7 @@ class GenomicDex:
     """Factory for creating genomic processing pipelines using Dex."""
 
     @staticmethod
-    def create_pipeline(model: EmbedModel, fasta_path: Path | None = None) -> Dex:
+    def create_pipeline(model: GenomicModel, fasta_path: Path | None = None) -> Dex:
         """Create a Dex pipeline configured for genomic interval processing."""
         wants_seq = model.wants == "sequences"
 
@@ -106,4 +106,3 @@ class GenomicDex:
             postprocessor_fn=postprocessor,
             collate_fn=collate_fn,
         )
-

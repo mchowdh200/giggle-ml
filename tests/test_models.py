@@ -2,7 +2,8 @@ from unittest.mock import patch
 
 import torch
 
-from giggleml.embed_gen.embed_model import HyenaDNA, MModel
+from giggleml.models.hyena_dna import HyenaDNA
+from giggleml.models.m_model import MModel
 from giggleml.utils.torch_utils import guess_device
 
 
@@ -199,7 +200,7 @@ def test_mmodel_distributed_embed_structure():
 
 def test_row_mmodel():
     """Test the RowMModel helper class."""
-    from giggleml.embed_gen.embed_model.m_model import RowMModel
+    from giggleml.models.m_model import RowMModel
 
     mmodel = MModel(size="1k")
     row_model = RowMModel(mmodel)

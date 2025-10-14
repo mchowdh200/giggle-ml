@@ -4,13 +4,13 @@ from typing import final
 import torch
 from typing_extensions import override
 
-from giggleml.embed_gen.embed_model import EmbedModel
+from giggleml.models.genomic_model import GenomicModel
 from giggleml.utils.types import GenomicInterval, lazy
 
 
 @lazy
 @final
-class CountACGT(EmbedModel):
+class CountACGT(GenomicModel):
     """
     Developed for testing purposes. Has an arbitrary max sequence length of 10.
     Creates a 4 dimensional embedding vector for counts of ACGT
@@ -57,7 +57,7 @@ class CountACGT(EmbedModel):
 
 @lazy
 @final
-class TrivialModel(EmbedModel):
+class TrivialModel(GenomicModel):
     wants = "intervals"
 
     def __init__(self, max_seq_len: int = 10):

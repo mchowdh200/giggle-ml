@@ -30,8 +30,8 @@ from typing_extensions import override
 from giggleml.data_wrangling.interval_dataset import IntervalDataset
 from giggleml.embed_gen.batch_infer import BatchInfer
 from giggleml.embed_gen.dex import Dex
-from giggleml.embed_gen.embed_model.embed_model import EmbedModel
-from giggleml.embed_gen.embed_model.hyena_dna import HyenaDNA
+from giggleml.models.genomic_model import GenomicModel
+from giggleml.models.hyena_dna import HyenaDNA
 from giggleml.iter_utils.distributed_scatter_mean import distributed_scatter_mean_iter
 from giggleml.iter_utils.set_flat_iter import SetFlatIter
 from giggleml.utils.torch_utils import all_gather_concat, freeze_model
@@ -216,7 +216,7 @@ class MModel(nn.Module):
 
 
 @final
-class RowMModel(EmbedModel):
+class RowMModel(GenomicModel):
     """
     Simplified MModel that only performs the element-wise (within the sets) operations
     """

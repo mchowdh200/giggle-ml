@@ -10,12 +10,12 @@ from giggleml.utils.types import lazy
 # INFO: !! Currently all modules assume "embedding vectors" are float32.
 
 # ===================
-#    EmbedModel
+#    GenomicModel
 # ===================
 
 
 @lazy
-class EmbedModel(ABC, nn.Module):
+class GenomicModel(ABC, nn.Module):
     wants: str  # Type of data this model accepts: "sequences" or "intervals"
     max_seq_len: int | None  # Maximum sequence length the model can handle
     embed_dim: int  # Dimension of the output embeddings

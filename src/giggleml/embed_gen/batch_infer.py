@@ -10,7 +10,7 @@ from giggleml.utils.types import lazy
 
 from ..data_wrangling.interval_dataset import IntervalDataset
 from .dex import ConsumerFn, Dex
-from .embed_model import EmbedModel
+from giggleml.models.genomic_model import GenomicModel
 from .genomic_dex import GenomicDex
 
 
@@ -19,7 +19,7 @@ from .genomic_dex import GenomicDex
 class BatchInfer:
     def __init__(
         self,
-        model: EmbedModel,
+        model: GenomicModel,
         batch_size: int,
         num_workers: int = 0,
     ):
