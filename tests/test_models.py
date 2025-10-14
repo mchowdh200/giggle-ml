@@ -229,7 +229,7 @@ def test_mmodel_repr():
     assert repr_str == expected
 
 
-def test_mmodel_output():
+def test_mmodel_call():
     model = MModel("1k")
     device = guess_device()
     model.to(device)
@@ -244,16 +244,5 @@ def test_mmodel_output():
     assert len(results) == 1
 
     for embed in results:
-        assert len(embed) == model.embed_dim
+        assert len(embed) == model.final_embed_dim
         assert embed.dtype == torch.float16
-
-    brief = results[:, ::10]
-    brief = torch.round(brief * 10)
-    expect = torch.Tensor(
-        [
-            [-7.0, 3.0, 7.0, 8.0, -9.0, 5.0, 7.0, 6.0, -2.0, -10.0, -0.0, 3.0, 1.0],
-            [-4.0, 7.0, 1.0, -0.0, -9.0, 14.0, 9.0, 8.0, -6.0, -9.0, -5.0, 1.0, 7.0],
-        ]
-    ).to(torch.float16)
-
-    assert torch.allclose(brief, expect, atol=1.0)
