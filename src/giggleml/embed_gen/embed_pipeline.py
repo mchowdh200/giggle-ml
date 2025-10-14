@@ -8,7 +8,8 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from giggleml.embed_gen.batch_infer import BatchInfer
+from giggleml.embed_gen.batch_infer import GenomicEmbedder
+from giggleml.models.genomic_model import GenomicModel
 from giggleml.utils.parallel import Parallel
 from giggleml.utils.types import lazy
 
@@ -16,7 +17,6 @@ from ..data_wrangling import fasta
 from ..data_wrangling.interval_dataset import IntervalDataset
 from . import embed_io
 from .embed_io import Embed, EmbedMeta
-from giggleml.models.genomic_model import GenomicModel
 
 
 @lazy
@@ -72,7 +72,9 @@ class DirectPipeline(EmbedPipeline):
         self.batch_size: int = batch_size
         self.worker_count: int | None = worker_count
         self.sub_workers: int = sub_workers
-        self.infer: BatchInfer = BatchInfer(embed_model, batch_size, sub_workers)
+        self.infer: GenomicEmbedder = GenomicEmbedder(
+            embed_model, batch_size, sub_workers
+        )
 
     @overload
     def embed(
@@ -159,7 +161,7 @@ class DirectPipeline(EmbedPipeline):
         # File-based mode: use distributed zarr writing
         # Run in distributed environment with picklable worker function
         Parallel(self.worker_count)(
-            BatchInfer(self.model, self.batch_size, self.sub_workers).to_disk,
+            GenomicEmbedder(self.model, self.batch_size, self.sub_workers).to_disk,
             intervals,
             out,
         )

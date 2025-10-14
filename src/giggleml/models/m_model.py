@@ -28,12 +28,12 @@ from torch.utils.checkpoint import checkpoint
 from typing_extensions import override
 
 from giggleml.data_wrangling.interval_dataset import IntervalDataset
-from giggleml.embed_gen.batch_infer import BatchInfer
+from giggleml.embed_gen.batch_infer import GenomicEmbedder
 from giggleml.embed_gen.dex import Dex
-from giggleml.models.genomic_model import GenomicModel
-from giggleml.models.hyena_dna import HyenaDNA
 from giggleml.iter_utils.distributed_scatter_mean import distributed_scatter_mean_iter
 from giggleml.iter_utils.set_flat_iter import SetFlatIter
+from giggleml.models.genomic_model import GenomicModel
+from giggleml.models.hyena_dna import HyenaDNA
 from giggleml.utils.torch_utils import all_gather_concat, freeze_model
 
 
@@ -164,8 +164,8 @@ class MModel(nn.Module):
 
         # 2. create element-wise embeddings
         phi_embeds = list()
-        # BatchInfer is a Dex that handles genomic nuances like FASTA mapping & interval chunking
-        BatchInfer(RowMModel(self), batch_size, sub_workers).raw(
+        # this wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking
+        GenomicEmbedder(RowMModel(self), batch_size, sub_workers).raw(
             data, phi_embeds.extend
         )
 
