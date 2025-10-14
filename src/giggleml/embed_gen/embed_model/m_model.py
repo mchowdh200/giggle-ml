@@ -91,17 +91,24 @@ class MModel(nn.Module):
     @override
     def forward(self, batch: list[dict[str, torch.Tensor]]) -> torch.Tensor:
         # 1. phi pass
-        phi_embeds = torch.concat(
-            [torch.Tensor([self.set_contents_forward(item) for item in batch])]
+        phi_embeds = torch.cat(
+            [self.set_contents_forward(item) for item in batch], dim=0
         )
 
         # 2. set-level mean
 
         dev = phi_embeds.device
-        set_indices = torch.Tensor(SetFlatIter(batch).set_indices(), device=dev)
-        set_sizes = torch.Tensor([len(block) for block in batch], device=dev)
+        dtype: torch.dtype = phi_embeds.dtype
+        set_indices = torch.tensor(
+            list(SetFlatIter(batch).set_indices()), device=dev, dtype=torch.int64
+        )
+        set_sizes = torch.tensor(
+            [len(block) for block in batch], device=dev, dtype=dtype
+        )
 
-        set_means = torch.zeros(len(batch), phi_embeds.shape[1]).scatter_add_(
+        set_means = torch.zeros(
+            len(batch), phi_embeds.shape[1], device=dev, dtype=dtype
+        ).scatter_add_(
             0, set_indices.unsqueeze(1).expand_as(phi_embeds), phi_embeds
         ) / set_sizes.unsqueeze(1)
 
