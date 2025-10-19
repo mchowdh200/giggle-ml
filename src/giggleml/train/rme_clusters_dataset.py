@@ -45,7 +45,7 @@ class RmeSeqpareClusters(IterableDataset):
         seqpare: SeqpareDB,
         world_size: int,
         rank: int,
-        positive_threshold: float = 0.7,
+        positive_threshold: float = 0.1,
         clusters_amnt: int = 10,
         groups_per_cluster: int = 10,
         intervals_per_group: int = 30,

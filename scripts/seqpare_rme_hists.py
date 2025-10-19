@@ -40,13 +40,16 @@ def main():
         plt.suptitle(f"{small:.1f}% < {whats_small}, max {top:.3f}")
         plt.show()
 
-        # top 10% quartile
-        quartile_10 = similarities[int(len(similarities) * 0.9)]
+        # 90% percentile
+        percentile_10 = round(similarities[round(len(similarities) * 0.1)], 2)
+        percentile_90 = round(similarities[round(len(similarities) * 0.9)], 2)
         plt.plot(similarities)
         plt.title(f"{name} sorted similarities")
         plt.xlabel("(sorted) index")
         plt.ylabel("similarity")
-        plt.suptitle(f"{quartile_10} 10% quartile in similarity")
+        plt.suptitle(
+            f"{percentile_10}-{percentile_90} 10%-90% percentiles in similarity"
+        )
         plt.show()
 
 

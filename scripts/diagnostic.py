@@ -1,32 +1,24 @@
-import os
-import pickle
+from pathlib import Path
 
-from matplotlib import pyplot as plt
+from giggleml.train.rme_clusters_dataset import RmeSeqpareClusters
+from giggleml.train.seqpare_db import SeqpareDB
 
 
 def main():
-    for name in os.listdir("data/roadep_combo"):
-        a = pickle.load(
-            open(
-                f"data/roadep_combo/{name}",
-                "rb",
-            )
-        )
+    data_path = Path("data", "roadmap_epigenomics")
+    sdb = SeqpareDB(data_path / "seqpareRanks")
+    dset = RmeSeqpareClusters(data_path / "beds", sdb, 1, 0)
 
-        items = list(a.items())
-        items.sort(key=lambda x: x[1])
-        [print(x) for x in items]
+    threshold = 0.1
+    print(
+        [int(sum(sdb.fetch_mask(name, threshold))) for name in dset.allowed_rme_names]
+    )
 
-        floats = [x[1] for x in items]
-        plt.hist(floats, bins=20)
-        small = sum([x[1] < 0.05 for x in items]) / 1905 * 100
-        top = max([x[1] for x in items])
-        plt.title(f"{small}% | {top}")
-        plt.show()
-
-        plt.plot(floats)
-        plt.title(f"{small}% | {top}")
-        plt.show()
+    # dset_iter = iter(dset)
+    #
+    # for i in range(1):
+    #     item = next(dset_iter)
+    #     print(item)
 
 
 if __name__ == "__main__":
