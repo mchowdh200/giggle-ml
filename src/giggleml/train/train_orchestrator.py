@@ -31,7 +31,7 @@ class TrainConfig:
     validation_freq: int = 5
     seed: int = 42
     base_data_dir: Path = Path("data")
-    base_model_dir: Path = Path("models/hdna_seqpare_08092025")
+    base_model_dir: Path = Path("modelCkpts/hdna_seqpare_08092025")
     fasta_path: Path = field(init=False)
     rme_beds_path: Path = field(init=False)
     seqpare_dir: Path = field(init=False)
