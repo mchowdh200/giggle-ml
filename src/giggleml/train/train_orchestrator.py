@@ -26,7 +26,6 @@ from giggleml.utils.cv_splits import create_cv_splits
 class TrainConfig:
     """Consolidated configuration for the training script."""
 
-    # ... (fields remain the same) ...
     mode: str = "train"
     epochs: int = 10
     validation_freq: int = 5
@@ -86,7 +85,6 @@ class TrainConfig:
 
 
 class Finetuner:
-    # ... (__init__, setup, run, and dataset helpers remain the same) ...
     def __init__(self, config: TrainConfig):
         self.config = config
         self.fabric: Fabric | None = None
@@ -269,7 +267,11 @@ class Finetuner:
 
         # --- New Assertion ---
         gathered_size = self.config.clusters_per_batch * self.fabric.world_size
-        expected_shape = (gathered_size, self.config.cluster_size, self.model.embed_dim)
+        expected_shape = (
+            gathered_size,
+            self.config.cluster_size,
+            self.model.final_embed_dim,
+        )
 
         batch_tensor = batch_tensor.view(expected_shape).to(self.fabric.device)
         assert batch_tensor.shape == expected_shape, (
@@ -304,7 +306,7 @@ class Finetuner:
         expected_shape = (
             self.eval_dataset.clusters_amnt,
             self.config.cluster_size,
-            self.model.embed_dim,
+            self.model.final_embed_dim,
         )
         eval_batch_tensor = eval_batch_tensor.view(expected_shape).to(
             self.fabric.device
