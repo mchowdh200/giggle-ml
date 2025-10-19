@@ -11,11 +11,11 @@ from giggleml.train.hparam_config import (
     HyperparameterSearchResults,
     ValidationResult,
 )
-from giggleml.train.train_orchestrator import run_training
+from giggleml.train.train_orchestrator import Finetuner, TrainConfig
 
 
 def run_training_with_hyperparams(
-    hyperparams: dict[str, Any], results_dir: Path, resume_from_epoch: int | None = None
+    hyperparams: dict[str, Any], results_dir: Path
 ) -> tuple[float, float]:
     """
     Run training on validation set with given hyperparameters for hyperparameter optimization.
@@ -23,7 +23,6 @@ def run_training_with_hyperparams(
     Args:
         hyperparams: Dictionary of hyperparameters
         results_dir: Directory to save results
-        resume_from_epoch: Epoch to resume from (for partial runs)
 
     Returns:
         (val_loss, val_accuracy)
@@ -31,8 +30,8 @@ def run_training_with_hyperparams(
     try:
         print(f"Running hyperparameter optimization with hyperparams: {hyperparams}")
 
-        val_loss, val_accuracy = run_training(
-            use_cv=True,
+        # Create TrainConfig with hyperparameters
+        config = TrainConfig(
             mode="val",
             learning_rate=hyperparams["learning_rate"],
             margin=hyperparams["margin"],
@@ -45,8 +44,12 @@ def run_training_with_hyperparams(
             weight_decay=hyperparams["weight_decay"],
             validation_freq=1,  # Validate every epoch during search
             seed=hyperparams.get("seed", 42),
-            resume_from_epoch=resume_from_epoch,
+            base_model_dir=results_dir,
         )
+
+        # Create and run finetuner
+        finetuner = Finetuner(config)
+        val_loss, val_accuracy = finetuner.run()
 
         return val_loss, val_accuracy
 
@@ -109,21 +112,20 @@ def main():
         print(f"\n=== Combination {i + 1}/{len(combinations)} ===")
         print(f"Hyperparameters: {hyperparams}")
 
-        # Check for resumption
-        resume_from_epoch = None
+        # Note: Resumption is now handled automatically by the new API through checkpoint loading
         if args.resume:
+            # Check if there are partial results for logging purposes
             for result in search_results.results:
                 if (
                     result.hyperparams == hyperparams
                     and result.completed_epoch < result.epoch
                 ):
-                    resume_from_epoch = result.completed_epoch
-                    print(f"Resuming from epoch {resume_from_epoch}")
+                    print(f"Found partial result that may be resumed automatically")
                     break
 
         try:
             val_loss, val_accuracy = run_training_with_hyperparams(
-                hyperparams, results_dir, resume_from_epoch
+                hyperparams, results_dir
             )
 
             # Save result (train_loss set to 0.0 since we're only evaluating)
