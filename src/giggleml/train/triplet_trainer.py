@@ -9,7 +9,6 @@ from torch import Tensor
 from torch.nn import Module
 from torch.types import Device
 
-from giggleml.models.genomic_model import GenomicModel
 from giggleml.utils.misc import partition_integer
 
 # Type alias for triplet loss function
@@ -22,19 +21,19 @@ class IntervalClusterTripletFT(Module):
         world_size: int,
         rank: int,
         device: Device,
-        model: GenomicModel,
+        embed_dim: int,
         loss: Loss3,
     ):
         super().__init__()
         self.world_size: int = world_size
         self.rank: int = rank
         self.device: Device = device
-        self.model: GenomicModel = model
+        self.embed_dim: int = embed_dim
         self.loss: Loss3 = loss
 
     def _prepare_embeddings_and_labels(self, batch: Tensor) -> tuple[Tensor, Tensor]:
         """Prepare embeddings and labels from batch."""
-        all_embeds = batch.reshape(-1, self.model.embed_dim)
+        all_embeds = batch.reshape(-1, self.embed_dim)
         all_labels = self._create_cluster_labels(batch)
         return all_embeds, all_labels
 
@@ -80,7 +79,7 @@ class IntervalClusterTripletFT(Module):
         my_start_cluster = sum(splits[: self.rank])
         my_amnt_clusters = splits[self.rank]
         my_embeds = batch[my_start_cluster : my_start_cluster + my_amnt_clusters].view(
-            -1, self.model.embed_dim
+            -1, self.embed_dim
         )
         my_labels = all_labels[
             my_start_cluster * batch.shape[1] : (my_start_cluster + my_amnt_clusters)

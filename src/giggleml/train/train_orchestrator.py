@@ -210,7 +210,7 @@ class Finetuner:
             self.fabric.world_size,
             self.fabric.global_rank,
             self.fabric.device,
-            self.model,
+            self.model.final_embed_dim,
             loss_fn,
         )
 
