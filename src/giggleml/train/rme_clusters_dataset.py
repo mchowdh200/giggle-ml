@@ -102,14 +102,19 @@ class RmeSeqpareClusters(IterableDataset):
                 f"intervals_per_group must be positive, got {intervals_per_group}"
             )
 
-        @as_list
-        def total_possible_rme_names() -> Iterable[str]:
+        def total_possible_rme_names() -> Iterator[str]:
             for entry in Path(self.rme_dir).iterdir():
-                if entry.is_file() and entry.suffix in {".bed", ".bed.gz"}:
-                    yield entry.stem
+                if entry.is_file():
+                    name = entry.name
+                    if name.endswith(".bed.gz"):
+                        yield name[:-7]  # Remove .bed.gz
+                    elif name.endswith(".bed"):
+                        yield name[:-4]  # Remove .bed
 
         self.allowed_rme_names: set[str] = set(
-            allowed_rme_names if allowed_rme_names else total_possible_rme_names()
+            total_possible_rme_names()
+            if allowed_rme_names is None
+            else allowed_rme_names
         )
 
         self._allowed_mask: NDArray[np.bool_] = self.sdb.labels_to_mask(
