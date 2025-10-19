@@ -78,14 +78,13 @@ class SeqpareDB:
                 yield (item_label, similarity)
 
     @cache
-    def fetch_mask(self, label: str, distance_percentile: float) -> NDArray[np.bool]:
+    def fetch_mask(self, label: str, distance_threshold: float) -> NDArray[np.bool]:
         data = SeqpareDB.parse_seqpare_tsv(self.dir, label)
         # mapping into seqpare distance allows reasoning with the triangle inequality
         data = [(label, 1 - sim) for label, sim in data]  # map into distance
         data.sort(key=lambda x: x[1])  # sort ascending
 
         distances = [x[1] for x in data]
-        threshold = distances[round(len(distances) * distance_percentile)]
 
         bits: NDArray[np.bool] = np.zeros(len(self._labels), dtype=np.bool)
 
@@ -93,20 +92,20 @@ class SeqpareDB:
             # skip unknown labels
             if label in self._labels:
                 item_id = self._labels[label]
-                bits[item_id] = value <= threshold
+                bits[item_id] = value <= distance_threshold
 
         return bits
 
     def fetch_labels(
-        self, label: str, distance_percentile: float = 0.1
+        self, label: str, distance_threshold: float = 0.96
     ) -> tuple[list[str], list[str]]:
         """
         fetches the (positives, negatives) labels for a given label
         @param label: the label to fetc
-        @param distance_percentile: the percentile for which items below that distance should be considered positive
+        @param distance_threshold: the distance for which items below should be considered positive
         @returns (positives, negatives) for a label
         """
-        mask = self.fetch_mask(label, distance_percentile)
+        mask = self.fetch_mask(label, distance_threshold)
         return self.mask_to_labels(mask)
 
     def mask_to_labels(self, mask: NDArray[np.bool]) -> tuple[list[str], list[str]]:

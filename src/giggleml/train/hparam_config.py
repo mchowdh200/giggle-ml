@@ -29,7 +29,7 @@ class HyperparameterConfig:
         if self.densities is None:
             self.densities = [30]
         if self.positive_threshold is None:
-            self.positive_threshold = 0.7
+            self.positive_threshold = 0.96
         if self.epochs is None:
             self.epochs = [10]
         if self.betas_1 is None:
@@ -48,7 +48,7 @@ class HyperparameterConfig:
             batch_sizes=[16],  # total batch sizes
             pk_ratios=[0.5, 1.0, 2.0, 4.0, 8.0],  # pk ratios for cluster calculation
             densities=[20],  # Intervals per group
-            positive_threshold=0.05,  # Fixed
+            positive_threshold=0.96,  # Fixed
             epochs=[2],  # Fixed
             # AdamW hyperparameters
             betas_1=[0.9],  # Standard
@@ -65,7 +65,7 @@ class HyperparameterConfig:
             batch_sizes=[6],  # Very small for memory
             pk_ratios=[1.0],  # pk ratio for cluster calculation
             densities=[3],  # Very small for memory (total batch = 6 intervals)
-            positive_threshold=0.05,  # Fixed
+            positive_threshold=0.96,  # Fixed
             epochs=[2],  # Fixed
             # AdamW hyperparameters
             betas_1=[0.9],  # Standard

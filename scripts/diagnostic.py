@@ -9,7 +9,7 @@ def main():
     sdb = SeqpareDB(data_path / "seqpareRanks")
     dset = RmeSeqpareClusters(data_path / "beds", sdb, 1, 0)
 
-    threshold = 0.1
+    threshold = 0.96
     print(
         [int(sum(sdb.fetch_mask(name, threshold))) for name in dset.allowed_rme_names]
     )

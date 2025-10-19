@@ -45,7 +45,7 @@ class TrainConfig:
     batch_size: int = 100
     pk_ratio: float = 1.0
     density: int = 30
-    positive_threshold: float = 0.7
+    positive_threshold: float = 0.1
     cv_ratios: dict[str, float] = field(
         default_factory=lambda: {
             "train_ratio": 0.8,
