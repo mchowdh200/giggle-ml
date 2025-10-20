@@ -10,6 +10,7 @@ from random import Random
 from typing import NamedTuple, override
 
 import numpy as np
+import torch  # <-- Added import
 from numpy._typing import NDArray
 from torch.utils.data import IterableDataset
 
@@ -27,7 +28,7 @@ Cluster = list[list[GenomicInterval]]
 # a batch, to be mined for triplets
 class MiningBatch(NamedTuple):
     interval_groups: list[list[GenomicInterval]]
-    adjacency_matrix: NDArray[np.bool]
+    adjacency_matrix: torch.Tensor
 
 
 @lazy
@@ -128,11 +129,18 @@ class RmeSeqpareClusters(IterableDataset):
             )
             node_labels = [self.sdb.idx_to_label(idx) for idx in nodes]
             # only with indices contained in the subgraph
-            adjacency_matrix = [
+            adjacency_matrix_list = [
                 self.sdb.fetch_mask(label)[nodes] for label in node_labels
             ]
             interval_samples = [self._sample_group(label) for label in node_labels]
-            yield MiningBatch(interval_samples, np.array(adjacency_matrix))
+
+            # --- Modified Lines ---
+            # 1. Stack the list of numpy arrays into one contiguous numpy array
+            adj_matrix_np = np.array(adjacency_matrix_list)
+            # 2. Convert the numpy array to a torch tensor
+            adj_matrix_tensor = torch.from_numpy(adj_matrix_np)
+            yield MiningBatch(interval_samples, adj_matrix_tensor)
+            # --- End Modified Lines ---
 
     @as_list
     def _sample_neighbors(self, anchor: str) -> Iterator[int]:
