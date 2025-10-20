@@ -2,11 +2,12 @@
 RME (Roadmap Epigenomics) dataset for sampling interval clusters.
 """
 
+import itertools
 from collections.abc import Iterable, Iterator
 from os import PathLike
 from pathlib import Path
 from random import Random
-from typing import override
+from typing import NamedTuple, override
 
 import numpy as np
 from numpy._typing import NDArray
@@ -14,7 +15,6 @@ from torch.utils.data import IterableDataset
 
 from giggleml.data_wrangling.interval_dataset import BedDataset
 from giggleml.train.seqpare_db import SeqpareDB
-from giggleml.utils.misc import partition_list
 from giggleml.utils.path_utils import fix_bed_ext
 from giggleml.utils.types import GenomicInterval, lazy
 from giggleml.utils.utils.collection_utils import as_list
@@ -22,6 +22,12 @@ from giggleml.utils.utils.lru_cache import lru_cache
 
 # A cluster is a list of bed files
 Cluster = list[list[GenomicInterval]]
+
+
+# a batch, to be mined for triplets
+class MiningBatch(NamedTuple):
+    interval_groups: list[list[GenomicInterval]]
+    adjacency_matrix: NDArray[np.bool]
 
 
 @lazy
@@ -58,10 +64,8 @@ class RmeSeqpareClusters(IterableDataset):
         Args:
             road_epig_path: Path to the road epigenomics data.
             seqpare: An instance of the SeqpareDB.
-            world_size: The total number of processes in the distributed setup.
-            rank: The rank of the current process.
             positive_threshold: the minimum similarity for all items in a cluster.
-            clusters_amnt: Total clusters across all processes. Must be divisible by world_size.
+            clusters_amnt: Total clusters
             groups_per_cluster: Number of interval groups per cluster.
             intervals_per_group: Number of intervals per group.
             allowed_rme_names: Iterable of RME names for cross-validation. Defaults to all names.
@@ -70,8 +74,6 @@ class RmeSeqpareClusters(IterableDataset):
         # Assign attributes first
         self.rme_dir: PathLike = road_epig_path
         self.sdb: SeqpareDB = seqpare
-        self.world_size: int = world_size
-        self.rank: int = rank
         self.positive_threshold: float = positive_threshold
         self.clusters_amnt: int = clusters_amnt
         self.groups_per_cluster: int = groups_per_cluster
@@ -79,16 +81,8 @@ class RmeSeqpareClusters(IterableDataset):
         self.seed: int = seed
 
         # Validate parameters
-        if clusters_amnt % world_size != 0:
-            raise ValueError(
-                f"clusters_amnt ({clusters_amnt}) must be divisible by world_size ({world_size})"
-            )
         if clusters_amnt <= 0:
             raise ValueError(f"clusters_amnt must be positive, got {clusters_amnt}")
-        if world_size <= 0:
-            raise ValueError(f"world_size must be positive, got {world_size}")
-        if rank < 0 or rank >= world_size:
-            raise ValueError(f"rank ({rank}) must be in range [0, {world_size})")
         if not (0.0 < positive_threshold <= 1.0):
             raise ValueError(
                 f"positive_threshold must be in (0, 1], got {positive_threshold}"
@@ -120,88 +114,60 @@ class RmeSeqpareClusters(IterableDataset):
         self._allowed_mask: NDArray[np.bool_] = self.sdb.labels_to_mask(
             self.allowed_rme_names
         )
-        self._world_rng: Random = Random(self.seed)
-        self._rank_rng: Random = Random(self.seed + self.rank)
+        self._rng: Random = Random(self.seed)
 
     @override
-    def __iter__(self) -> Iterator[list[Cluster]]:
+    def __iter__(self) -> Iterator[MiningBatch]:
         while True:
             anchors = self._sample_anchors()  # same across ranks
-            rank_anchors = partition_list(anchors, self.world_size, self.rank)
-            clusters = [self._sample_positives(anchor) for anchor in rank_anchors]
-
-            # sanity checks
-            assert len(clusters) == self.clusters_amnt // self.world_size
-            assert all(
-                [len(cluster) == self.groups_per_cluster for cluster in clusters]
+            # since _sample_neighbors can self-sample anchors, this is all sampled labels
+            nodes = list(
+                itertools.chain.from_iterable(
+                    [self._sample_neighbors(anchor) for anchor in anchors]
+                )
             )
-            assert all(
-                [
-                    len(group) == self.intervals_per_group
-                    for cluster in clusters
-                    for group in cluster
-                ]
-            )
-
-            yield clusters
+            node_labels = [self.sdb.idx_to_label(idx) for idx in nodes]
+            # only with indices contained in the subgraph
+            adjacency_matrix = [
+                self.sdb.fetch_mask(label)[nodes] for label in node_labels
+            ]
+            interval_samples = [self._sample_group(label) for label in node_labels]
+            yield MiningBatch(interval_samples, np.array(adjacency_matrix))
 
     @as_list
-    def _sample_positives(self, anchor: str) -> Iterable[list[GenomicInterval]]:
+    def _sample_neighbors(self, anchor: str) -> Iterator[int]:
         positive_mask = (
-            self.sdb.fetch_mask(anchor, self.positive_threshold / 2)
-            & self._allowed_mask
+            self.sdb.fetch_mask(anchor, self.positive_threshold) & self._allowed_mask
         )
-
         positive_indices = np.flatnonzero(positive_mask)
+
         if len(positive_indices) == 0:
+            # this shouldn't happen because the anchor is self-similar
             raise RuntimeError(
                 f"No positive samples found for anchor '{anchor}' with threshold {self.positive_threshold}. "
                 f"Try lowering positive_threshold or expanding allowed_rme_names."
             )
 
         for _ in range(self.groups_per_cluster):
-            # 1. choose label (of the positives)
-            # 2. collect intervals from that bed file
-            label_idx = self._rank_rng.choice(positive_indices)
-            label = self.sdb.idx_to_label(label_idx)
-            bed = self._fetch_bed(fix_bed_ext(Path(self.rme_dir, label)))
+            yield self._rng.choice(positive_indices)
 
-            if len(bed) == 0:
-                raise RuntimeError(
-                    f"Bed file for label '{label}' is empty. Check data integrity."
-                )
+    def _sample_group(self, anchor: str) -> list[GenomicInterval]:
+        bed = self._fetch_bed(fix_bed_ext(Path(self.rme_dir, anchor)))
 
-            yield self._rank_rng.choices(bed, k=self.intervals_per_group)
+        if len(bed) == 0:
+            raise RuntimeError(
+                f"Bed file for label '{anchor}' is empty. Check data integrity."
+            )
+
+        return self._rng.choices(bed, k=self.intervals_per_group)
 
     @lru_cache(max_size=128)
     def _fetch_bed(self, path: Path) -> list[GenomicInterval]:
         return list(iter(BedDataset(path)))
 
-    @as_list
-    def _sample_anchors(self) -> Iterator[str]:
+    def _sample_anchors(self) -> list[str]:
         """same across ranks"""
-
-        seed_anchor = self._world_rng.choice(list(self.allowed_rme_names))
-        available = (
-            ~self.sdb.fetch_mask(seed_anchor, 2 * self.positive_threshold)
-            & self._allowed_mask
-        )
-
-        yield seed_anchor
-
-        for _ in range(self.clusters_amnt // self.world_size - 1):
-            available_indices = np.flatnonzero(available)
-            if len(available_indices) == 0:
-                raise RuntimeError(
-                    f"Ran out of sufficiently distant anchors after {_ + 1} iterations. "
-                    f"Current settings: clusters_amnt={self.clusters_amnt}, world_size={self.world_size}, "
-                    f"positive_threshold={self.positive_threshold}, allowed_rme_names={len(self.allowed_rme_names)}. "
-                    f"Try reducing clusters_amnt, increasing allowed_rme_names, or decreasing positive_threshold."
-                )
-
-            next_anchor_idx = self._world_rng.choice(available_indices)
-            yield (next_anchor := self.sdb.idx_to_label(next_anchor_idx))
-            available &= ~self.sdb.fetch_mask(next_anchor, self.positive_threshold)
+        return self._rng.choices(list(self.allowed_rme_names), k=self.clusters_amnt)
 
     def save_state(self) -> dict:
         """
@@ -211,8 +177,7 @@ class RmeSeqpareClusters(IterableDataset):
             Dictionary containing all necessary state information for resumption.
         """
         return {
-            "world_rng_state": self._world_rng.getstate(),
-            "rank_rng_state": self._rank_rng.getstate(),
+            "rng_state": self._rng.getstate(),
         }
 
     def load_state(self, state_dict: dict) -> "RmeSeqpareClusters":
@@ -225,7 +190,6 @@ class RmeSeqpareClusters(IterableDataset):
         Returns:
             self
         """
-        # Restore random number generator states
-        self._world_rng.setstate(state_dict["world_rng_state"])
-        self._rank_rng.setstate(state_dict["rank_rng_state"])
+        # Restore random number generator state
+        self._rng.setstate(state_dict["rng_state"])
         return self

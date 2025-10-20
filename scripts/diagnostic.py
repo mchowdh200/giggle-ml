@@ -7,18 +7,18 @@ from giggleml.train.seqpare_db import SeqpareDB
 def main():
     data_path = Path("data", "roadmap_epigenomics")
     sdb = SeqpareDB(data_path / "seqpareRanks")
-    dset = RmeSeqpareClusters(data_path / "beds", sdb, 1, 0)
-
     threshold = 0.96
-    print(
-        [int(sum(sdb.fetch_mask(name, threshold))) for name in dset.allowed_rme_names]
-    )
+    dset = RmeSeqpareClusters(data_path / "beds", sdb, 1, 0, threshold)
 
-    # dset_iter = iter(dset)
-    #
-    # for i in range(1):
-    #     item = next(dset_iter)
-    #     print(item)
+    # print(
+    #     [int(sum(sdb.fetch_mask(name, threshold))) for name in dset.allowed_rme_names]
+    # )
+
+    dset_iter = iter(dset)
+
+    for i in range(1):
+        item = next(dset_iter)
+        print("good")
 
 
 if __name__ == "__main__":

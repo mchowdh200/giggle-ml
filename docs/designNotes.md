@@ -1,3 +1,5 @@
+# Data related
+
 ## Seqpare
 
 - Self-consistent metric. Due to the triangle inequality holding, I can make assumptions about the relative similarity between A and C where A and C are both independently close to B. This lets me trivially sample clusters seqpare-based KNN results.
@@ -11,6 +13,12 @@ Both are applicable to learn the metric.
 - Mining triplets within the batch allows us to reuse set embeddings (expensive part).
 - Triplet loss theoretical benefits. Due to all items in the batch being mutually related, the loss more directly reflects the intended structure of the embedding space.
 - Online, hard triplet mining focuses on important examples. Efficiently, because all set embeddings are used for at least one triplet.
+
+## Similarity graph
+
+Hard triplets are normally mined by selecting, for an anchor, a positive element that the embedding model thinks is particularly different. But my data consists only of elements and a continuous similarity value between elements. If elements are sufficiently similar, we call it positive. So, it's a graph. I can't sample sufficiently distant anchors in the graph for which to draw clusters around those anchors, because the clusters would have overlap. If clusters have overlap, I must be sure not to define elements in distinct neighborhoods as negative. The solution obvious, but trickier. The mining batch is not a set of distinct clusters, it is series of sub-graphs where any node can be anchor so long as we determine its unique positive neighborhood.
+
+# Other
 
 ## Tiling Algorithm
 
