@@ -129,7 +129,6 @@ class ValidationResult:
 
     hyperparams: dict[str, Any]
     val_loss: float
-    val_triplet_accuracy: float
     train_loss: float
     epoch: int
     completed_epoch: int = 0  # For resumption tracking
@@ -143,7 +142,6 @@ class ValidationResult:
         return {
             "hyperparams": self.hyperparams,
             "val_loss": self.val_loss,
-            "val_triplet_accuracy": self.val_triplet_accuracy,
             "train_loss": self.train_loss,
             "epoch": self.epoch,
             "completed_epoch": self.completed_epoch,

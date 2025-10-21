@@ -16,7 +16,7 @@ from giggleml.train.train_orchestrator import Finetuner, TrainConfig
 
 def run_training_with_hyperparams(
     hyperparams: dict[str, Any], results_dir: Path
-) -> tuple[float, float]:
+) -> float:
     """
     Run training on validation set with given hyperparameters for hyperparameter optimization.
 
@@ -25,7 +25,7 @@ def run_training_with_hyperparams(
         results_dir: Directory to save results
 
     Returns:
-        (val_loss, val_accuracy)
+        val_loss
     """
     try:
         print(f"Running hyperparameter optimization with hyperparams: {hyperparams}")
@@ -49,9 +49,8 @@ def run_training_with_hyperparams(
 
         # Create and run finetuner
         finetuner = Finetuner(config)
-        val_loss, val_accuracy = finetuner.run()
-
-        return val_loss, val_accuracy
+        val_loss = finetuner.run()
+        return val_loss
 
     except Exception as e:
         print(f"Hyperparameter optimization failed with error: {e}")
@@ -120,26 +119,23 @@ def main():
                     result.hyperparams == hyperparams
                     and result.completed_epoch < result.epoch
                 ):
-                    print(f"Found partial result that may be resumed automatically")
+                    print("Found partial result that may be resumed automatically")
                     break
 
         try:
-            val_loss, val_accuracy = run_training_with_hyperparams(
-                hyperparams, results_dir
-            )
+            val_loss = run_training_with_hyperparams(hyperparams, results_dir)
 
             # Save result (train_loss set to 0.0 since we're only evaluating)
             result = ValidationResult(
                 hyperparams=hyperparams,
                 val_loss=val_loss,
-                val_triplet_accuracy=val_accuracy,
                 train_loss=0.0,  # Not applicable for evaluation-only mode
                 epoch=hyperparams["epochs"],
                 completed_epoch=hyperparams["epochs"],  # Mark as fully completed
             )
 
             search_results.add_result(result)
-            print(f"Result: Val Loss={val_loss:.4f}, Val Acc={val_accuracy:.4f}")
+            print(f"Result: Val Loss={val_loss:.4f}")
 
         except Exception as e:
             print(f"Error running combination {hyperparams}: {e}")
@@ -151,7 +147,6 @@ def main():
         print("\n=== BEST RESULT ===")
         print(f"Hyperparameters: {best.hyperparams}")
         print(f"Validation Loss: {best.val_loss:.4f}")
-        print(f"Validation Accuracy: {best.val_triplet_accuracy:.4f}")
 
         # Save best hyperparameters separately for easy access
         best_path = results_dir / "best_hyperparams.json"

@@ -130,7 +130,8 @@ class RmeSeqpareClusters(IterableDataset):
             node_labels = [self.sdb.idx_to_label(idx) for idx in nodes]
             # only with indices contained in the subgraph
             adjacency_matrix_list = [
-                self.sdb.fetch_mask(label)[nodes] for label in node_labels
+                self.sdb.fetch_mask(label, self.positive_threshold)[nodes]
+                for label in node_labels
             ]
             interval_samples = [self._sample_group(label) for label in node_labels]
 

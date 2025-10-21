@@ -1,14 +1,15 @@
 """
-Main training orchestrator for HyenaDNA fine-tuning with seqpare similarity metrics.
+Main training orchestrator for HyenaDNA fine-tuning with graph-based triplets.
 Refactored for a clear, type-safe, two-phase initialization lifecycle.
 """
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
+import torch
 from lightning_fabric import Fabric
 from lightning_fabric.loggers.tensorboard import TensorBoardLogger
 from torch import Tensor, optim
@@ -16,10 +17,11 @@ from torch.nn.modules.loss import TripletMarginLoss
 
 from giggleml.data_wrangling.interval_dataset import MemoryIntervalDataset
 from giggleml.models.m_model import MModel
-from giggleml.train.rme_clusters_dataset import Cluster, RmeSeqpareClusters
+from giggleml.train.graph_triplet_miner import GraphTripletMiner
+from giggleml.train.rme_clusters_dataset import MiningBatch, RmeSeqpareClusters
 from giggleml.train.seqpare_db import SeqpareDB
-from giggleml.train.triplet_trainer import IntervalClusterTripletFT
 from giggleml.utils.cv_splits import create_cv_splits
+from giggleml.utils.types import GenomicInterval
 
 
 @dataclass
@@ -42,9 +44,11 @@ class TrainConfig:
     beta1: float = 0.9
     beta2: float = 0.999
     weight_decay: float = 0.0
+
     batch_size: int = 100
     pk_ratio: float = 1.0
-    density: int = 30
+    density: int = 30  # This is intervals_per_group
+
     positive_threshold: float = 0.1
     cv_ratios: dict[str, float] = field(
         default_factory=lambda: {
@@ -53,8 +57,10 @@ class TrainConfig:
             "test_ratio": 0.1,
         }
     )
+
     clusters_per_batch: int = field(init=False)
     cluster_size: int = field(init=False)
+
     dex_batch_size: int = 10
     dex_sub_workers: int = 4
 
@@ -76,7 +82,6 @@ class TrainConfig:
         self.log_dir = self.base_model_dir / "logs"
         self.checkpoint_dir = self.base_model_dir / "checkpoints"
 
-        # --- Derived Batching Parameters ---
         cluster_size_f = math.sqrt(self.batch_size / self.pk_ratio)
         clusters_per_batch_f = cluster_size_f * self.pk_ratio
 
@@ -90,9 +95,13 @@ class Finetuner:
         self.fabric: Fabric | None = None
         self.model: MModel | None = None
         self.optimizer: optim.AdamW | None = None
-        self.train_step: IntervalClusterTripletFT | None = None
+
+        self.triplet_miner: GraphTripletMiner | None = None
+        self.loss_fn: TripletMarginLoss | None = None
+
         self.train_dataset: RmeSeqpareClusters | None = None
         self.eval_dataset: RmeSeqpareClusters | None = None
+
         self.start_epoch = 0
         self._is_setup = False
 
@@ -106,26 +115,36 @@ class Finetuner:
         self._load_checkpoint()
         self._is_setup = True
 
-    def run(self) -> tuple[float, float]:
+    def run(self) -> float:
         self.setup()
         assert self.fabric, "Fabric not initialized"
         assert self.model, "Model not initialized"
-        assert self.train_step, "Train step not initialized"
+        # --- Updated Assertions ---
+        assert self.triplet_miner, "Triplet miner not initialized"
+        assert self.loss_fn, "Loss function not initialized"
+
         assert self.eval_dataset, "Evaluation dataset not initialized"
+
         if self.config.mode == "test":
             self.fabric.print("Starting evaluation in test-only mode.")
             return self._evaluate()
+
         assert self.train_dataset, "Training dataset not initialized for train mode"
+
         self.fabric.print(f"Starting training for {self.config.epochs} epochs.")
         train_data_iter = iter(self.train_dataset)
-        final_eval_loss, final_eval_accuracy = -1.0, -1.0
+        final_eval_loss: float = -1.0
+
         for epoch in range(self.start_epoch, self.config.epochs):
             self._train_epoch(train_data_iter, epoch)
+
             if (epoch + 1) % self.config.validation_freq == 0:
-                final_eval_loss, final_eval_accuracy = self._evaluate(epoch)
+                final_eval_loss = self._evaluate(epoch)
+
             self._save_checkpoint(epoch)
+
         self.fabric.print("Training finished!")
-        return final_eval_loss, final_eval_accuracy
+        return final_eval_loss
 
     def _create_dataset(
         self,
@@ -152,6 +171,7 @@ class Finetuner:
         assert self.fabric
         seqpare_db = SeqpareDB(self.config.seqpare_dir)
         cv_splits = create_cv_splits(self.config.rme_beds_path, **self.config.cv_ratios)
+
         if self.config.mode in ["train", "val"]:
             train_rme_names = cv_splits["train"]
             eval_rme_names = cv_splits["val"]
@@ -168,6 +188,7 @@ class Finetuner:
             eval_rme_names = cv_splits["test"]
         else:
             raise ValueError(f"Invalid mode: {self.config.mode}")
+
         self.fabric.print(
             f"Setting up evaluation dataset with {len(eval_rme_names)} files."
         )
@@ -199,73 +220,88 @@ class Finetuner:
             betas=(self.config.beta1, self.config.beta2),
             weight_decay=self.config.weight_decay,
         )
-        loss_fn = TripletMarginLoss(margin=self.config.margin)
 
         self.model, self.optimizer = self.fabric.setup(model, optimizer)
         assert self.model
 
-        self.train_step = IntervalClusterTripletFT(
-            self.fabric.world_size,
-            self.fabric.global_rank,
-            self.fabric.device,
-            self.model.final_embed_dim,
-            loss_fn,
+        self.loss_fn = TripletMarginLoss(margin=self.config.margin, reduction="mean")
+        self.triplet_miner = GraphTripletMiner(
+            margin=self.config.margin, distance_metric="euclidean"
         )
 
     def _load_checkpoint(self):
         assert self.fabric and self.model
         checkpoint_path = self.config.checkpoint_dir / "latest-checkpoint.pt"
         if not checkpoint_path.is_file():
+            self.fabric.print("No checkpoint found, starting from scratch.")
             return
 
         self.fabric.print(f"Loading checkpoint: {checkpoint_path}")
-        state = self.fabric.load(checkpoint_path)
 
-        # --- New Assertion ---
-        assert "model" in state, "Checkpoint must contain a 'model' state_dict"
-        self.model.load_state_dict(state["model"])
+        state_to_load: dict[str, Any] = {"model": self.model}
 
         if self.config.mode in ["train", "val"]:
             assert self.optimizer
-            self.optimizer.load_state_dict(state["optimizer"])
-            self.start_epoch = state["epoch"] + 1
-            if (
-                self.config.mode == "train"
-                and self.train_dataset
-                and state.get("train_dataset_state")
-            ):
-                self.train_dataset.load_state(state["train_dataset_state"])
+            state_to_load["optimizer"] = self.optimizer
+
+        if self.config.mode == "train" and self.train_dataset:
+            state_to_load["train_dataset"] = self.train_dataset
+
+        # loads fields dynamically based on dict keys
+        remaining_state = self.fabric.load(checkpoint_path, state_to_load)
+
+        if "epoch" in remaining_state:
+            self.start_epoch = remaining_state["epoch"] + 1
+            self.fabric.print(f"Resuming from epoch {self.start_epoch}")
 
     def _save_checkpoint(self, epoch: int):
-        assert self.fabric
+        assert self.fabric and self.model and self.optimizer
         if self.config.mode != "train":
             return
+
         checkpoint_path = self.config.checkpoint_dir / "latest-checkpoint.pt"
+
         state = {
             "model": self.model,
             "optimizer": self.optimizer,
             "epoch": epoch,
-            "train_dataset_state": self.train_dataset.save_state()
-            if self.train_dataset
-            else None,
+            "train_dataset": self.train_dataset,
         }
+
         self.fabric.save(checkpoint_path, state)
         self.fabric.print(f"Checkpoint saved at epoch {epoch} to {checkpoint_path}")
 
-    def _train_epoch(self, train_data_iter, epoch: int):
-        assert self.fabric and self.model and self.optimizer and self.train_step
+    def _train_epoch(self, train_data_iter: Iterator[MiningBatch], epoch: int):
+        assert self.fabric and self.model and self.optimizer
+        assert self.triplet_miner and self.loss_fn
+
         self.model.train()
         self.optimizer.zero_grad()
 
-        batch = next(train_data_iter)
+        # --- Data loading: Rank 0 fetches, then broadcasts to all ---
+        if self.fabric.global_rank == 0:
+            data_batch = next(train_data_iter)
+        else:
+            data_batch = (None, None)  # Placeholder for broadcast
+
+        # Broadcast the (node_intervals, adj_matrix) tuple from rank 0
+        data_batch = self.fabric.broadcast(data_batch, src=0)
+        node_intervals, adj_matrix = data_batch
+        assert node_intervals is not None
+        assert adj_matrix is not None
+        # All ranks now have the identical node_intervals and adj_matrix
+
+        # Call distributed_embed on all ranks with the *full* interval list.
+        # Assumes distributed_embed handles internal sharding and returns
+        # the identical, complete tensor on all ranks.
         batch_tensor = self.model.distributed_embed(
-            self._batch_with_fasta(batch),
+            self._batch_with_fasta(node_intervals),
             self.config.dex_batch_size,
             self.config.dex_sub_workers,
         )
-        batch_tensor: Tensor = cast(Tensor, self.fabric.all_gather(batch_tensor))
 
-        # --- New Assertion ---
+        # No all_gather needed here per your request
+
         gathered_size = self.config.clusters_per_batch * self.fabric.world_size
         expected_shape = (
             gathered_size,
@@ -273,76 +309,146 @@ class Finetuner:
             self.model.final_embed_dim,
         )
 
-        batch_tensor = batch_tensor.view(expected_shape).to(self.fabric.device)
-        assert batch_tensor.shape == expected_shape, (
-            f"Expected train tensor shape {expected_shape} but got {batch_tensor.shape}"
+        batch_tensor_clustered = batch_tensor.view(expected_shape)
+        assert batch_tensor_clustered.shape == expected_shape, (
+            f"Expected train tensor shape {expected_shape} but got {batch_tensor_clustered.shape}"
         )
 
-        loss = self.train_step.training_step(batch_tensor)
+        num_nodes = gathered_size * self.config.cluster_size
+        batch_tensor_flat = batch_tensor_clustered.view(
+            num_nodes, self.model.final_embed_dim
+        ).to(self.fabric.device)
+
+        # Move adj_matrix to the correct device
+        adj_matrix = adj_matrix.to(self.fabric.device)
+
+        # Sanity check
+        assert adj_matrix.shape[0] == num_nodes, (
+            f"Adjacency matrix shape ({adj_matrix.shape[0]}) does not match "
+            f"flattened embeddings shape ({num_nodes})"
+        )
+
+        # --- In-line Mining and Loss Calculation (on flat tensor) ---
+        # All ranks do this simultaneously on identical data
+        anchor_idx, pos_idx, neg_idx = self.triplet_miner.mine(
+            batch_tensor_flat, adj_matrix
+        )
+
+        if anchor_idx.numel() == 0:
+            loss = torch.tensor(0.0, device=self.fabric.device, requires_grad=True)
+            triplets_found = 0
+        else:
+            anchor_embeds = batch_tensor_flat[anchor_idx]
+            positive_embeds = batch_tensor_flat[pos_idx]
+            negative_embeds = batch_tensor_flat[neg_idx]
+
+            loss = self.loss_fn(anchor_embeds, positive_embeds, negative_embeds)
+            triplets_found = anchor_idx.numel()
+
         self.fabric.backward(loss)
         self.optimizer.step()
 
         train_loss = loss.item()
-        self.fabric.print(f"Epoch {epoch} | Train Loss: {train_loss:.4f}")
+        self.fabric.print(
+            f"Epoch {epoch} | Rank {self.fabric.global_rank} | "
+            f"Train Loss: {train_loss:.4f} | Triplets: {triplets_found}"
+        )
         self.fabric.log("train_loss", train_loss, step=epoch)
 
-    def _evaluate(self, epoch: int | None = None) -> tuple[float, float]:
-        assert self.fabric and self.model and self.train_step and self.eval_dataset
+    def _evaluate(self, epoch: int | None = None) -> float:
+        assert self.fabric and self.model and self.triplet_miner and self.loss_fn
+        assert self.eval_dataset
 
         self.model.eval()
         eval_data_iter = iter(self.eval_dataset)
-        eval_batch = next(eval_data_iter)
 
+        # --- Data loading: Rank 0 fetches, then broadcasts to all ---
+        if self.fabric.global_rank == 0:
+            data_batch = next(eval_data_iter)
+        else:
+            data_batch = (None, None)  # Placeholder for broadcast
+
+        # Broadcast the (node_intervals, adj_matrix) tuple from rank 0
+        data_batch = self.fabric.broadcast(data_batch, src=0)
+        node_intervals, eval_adj_matrix = data_batch
+        assert node_intervals is not None
+        assert eval_adj_matrix is not None
+        # All ranks now have the identical node_intervals and eval_adj_matrix
+
+        # Call distributed_embed on all ranks with the *full* interval list.
         eval_batch_tensor = self.model.distributed_embed(
-            self._batch_with_fasta(eval_batch),
+            self._batch_with_fasta(node_intervals),
             self.config.dex_batch_size,
             self.config.dex_sub_workers,
         )
-        eval_batch_tensor: Tensor = cast(
-            Tensor, self.fabric.all_gather(eval_batch_tensor)
-        )
 
-        # --- New Assertion ---
+        # No all_gather needed here
+
         expected_shape = (
             self.eval_dataset.clusters_amnt,
             self.config.cluster_size,
             self.model.final_embed_dim,
         )
-        eval_batch_tensor = eval_batch_tensor.view(expected_shape).to(
-            self.fabric.device
-        )
-        assert eval_batch_tensor.shape == expected_shape, (
-            f"Expected eval tensor shape {expected_shape} but got {eval_batch_tensor.shape}"
+        eval_batch_tensor_clustered = eval_batch_tensor.view(expected_shape)
+        assert eval_batch_tensor_clustered.shape == expected_shape, (
+            f"Expected eval tensor shape {expected_shape} but got {eval_batch_tensor_clustered.shape}"
         )
 
-        loss, accuracy = self.train_step.validation_step(eval_batch_tensor)
+        num_nodes = self.eval_dataset.clusters_amnt * self.config.cluster_size
+        eval_batch_tensor_flat = eval_batch_tensor_clustered.view(
+            num_nodes, self.model.final_embed_dim
+        ).to(self.fabric.device)
 
+        # Move adj_matrix to the correct device
+        eval_adj_matrix = eval_adj_matrix.to(self.fabric.device)
+
+        assert eval_adj_matrix.shape[0] == num_nodes, (
+            f"Eval adjacency matrix shape ({eval_adj_matrix.shape[0]}) does not match "
+            f"flattened embeddings shape ({num_nodes})"
+        )
+
+        with torch.no_grad():
+            anchor_idx, pos_idx, neg_idx = self.triplet_miner.mine(
+                eval_batch_tensor_flat, eval_adj_matrix
+            )
+
+            if anchor_idx.numel() == 0:
+                loss_tensor = torch.tensor(0.0, device=self.fabric.device)
+            else:
+                anchor_embeds = eval_batch_tensor_flat[anchor_idx]
+                positive_embeds = eval_batch_tensor_flat[pos_idx]
+                negative_embeds = eval_batch_tensor_flat[neg_idx]
+                loss_tensor = self.loss_fn(
+                    anchor_embeds, positive_embeds, negative_embeds
+                )
+
+        # This reduction is still necessary to get a single, averaged loss
+        # value from across all ranks (which calculated the same loss,
+        # but reduction is good practice and correct).
+        avg_loss_tensor: Tensor = cast(
+            Tensor, self.fabric.all_reduce(loss_tensor, reduce_op="mean")
+        )
+        loss = avg_loss_tensor.item()
+
+        # --- Logging ---
         eval_split_name = "Test" if self.config.mode == "test" else "Validation"
         log_prefix = "test" if self.config.mode == "test" else "val"
 
-        if epoch:
-            self.fabric.print(
-                f"Epoch {epoch} | {eval_split_name} Loss: {loss:.4f} | Acc: {accuracy:.4f}"
-            )
+        if epoch is not None:
+            self.fabric.print(f"Epoch {epoch} | {eval_split_name} Loss: {loss:.4f}")
             self.fabric.log(f"{log_prefix}_loss", loss, step=epoch)
-            self.fabric.log(f"{log_prefix}_accuracy", accuracy, step=epoch)
         else:
-            self.fabric.print(
-                f"{eval_split_name} Loss: {loss:.4f} | Acc: {accuracy:.4f}"
-            )
+            self.fabric.print(f"{eval_split_name} Loss: {loss:.4f}")
 
-        return loss, accuracy
+        return loss
 
     def _batch_with_fasta(
-        self, batch: Sequence[Cluster]
+        self, batch: Iterable[Sequence[GenomicInterval]]
     ) -> list[MemoryIntervalDataset]:
-        """flattens the batch and maps items into IntervalDatasets with fasta paths"""
-
         results = list()
 
-        for cluster in batch:
-            for item in cluster:
-                result = MemoryIntervalDataset(item, self.config.fasta_path)
-                results.append(result)
+        for item in batch:
+            result = MemoryIntervalDataset(item, self.config.fasta_path)
+            results.append(result)
 
         return results
