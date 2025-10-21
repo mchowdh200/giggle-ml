@@ -3,6 +3,7 @@ from collections.abc import Callable, Iterable, Iterator
 
 import torch
 import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, IterableDataset
 
@@ -152,13 +153,16 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         device = guess_device(current_rank)
         model.to(device)
 
-        if is_distributed() and not isinstance(model, DDP):
-            # Only wrap in DDP if the model has trainable parameters
-            has_trainable_params = any(p.requires_grad for p in model.parameters())
-            if has_trainable_params:
-                model = DDP(
-                    model, device_ids=[device] if device.type == "cuda" else None
-                )
+        if is_distributed():
+            mp.set_start_method("spawn", force=True)
+
+            if not isinstance(model, DDP):
+                # Only wrap in DDP if the model has trainable parameters
+                has_trainable_params = any(p.requires_grad for p in model.parameters())
+                if has_trainable_params:
+                    model = DDP(
+                        model, device_ids=[device] if device.type == "cuda" else None
+                    )
 
         # Create dataset that handles preprocessing and distributed sharding
         dataset = _StreamingPreprocessorDataset(data, batch_size, self.preprocessor_fn)
