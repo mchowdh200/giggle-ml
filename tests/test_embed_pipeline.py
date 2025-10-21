@@ -15,6 +15,8 @@ def test_pipeline():
         shutil.rmtree("tests/test_out.tmp")
     with contextlib.suppress(FileNotFoundError, OSError):
         os.remove("tests/test_out.tmp.resize.lock")
+        with contextlib.suppress(FileNotFoundError, OSError):
+            os.remove("tests/test_out.tmp.init.lock")
     with contextlib.suppress(FileNotFoundError, OSError):
         os.remove("tests/test_out.tmp.meta")
 
@@ -29,7 +31,9 @@ def test_pipeline():
         )
 
         pipeline = DirectPipeline(
-            embed_model=CountACGT(), batch_size=2, worker_count=worker_count
+            embed_model=CountACGT(),
+            batch_size=2,
+            worker_count=worker_count,
         )
         bed = BedDataset("tests/test.bed", "tests/test.fa")
         embed = pipeline.embed(bed, "tests/test_out.tmp")
@@ -67,6 +71,8 @@ def test_pipeline():
             shutil.rmtree("tests/test_out.tmp")
         with contextlib.suppress(FileNotFoundError, OSError):
             os.remove("tests/test_out.tmp.resize.lock")
+        with contextlib.suppress(FileNotFoundError, OSError):
+            os.remove("tests/test_out.tmp.init.lock")
         with contextlib.suppress(FileNotFoundError, OSError):
             os.remove("tests/test_out.tmp.meta")
 

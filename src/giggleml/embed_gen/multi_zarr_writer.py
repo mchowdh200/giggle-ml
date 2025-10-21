@@ -124,21 +124,19 @@ class MultiZarrWriter:
 
     def _open_or_create_zarr_file(self, output_path: str) -> zarr.Array:
         """Open existing zarr file or create new one safely."""
+        lock_path = f"{output_path}.init.lock"
+        with FileLock(lock_path, timeout=30):
+            if os.path.exists(output_path):
+                zarr_array = zarr.open(output_path, mode="a")
+            else:
+                zarr_array = zarr.open(
+                    output_path,
+                    mode="w",
+                    shape=(0,) + self.shape[1:],
+                    chunks=self.chunks,
+                    dtype=self.dtype,
+                    **self.kwargs,
+                )
 
-        # concurrency-safe because in the event of double-initialization, the processes
-        # write the same information
-
-        if os.path.exists(output_path):
-            zarr_array = zarr.open(output_path, mode="a")
-        else:
-            zarr_array = zarr.open(
-                output_path,
-                mode="w",
-                shape=(0,) + self.shape[1:],
-                chunks=self.chunks,
-                dtype=self.dtype,
-                **self.kwargs,
-            )
-
-        assert isinstance(zarr_array, zarr.Array)
-        return zarr_array
+            assert isinstance(zarr_array, zarr.Array)
+            return zarr_array
