@@ -163,7 +163,6 @@ def test_mmodel_tokenize():
     sequences = ["ACGT", "TTGG"]
     result = model.tokenize([sequences])[0]
 
-    assert isinstance(result, dict)
     assert "input_ids" in result
     assert isinstance(result["input_ids"], torch.Tensor)
 

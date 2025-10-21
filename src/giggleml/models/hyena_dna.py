@@ -130,6 +130,10 @@ class HyenaDNA(GenomicModel):
 
     @override
     def collate(self, batch: Sequence[str]) -> dict[str, torch.Tensor]:
+        # everything produced is placed or kept on the CPU because this might
+        # run on a DataLoader sub-process which would need to pull the results
+        # back to the main process and it can't transfer unless everything's CPU-only.
+
         if self.max_seq_len is None:
             raise ValueError("How did this HyenaDNA instance get a None maxSeqLen?")
 
@@ -143,7 +147,7 @@ class HyenaDNA(GenomicModel):
             # INFO: 1. tokenization
 
             # WARN: this was a legacy method:   tokenized = self.tokenizer.batch_encode_plus(
-            tokenized = self._tokenizer(
+            inputs = self._tokenizer(
                 batch,
                 max_length=self.max_seq_len,
                 padding="max_length",
@@ -152,23 +156,16 @@ class HyenaDNA(GenomicModel):
                 return_tensors="pt",
             )
 
-            inputs: dict[str, torch.Tensor] = {
-                k: v.to(self.device, non_blocking=True) for k, v in tokenized.items()
-            }
-
             # INFO: 2. create attention mask for masked mean pooling
-            input_ids = inputs["input_ids"]
             seq_lens = torch.tensor(
                 [len(item) for item in batch],
-                dtype=torch.float32,
-                device=self.device,
+                dtype=torch.float16,
                 requires_grad=False,
             )
             seq_lens = seq_lens.unsqueeze(dim=1)
             indices = torch.arange(
                 self.max_seq_len,
-                dtype=torch.float32,
-                device=self.device,
+                dtype=torch.float16,
                 requires_grad=False,
             )
             mask = (indices < seq_lens).float()
@@ -176,7 +173,6 @@ class HyenaDNA(GenomicModel):
             mask = mask.flip(dims=[1])  # because HyenaDNA pre-pads
 
             inputs["attention_mask"] = mask
-
             return inputs
 
     @override
@@ -186,7 +182,7 @@ class HyenaDNA(GenomicModel):
             inputs = batch["input_ids"]
 
             hidden: torch.Tensor = self._model(
-                input_ids=inputs
+                input_ids=inputs.to(self.device)
             ).last_hidden_state  # shape (batch, seqMax, eDim)
 
             batch_size, max_seq_len, hidden_dim = hidden.shape
@@ -197,7 +193,7 @@ class HyenaDNA(GenomicModel):
             assert hidden_dim == self.embed_dim
 
             # INFO: 3. masked mean pooling using precomputed mask
-            mask = batch["attention_mask"]
+            mask = batch["attention_mask"].to(self.device)
             mask = mask.expand(hidden.shape)
 
             # calculate sequence lengths from mask for normalization
