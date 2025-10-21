@@ -90,6 +90,8 @@ class MModel(nn.Module):
 
     @override
     def forward(self, batch: list[dict[str, torch.Tensor]]) -> torch.Tensor:
+        raise NotImplementedError  # see fixme comment
+
         # 1. phi pass
         phi_embeds = torch.cat(
             [self.set_contents_forward(item) for item in batch], dim=0
@@ -99,6 +101,11 @@ class MModel(nn.Module):
 
         dev = phi_embeds.device
         dtype: torch.dtype = phi_embeds.dtype
+        # FIXME:
+        # this SetFlatIter should probably not be called on the batch because the length of each in the batch
+        # does not correspond to the amount of intervals in that item. This function is provided
+        # mostly as a convenience method or example that avoids the overhead of the distributed embedding engine.
+        # it is untested.
         set_indices = torch.tensor(
             list(SetFlatIter(batch).set_indices()), device=dev, dtype=torch.int64
         )
