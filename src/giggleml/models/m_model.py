@@ -20,7 +20,7 @@ M Model, deep sets architecture, hyenaDNA pre-processing
 """
 
 from collections.abc import Sequence
-from typing import Any, final
+from typing import Any, cast, final
 
 import torch
 import torch.nn as nn
@@ -164,8 +164,13 @@ class MModel(nn.Module):
 
         # 2. create element-wise embeddings
         phi_embeds = list()
-        # this wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking
-        GenomicEmbedder(RowMModel(self), batch_size, sub_workers).raw(
+        # The RowMModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
+        # We have to conditionally unwrap self because tools like fabric like to wrap the model in
+        # unpicklable shells.
+        unwrapped_self = cast(
+            "MModel", self.module if hasattr(self, "module") else self
+        )
+        GenomicEmbedder(RowMModel(unwrapped_self), batch_size, sub_workers).raw(
             data, phi_embeds.extend
         )
 
