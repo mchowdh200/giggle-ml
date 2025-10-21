@@ -1,5 +1,5 @@
 import itertools
-from collections.abc import Collection, Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 
 from giggleml.utils.types import SizedIterable
 
@@ -14,11 +14,11 @@ class SetFlatIter[T, U]:
     between its methods.
     """
 
-    def __init__(self, data: SizedIterable[SizedIterable[T]]):
+    def __init__(self, data: Sequence[SizedIterable[T]]):
         """
         Initializes and consumes the input to learn the structure and cache data.
         """
-        self._data: Collection[Collection[T]] = data
+        self._data: Sequence[SizedIterable[T]] = data
         self._group_lengths: list[int] = [len(group) for group in data]
 
     def __iter__(self) -> Iterator[T]:
