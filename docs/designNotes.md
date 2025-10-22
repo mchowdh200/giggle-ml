@@ -1,4 +1,4 @@
-# Data related
+# Training paradigm
 
 ## Seqpare
 
@@ -18,6 +18,32 @@ Both are applicable to learn the metric.
 
 Hard triplets are normally mined by selecting, for an anchor, a positive element that the embedding model thinks is particularly different. But my data consists only of elements and a continuous similarity value between elements. If elements are sufficiently similar, we call it positive. So, it's a graph. I can't sample sufficiently distant anchors in the graph for which to draw clusters around those anchors, because the clusters would have overlap. If clusters have overlap, I must be sure not to define elements in distinct neighborhoods as negative. The solution obvious, but trickier. The mining batch is not a set of distinct clusters, it is series of sub-graphs where any node can be anchor so long as we determine its unique positive neighborhood.
 
+## M Model
+
+Why?
+
+- The system operates at set level; permutation invariant. Giggle, the inspiration, is permutation invariant to intervals. As is seqpare. And, a permutation invariant embedding architecture.
+- Naive set level triplet mining is too expensive. Already exceeding A100 80GB memory limits with a batch size of 16 and 20 intervals per item. 20 intervals is questionable because CLT kicks in at 40 as a rule of thumb. And 16 is very small for proper triplet mining. Additionally, maxing out GPU memory incurs a strong performance penalty because we have no reserve space for triplet mining over the combined batch between all GPUs.
+
+Deep sets architecture on HyenaDNA embeddings  
+`interval set --fasta--> sequence set --HyenaDNA--> sequence embeddings --M Model--> (a single) set embedding`
+
+HyenaDNA sequence embeddings across all sets in the batch are passed through $\phi$. We use gradient checkpointing over the $\phi$ MLP -- activations are thrown out, but inputs (into the MLP) cached. The loss can be calculated with a low memory footprint using this technique. The backward pass is efficient because gradient accumulation occurs automatically by pytorch. A running average over the $\phi$ gradients; no entire set of activations in memory at once. It's effectively no limit on the size of sets we can process because we've pushed the memory complexity into the time complexity and made the model lightweight.
+
+# Embedding pipeline
+
+I've identified that pipeline designs are hard to generalize because the accelerator and context varies through the pipeline. Boundaries, obvious in one layer, may need to become data in another. Subsequent boundaries don't have to match the rest. Order isn't guaranteed, but often required. Some items can become multiple. I have managed to generalize all my usages.
+
+```
+    [ N items stream ] -> [ M > N items ] -> [ M//b batches ] -> [ M//b embeds ] -> [ N outputs ]
+                 ("preprocess")   (DataLoader batching)   (model call)     ("postprocess")
+```
+
+Additionally tokenization is often dependent on the type of model and input data type. To handle that, I take in a collate_fn and decollate_fn as parameters used just before and after the model call. In a situation where genomic intervals are provided and chunked, tokenization can be used conditionally with fasta-mapping simply by passing the proper functions.  
+This allows a stream of genomic interval streams to be processed by flattening and zipping with indices. The DataLoader will create batch boundaries invariant of set boundaries or the growth-factor due to chunking. This guarantees stable batching and maximum throughput entirely invariant to the input shape or worker count.
+
+The DataLoader sub-workers and top-level workers all work out of sync and so output order is generally far from guaranteed and difficult to repair in a streaming way. We can get eventual ordering by tagging inputs with indices used to direct outputs. We can use Zarr arrays (which support) concurrent writing to different chunks to collect sorted outputs without a non-linear cost in the same way that we can linearly sort a distinct and fixed length list of numbers. Disk IO is free because we have essentially three computational devices: CPU (top-level worker), CPU (sub-worker), GPU(s). The sub-workers continuously prepare batches for the GPU to continuously embed for the top-level workers to continuously write. The overlapping nature of organization amortizes transit costs.
+
 # Other
 
 ## Tiling Algorithm
@@ -31,17 +57,3 @@ Hard triplets are normally mined by selecting, for an anchor, a positive element
   - Tiles at increasing sizes (base size)\*2^K for the K-th layer. Each layer has a few offsets that linearly divide the tile spacing for that layer.
   - There are (layers \* offsets per layer) full-genome tilings.
   - Interval -> Tile Composition Algorithm: greedy, picks the largest most centered tile within the interval first. Recursively tiles the remainder. Refuses to yield a tile that adds more "noise" than coverage.
-
-## M Model
-
-Why?
-
-- The system operates at set level; permutation invariant. Giggle, the inspiration, is permutation invariant to intervals. As is seqpare. And, a permutation invariant embedding architecture.
-- Naive set level triplet mining is too expensive. Already exceeding A100 80GB memory limits with a batch size of 16 and 20 intervals per item. 20 intervals is questionable because CLT kicks in at 40 as a rule of thumb. And 16 is very small for proper triplet mining. Additionally, maxing out GPU memory incurs a strong performance penalty because we have no reserve space for triplet mining over the combined batch between all GPUs.
-
-Deep sets architecture on HyenaDNA embeddings  
-`interval set --fasta--> sequence set --HyenaDNA--> sequence embeddings --M Model--> (a single) set embedding`
-
-HyenaDNA sequence embeddings across all sets in the batch are passed through $\phi$. We use gradient checkpointing over the $\phi$ MLP -- activations are thrown out, but inputs (into the MLP) cached. The loss can be calculated with a low memory footprint using this technique. The backward pass is efficient because gradient accumulation occurs automatically by pytorch. A running average over the $\phi$ gradients; no entire set of activations in memory at once. It's effectively no limit on the size of sets we can process because we've pushed the memory complexity into the time complexity and made the model lightweight.
-
-## Other
