@@ -36,13 +36,17 @@ I've identified that pipeline designs are hard to generalize because the acceler
 
 ```
     [ N items stream ] -> [ M > N items ] -> [ M//b batches ] -> [ M//b embeds ] -> [ N outputs ]
-                 ("preprocess")   (DataLoader batching)   (model call)     ("postprocess")
+                 ("preprocess")   (DataLoader batching) | (model call)  |  ("postprocess")
+                                                        |collate        |decollate
 ```
 
 Additionally tokenization is often dependent on the type of model and input data type. To handle that, I take in a collate_fn and decollate_fn as parameters used just before and after the model call. In a situation where genomic intervals are provided and chunked, tokenization can be used conditionally with fasta-mapping simply by passing the proper functions.  
 This allows a stream of genomic interval streams to be processed by flattening and zipping with indices. The DataLoader will create batch boundaries invariant of set boundaries or the growth-factor due to chunking. This guarantees stable batching and maximum throughput entirely invariant to the input shape or worker count.
 
 The DataLoader sub-workers and top-level workers all work out of sync and so output order is generally far from guaranteed and difficult to repair in a streaming way. We can get eventual ordering by tagging inputs with indices used to direct outputs. We can use Zarr arrays (which support) concurrent writing to different chunks to collect sorted outputs without a non-linear cost in the same way that we can linearly sort a distinct and fixed length list of numbers. Disk IO is free because we have essentially three computational devices: CPU (top-level worker), CPU (sub-worker), GPU(s). The sub-workers continuously prepare batches for the GPU to continuously embed for the top-level workers to continuously write. The overlapping nature of organization amortizes transit costs.
+
+The pipeline could be theoretically used to process an infinite data stream so long as resumption were accounted for.
+Breaking the pipeline into pre/postprocess, model, de/collate steps is "safe" because it prevents the user from operating directly on the infinite data stream.
 
 # Other
 
