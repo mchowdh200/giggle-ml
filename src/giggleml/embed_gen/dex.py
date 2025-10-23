@@ -9,7 +9,12 @@ from torch.utils.data import DataLoader, IterableDataset
 # Assumes these local utility imports exist
 from giggleml.iter_utils.rank_iter import RankIter
 from giggleml.utils.nothing import nothing, yield_through
-from giggleml.utils.torch_utils import get_world_size, guess_device, is_distributed
+from giggleml.utils.torch_utils import (
+    get_world_size,
+    guess_device,
+    is_distributed,
+    rprint,
+)
 
 # Type aliases for pipeline components
 type PreprocessorFn[T_in, U_pre] = Callable[[T_in], Iterable[U_pre]]
@@ -42,13 +47,15 @@ class _StreamingPreprocessorDataset[T_in, U_pre](IterableDataset):
         self.data = data
         self.batch_size = batch_size
         self.preprocessor_fn = preprocessor_fn
+        self.rank_iter: RankIter[Iterable[T_in]] = RankIter()
 
     def __iter__(self) -> Iterator[tuple[U_pre, bool]]:
         """Iterate through preprocessed data with correct boundary flags."""
-        blocks = itertools.batched(self.data, self.batch_size)
-        rank_data = RankIter(blocks)
 
-        for block in rank_data:
+        blocks = itertools.batched(self.data, self.batch_size)
+        data = self.rank_iter.iter(blocks)
+
+        for block in data:
             # Process each item in the block individually to create
             # distinct groups for the postprocessor.
             for item in block:
@@ -121,7 +128,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
     def simulate[T](self, data: Iterable[T], batch_size: int) -> Iterator[Iterable[T]]:
         """Pass data through, without executing the pipeline, for indices tracking"""
         blocks = itertools.batched(data, batch_size)
-        rank_data = RankIter(blocks)
+        rank_data = RankIter().iter(blocks)
         yield from rank_data
 
     def simulate_global_concat[T](self, data: Iterable[T], batch_size: int) -> list[T]:

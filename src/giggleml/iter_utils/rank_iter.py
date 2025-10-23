@@ -5,36 +5,75 @@ from typing import overload
 import torch
 import torch.distributed as dist
 
+from giggleml.utils.torch_utils import rprint
 
-class RankIter[T](Iterable[T]):
-    """Higher-order iterable that yields only elements for the current distributed rank.
 
-    In distributed settings, automatically shards data across workers by yielding
-    every world_size-th element starting from the current rank. In non-distributed
-    settings, yields all elements.
+class RankIter[T]:
+    """
+    Higher-order iterable that correctly shards data for distributed processing,
+    even when used with a DataLoader (num_workers > 0).
+
+    It captures the distributed rank/world_size when instantiated and
+    combines it with the DataLoader worker_id when iterated.
     """
 
-    def __init__(self, data: Iterable[T]):
-        """Initialize with source data iterable.
+    def __init__(self):
+        """
+        Initialize with source data iterable and capture distributed context.
+
+        This __init__ method is expected to be called from the main
+        distributed process (not a DataLoader worker).
 
         Args:
-            data: Source iterable to shard across ranks
+            data: Source iterable to shard across ranks and workers
         """
-        self.data = data
 
-    def __iter__(self) -> Iterator[T]:
-        """Iterate through rank-appropriate elements.
+        # 1. Capture rank and world size from the main process
+        self.is_dist = dist.is_available() and dist.is_initialized()
+        self.rank = dist.get_rank() if self.is_dist else 0
+        self.world_size = dist.get_world_size() if self.is_dist else 1
+
+        rprint(f"RankIter.__init__: dist.is_initialized()={dist.is_initialized()}")
+
+    def iter(self, data: Iterable[T]) -> Iterator[T]:
+        """
+        Iterate through elements, sharded by rank and/or worker.
+
+        This __iter__ method is expected to be called by the process
+        that consumes the data (e.g., a DataLoader worker).
 
         Yields:
-            Elements assigned to the current rank
+            Elements assigned to the current rank and worker
         """
-        if dist.is_available() and dist.is_initialized():
-            world_size = dist.get_world_size()
-            rank = dist.get_rank()
-            # Each worker processes every world_size-th element starting from its rank
-            yield from itertools.islice(self.data, rank, None, world_size)
+
+        # 2. Get worker info from the worker process (or None if num_workers=0)
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info:
+            rprint(
+                f"RankIter.__iter__: worker_info={worker_info}, dist.is_initialized()={dist.is_initialized()}"
+            )
+
+        data_iter = iter(data)
+
+        if worker_info is None:
+            # We are in the main process (num_workers = 0)
+            # Shard by rank only
+            start_index = self.rank
+            step_size = self.world_size
         else:
-            yield from self.data
+            # We are in a worker process (num_workers > 0)
+            # Shard by both rank and worker
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+
+            # The global index for this specific worker on this specific rank
+            start_index = self.rank * num_workers + worker_id
+
+            # The total number of workers across all ranks
+            step_size = self.world_size * num_workers
+
+        # 3. Yield the correctly sharded data
+        yield from itertools.islice(data_iter, start_index, None, step_size)
 
     @overload
     @staticmethod
