@@ -1,82 +1,64 @@
 import itertools
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 
 from giggleml.utils.types import SizedIterable
 
 
-class SetFlatIter[T]:
+class SetFlatIter[T, U]:
     """
-    A utility to flatten a nested iterable and provide batched streams
-    of the data and corresponding indices.
+    A utility to flatten a nested iterable and later regroup a
+    corresponding flat iterable back into the original structure.
 
     This implementation performs a single pass on initialization to learn the
     full structure, caching the data to ensure correctness and consistency
     between its methods.
-
-    All iterator methods (e.g., __iter__, indices) yield batches. Crucially,
-    batches *do not* cross the boundaries of the inner sets. If a set ends,
-    the current batch also ends, even if it is smaller than batch_size.
     """
 
-    def __init__(
-        self,
-        data: Sequence[SizedIterable[T]],
-        batch_size: int = 1,
-    ):
+    def __init__(self, data: Sequence[SizedIterable[T]]):
         """
-        does not consume the input to learn the structure and cache data.
-
-        Args:
-            data: A sequence of sized iterables (e.g., a list of lists).
-            batch_size: The desired size for batches. Batches will not
-                cross the boundaries of the inner iterables in `data`.
+        Initializes and consumes the input to learn the structure and cache data.
         """
-        if batch_size < 1:
-            raise ValueError("batch_size must be at least 1")
-
         self._data: Sequence[SizedIterable[T]] = data
         self._group_lengths: list[int] = [len(group) for group in data]
-        self._batch_size: int = batch_size
 
-    def __iter__(self) -> Iterator[tuple[T, ...]]:
+    def __iter__(self) -> Iterator[T]:
         """
-        Provides the batched, flattened data stream.
-        Iterable[Iterable[T]] -> Iterable[Batch[T]].
-
-        Yields:
-            Batches of items as tuples.
+        Provides the flattened data stream: Iterable[Iterable[T]] -> Iterable[T].
+        Returns an iterator over the cached data.
         """
-        for group in self._data:
-            yield from itertools.batched(group, self._batch_size)
+        yield from itertools.chain.from_iterable(self._data)
 
-    def indices(self) -> Iterator[tuple[tuple[int, int], ...]]:
+    def indices(self) -> Iterator[tuple[int, int]]:
         """
-        Provides batches of the (set index, index within set) mapping.
-        These batches correspond directly to the batches yielded by __iter__.
-
-        Yields:
-            Batches of (set_index, inner_index) tuples.
+        Provides the (set index, index within set) mapping.
+        This is always correct as the structure is pre-computed.
         """
         for i, length in enumerate(self._group_lengths):
-            # Create a generator for just this group's indices
-            # e.g., ((0, 0), (0, 1), (0, 2))
-            group_indices = ((i, j) for j in range(length))
+            for j in range(length):
+                yield (i, j)
 
-            # Batch the indices generator for this group
-            yield from itertools.batched(group_indices, self._batch_size)
+    def set_indices(self) -> Iterator[int]:
+        yield from (i for (i, _) in self.indices())
 
-    def set_indices(self) -> Iterator[tuple[int, ...]]:
+    def regroup(self, flat_iterable: Iterable[U]) -> Iterator[list[U]]:
         """
-        Provides batches of the set indices.
-        These batches correspond directly to the batches yielded by __iter__.
-
-        Yields:
-            Batches of set_index integers.
+        Regroups a flat iterable using the pre-computed structure.
         """
-        for i, length in enumerate(self._group_lengths):
-            # Create a generator for just this group's set indices
-            # e.g., (0, 0, 0)
-            group_set_indices = (i for _ in range(length))
+        flat_iter = iter(flat_iterable)
 
-            # Batch the set indices generator for this group
-            yield from itertools.batched(group_set_indices, self._batch_size)
+        for length in self._group_lengths:
+            try:
+                yield [next(flat_iter) for _ in range(length)]
+            except StopIteration:
+                raise ValueError(
+                    "The 'flat_iterable' has fewer items than the original structure."
+                )
+
+        # This check ensures the input iterable's length matches the original
+        try:
+            next(flat_iter)
+            raise ValueError(
+                "The 'flat_iterable' has more items than the original structure."
+            )
+        except StopIteration:
+            pass
