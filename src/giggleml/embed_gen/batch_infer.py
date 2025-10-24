@@ -1,17 +1,37 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
-from typing import final
+from typing import Any, Callable, NamedTuple, cast, final, override
 
-from torch import Tensor
+import torch
+from torch import Tensor, nn
+from torch.utils.data import IterableDataset
 
+from giggleml.data_wrangling import fasta
+from giggleml.data_wrangling.interval_dataset import IntervalDataset
 from giggleml.embed_gen.multi_zarr_writer import MultiZarrWriter
 from giggleml.iter_utils.set_flat_iter import SetFlatIter
+from giggleml.iter_utils.zipper import Zipper
 from giggleml.models.genomic_model import GenomicModel
-from giggleml.utils.types import lazy
+from giggleml.utils.types import GenomicInterval, lazy
 
-from ..data_wrangling.interval_dataset import IntervalDataset
-from .dex import ConsumerFn, Dex
-from .genomic_dex import GenomicDex
+from .dex import (
+    ConsumerFn,
+    Dex,
+)
+
+type Idx = tuple[int, int]
+type EmbedConsumer = Callable[[Sequence[tuple[Idx, Tensor]]], None]
+
+type _DexIn = tuple[Idx | None, GenomicInterval | None]
+type _DexOut = tuple[Idx | None, Tensor | None]
+
+
+class _DexBatch[T](NamedTuple):
+    indices: Iterable[Idx | None]
+    default_batch: T
+
+
+type _Dex = Dex[_DexIn, _DexIn, _DexOut, _DexOut, _DexBatch[Any], _DexBatch[Tensor]]
 
 
 @lazy
@@ -31,18 +51,19 @@ class GenomicEmbedder:
         self.num_workers = num_workers
         self.embed_dim = model.embed_dim
 
-    def raw(
-        self,
-        datasets: Sequence[IntervalDataset],
-        consumer: ConsumerFn[Tensor],
-    ) -> None:
+    def raw(self, datasets: Sequence[IntervalDataset], consumer: EmbedConsumer) -> None:
         """Process datasets with a generic consumer function.
 
         The consumer receives individual tensors in the order they are processed,
         without any regrouping or post-processing.
         """
         dex, set_flat_iter = self._create_dex_pipeline(datasets)
-        self._execute_pipeline(dex, set_flat_iter, consumer)
+
+        def raw_consumer_wrapper(output: Iterable[_DexOut]) -> None:
+            clean = [x for x in output if x[0] is not None and x[1] is not None]
+            consumer(cast(Sequence[tuple[Idx, Tensor]], clean))
+
+        self._execute_pipeline(dex, set_flat_iter, raw_consumer_wrapper)
 
     def to_disk(
         self,
@@ -51,8 +72,8 @@ class GenomicEmbedder:
     ) -> None:
         """Process datasets and write results to zarr files with direct writing.
 
-        Results are written directly to final zarr files using lock-based initialization
-        and rank-specific output mapping for efficient parallel processing.
+        Results are written directly to final zarr files. The new batching
+        strategy ensures indices are correctly paired with outputs.
         """
         if not datasets:
             raise ValueError("At least one dataset is required")
@@ -64,33 +85,53 @@ class GenomicEmbedder:
                 f"number of output paths ({len(output_paths)})"
             )
 
-        # Create pipeline and get streaming indices iterator
+        # Create pipeline
         dex, set_flat_iter = self._create_dex_pipeline(datasets)
-        rank_indices_iterator = dex.simulate(set_flat_iter.indices(), self.batch_size)
 
-        # Create direct zarr consumer with streaming indices
-        zarr_consumer = self._create_direct_zarr_consumer(
-            output_paths, rank_indices_iterator
-        )
+        # Create direct zarr consumer. It no longer needs the complex
+        # rank_indices_iterator, as indices are now part of the data.
+        zarr_consumer = self._create_direct_zarr_consumer(output_paths)
 
         # Execute pipeline with direct writing
         self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
 
     def _create_dex_pipeline(
         self, datasets: Sequence[IntervalDataset]
-    ) -> tuple[Dex, SetFlatIter]:
+    ) -> tuple[_Dex, SetFlatIter[GenomicInterval]]:
         """Create and configure the Dex pipeline for processing datasets."""
         fasta_path = self._validate_fasta_paths(datasets)
-        dex = GenomicDex.create_pipeline(self.model, fasta_path)
-        set_flat_iter = SetFlatIter(datasets)
+
+        wants_seq = self.model.wants == "sequences"
+
+        if wants_seq and fasta_path is None:
+            raise ValueError("Unable to map to FASTA; missing associated FASTA path")
+
+        # Create pipeline components
+        preprocessor = _Preprocessor(self.model.max_seq_len)
+        collate_fn = _Collate(fasta_path if wants_seq else None, self.model.collate)
+        wrapped_model = _ModelWrap(self.model)
+        decollate_fn = _Decollate()
+        postprocessor = _Postprocessor()
+        dex = Dex(
+            model=wrapped_model,
+            preprocessor_fn=preprocessor,
+            postprocessor_fn=postprocessor,
+            collate_fn=collate_fn,
+            decollate_fn=decollate_fn,
+        )
+        set_flat_iter = SetFlatIter(datasets, round_to_multiple=self.batch_size)
         return dex, set_flat_iter
 
     def _execute_pipeline(
-        self, dex: Dex, set_flat_iter: SetFlatIter, consumer: ConsumerFn[Tensor]
+        self,
+        dex: _Dex,
+        set_flat_iter: SetFlatIter[GenomicInterval],
+        consumer: ConsumerFn[_DexOut],
     ) -> None:
         """Execute the Dex pipeline with the given consumer."""
+
         dex.execute(
-            data=set_flat_iter,
+            data=_Dataset(set_flat_iter),
             consumer_fn=consumer,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
@@ -110,9 +151,11 @@ class GenomicEmbedder:
     def _create_direct_zarr_consumer(
         self,
         output_paths: Sequence[str],
-        rank_indices: Iterable[Iterable[tuple[int, int]]],
-    ) -> ConsumerFn[Tensor]:
-        """Create a consumer that writes directly to final zarr files with streaming indices."""
+    ) -> ConsumerFn[_DexOut]:
+        """
+        Create a consumer that writes directly to final zarr files.
+        It now receives (index_batch, output_batch) tuples directly.
+        """
 
         # Convert torch dtype to zarr-compatible string
         model_dtype = self.model.embed_dtype
@@ -124,18 +167,125 @@ class GenomicEmbedder:
             dtype=zarr_dtype,
         )
 
-        rank_indices_iterator = iter(rank_indices)
-
-        def zarr_consumer(embeddings: Iterable[Tensor]) -> None:
-            # Get the indices iterator for this batch
-
-            try:
-                batch_indices_iterator = next(rank_indices_iterator)
-            except StopIteration:
-                raise RuntimeError("No more indices available from rank simulation")
-
-            # Convert tensors to numpy arrays and write using the dedicated zarr writer
-            numpy_embeddings = [tensor.cpu().numpy() for tensor in embeddings]
-            zarr_writer.write_batch(numpy_embeddings, list(batch_indices_iterator))
+        def zarr_consumer(batch_output: Iterable[_DexOut]) -> None:
+            indices, embeddings = zip(
+                *[x for x in batch_output if x[0] is not None and x[1] is not None]
+            )
+            numpy_embeddings = [t.cpu().numpy() for t in embeddings]
+            zarr_writer.write_batch(numpy_embeddings, indices)
 
         return zarr_consumer
+
+
+# INFO --------------------------
+#        Generic Pipeline
+# -------------------------------
+
+
+@final
+class _Dataset(IterableDataset[_DexIn]):
+    def __init__(self, source: SetFlatIter[GenomicInterval]) -> None:
+        super().__init__()
+        self.source = source
+
+    @override
+    def __iter__(self) -> Iterator[_DexIn]:
+        zipper = Zipper(self.source.indices(), self.source)
+        yield from iter(zipper)
+
+
+class _Preprocessor:
+    """chunking intervals."""
+
+    def __init__(self, max_seq_len: int | None):
+        self.max_seq_len: int | None = max_seq_len
+
+    def _chunk_interval(
+        self, interval: GenomicInterval, max_size: int
+    ) -> list[GenomicInterval]:
+        """Split an interval into chunks of max_size."""
+        chrom, start, end = interval
+        length = end - start
+
+        if length <= max_size:
+            return [interval]
+
+        chunks = []
+        current_start = start
+        while current_start < end:
+            current_end = min(current_start + max_size, end)
+            chunks.append((chrom, current_start, current_end))
+            current_start = current_end
+
+        return chunks
+
+    def __call__(self, item: _DexIn):
+        idx, interval = item
+
+        if interval is not None and self.max_seq_len is not None:
+            chunks = self._chunk_interval(interval, self.max_seq_len)
+            for chunk in chunks:
+                yield idx, chunk
+        else:
+            yield idx, interval
+
+
+class _Collate:
+    """FASTA sequence mapping."""
+
+    def __init__(self, fasta_path: Path | None, model_collate_fn: Callable):
+        self.fasta_path: Path | None = fasta_path
+        self.model_collate_fn = model_collate_fn
+
+    def __call__(self, batch: Iterable[_DexIn]) -> _DexBatch[Any]:
+        indices, total_intervals = zip(*batch)
+        clean_intervals = [x for x in total_intervals if x is not None]
+
+        if self.fasta_path:
+            processed_batch = fasta.map(clean_intervals, self.fasta_path)
+        else:
+            processed_batch = clean_intervals
+
+        return _DexBatch(indices, self.model_collate_fn(processed_batch))
+
+
+class _ModelWrap(nn.Module):
+    def __init__(self, model: nn.Module) -> None:
+        super().__init__()
+        self.model: nn.Module = model
+
+    @override
+    def forward(self, batch: _DexBatch[Any]):
+        indices, default_batch = batch
+        return indices, self.model(default_batch)
+
+
+class _Decollate:
+    def __call__(
+        self, batch: _DexBatch[Tensor]
+    ) -> Iterator[tuple[Idx | None, Tensor | None]]:
+        from_model = iter(batch[1])
+
+        for idx in batch[0]:
+            if idx is None:
+                yield (None, None)
+            else:
+                yield (idx, next(from_model))
+
+
+class _Postprocessor:
+    """averaging chunk embeddings."""
+
+    def __call__(self, items: Iterable[_DexOut]) -> _DexOut:
+        indices, embeddings = zip(*items)
+
+        idx = indices[0]
+
+        if len(embeddings) == 1:
+            return idx, embeddings[0]
+        else:
+            assert idx is not None
+            # Average multiple chunk embeddings
+            clean_embeds = [x for x in embeddings if x is not None]
+            stacked = torch.stack(clean_embeds)
+            return idx, torch.mean(stacked, dim=0)
