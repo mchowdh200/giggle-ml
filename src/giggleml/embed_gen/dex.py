@@ -1,10 +1,11 @@
 import itertools
 from collections.abc import Callable, Iterable, Iterator
+from logging import warning
 
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 # Assumes these local utility imports exist
 from giggleml.iter_utils.rank_iter import RankIter
@@ -20,7 +21,7 @@ from giggleml.utils.torch_utils import (
 type PreprocessorFn[T_in, U_pre] = Callable[[T_in], Iterable[U_pre]]
 """Transforms input elements, potentially creating multiple outputs per input."""
 
-type PostprocessorFn[V_post, W_out] = Callable[[Iterable[V_post]], W_out]
+type PostprocessorFn[V_post, W_out] = Callable[[list[V_post]], W_out]
 """Aggregates multiple model outputs back into a single result."""
 
 type ConsumerFn[W_out] = Callable[[Iterable[W_out]], None]
@@ -47,31 +48,34 @@ class _StreamingPreprocessorDataset[T_in, U_pre](IterableDataset):
         self.data = data
         self.batch_size = batch_size
         self.preprocessor_fn = preprocessor_fn
-        self.rank_iter: RankIter[Iterable[T_in]] = RankIter()
 
-    def __iter__(self) -> Iterator[tuple[U_pre, bool]]:
-        """Iterate through preprocessed data with correct boundary flags."""
+        self.is_dist = dist.is_available() and dist.is_initialized()
+        self.rank = dist.get_rank() if self.is_dist else 0
+        self.world_size = dist.get_world_size() if self.is_dist else 1
 
-        blocks = itertools.batched(self.data, self.batch_size)
-        data = self.rank_iter.iter(blocks)
+    def __iter__(self) -> Iterator[tuple[int, U_pre]]:
+        """Iterate through preprocessed data with regroup indices."""
+        # batching at the top level prevents consumers from getting mixed-chunk items
+        total_blocks = itertools.batched(self.data, self.batch_size)
+        # a flat stream from the blocks for this rank
+        rank_items = itertools.chain.from_iterable(
+            itertools.islice(total_blocks, self.rank, None, self.world_size)
+        )
+        worker_info = get_worker_info()
+        sub_rank = worker_info.id if worker_info else 0
+        num_workers = worker_info.num_workers if worker_info else 1
+        # de-interleave of the rank's share into sub-worker tasks
+        sub_worker_items = itertools.islice(rank_items, sub_rank, None, num_workers)
 
-        for block in data:
-            # Process each item in the block individually to create
-            # distinct groups for the postprocessor.
-            for item in block:
-                sub_items_iter = iter(self.preprocessor_fn(item))
-
-                try:
-                    prev_sub_item = next(sub_items_iter)
-                except StopIteration:
-                    continue  # Preprocessor produced no items for this input
-
-                for sub_item in sub_items_iter:
-                    yield (prev_sub_item, False)
-                    prev_sub_item = sub_item
-
-                # Mark the end of the group for this specific 'item'.
-                yield (prev_sub_item, True)
+        for item in sub_worker_items:
+            # we make the required assumption that the expanded_item group fits in memory
+            expanded_items = list(self.preprocessor_fn(item))
+            yield from ((sub_rank + 1, item) for item in expanded_items[:-1])
+            yield (
+                -(sub_rank + 1),
+                expanded_items[-1],
+            )  # mark last item with negative index
+            # we add one because zero can't be signed
 
 
 class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
@@ -116,14 +120,15 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         self.decollate_fn = decollate_fn
 
     def _internal_collate(
-        self, batch: list[tuple[U_pre, bool]]
-    ) -> tuple[Batch_in, list[bool]]:
+        self, batch: list[tuple[int, U_pre]]
+    ) -> tuple[list[int], Batch_in]:
         """Internal collator to separate data from flags before calling user collate_fn."""
-        items = [item for item, _ in batch]
-        flags = [flag for _, flag in batch]
+        indices, items = zip(*batch)
+        items = list(items)
+        indices = list(indices)
         # Call the user-provided collate function with only the data
         user_batch = self.collate_fn(items)
-        return user_batch, flags
+        return indices, user_batch
 
     def simulate[T](self, data: Iterable[T], batch_size: int) -> Iterator[Iterable[T]]:
         """Pass data through, without executing the pipeline, for indices tracking"""
@@ -183,7 +188,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         output_item_stream = self._decollate_and_rebatch(model_output_batches)
 
         # 3. Group items by boundary flags and apply postprocessing
-        final_results = self._regroup_and_postprocess(output_item_stream)
+        final_results = self._regroup_and_postprocess(num_workers, output_item_stream)
 
         # 4. Send results to the consumer
         for block in itertools.batched(final_results, batch_size):
@@ -191,9 +196,9 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
 
     def _model_pass(
         self, loader: DataLoader, model: torch.nn.Module, device: torch.device
-    ) -> Iterator[tuple[Batch_out, list[bool]]]:
+    ) -> Iterator[tuple[list[int], Batch_out]]:
         """Executes the model on batched data, handling device placement."""
-        for batch_input, boundary_flags in loader:
+        for group_indices, batch_input in loader:
             # Robustly move batch components to the target device
             if isinstance(batch_input, (list, tuple)):
                 moved_batch = tuple(
@@ -208,31 +213,40 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
                 moved_batch = batch_input  # Assume it's a custom object
 
             output = model(moved_batch)
-            yield output, boundary_flags
+            yield group_indices, output
 
     def _decollate_and_rebatch(
-        self, model_output_batches: Iterable[tuple[Batch_out, list[bool]]]
-    ) -> Iterator[tuple[V_post, bool]]:
+        self, model_output_batches: Iterable[tuple[list[int], Batch_out]]
+    ) -> Iterator[tuple[int, V_post]]:
         """Applies user decollate and re-associates items with boundary flags."""
-        for batch_output, flags in model_output_batches:
+        for group_indices, batch_output in model_output_batches:
             # User decollate function returns an iterable of items
             decollated_items = self.decollate_fn(batch_output)
             # Zip items with their corresponding flags
-            yield from zip(decollated_items, flags)
+            yield from zip(group_indices, decollated_items)
 
     def _regroup_and_postprocess(
-        self, items: Iterable[tuple[V_post, bool]]
+        self, num_workers: int, items: Iterable[tuple[int, V_post]]
     ) -> Iterator[W_out]:
-        """Regroups items by boundary flags and applies postprocessing."""
-        current_group: list[V_post] = []
+        """Regroups items by group index and applies postprocessing."""
+        groups: list[list[V_post]] = [list() for _ in range(num_workers)]
 
-        for item, is_last in items:
+        for signed_group_idx, item in items:
+            is_last = signed_group_idx < 0
+            group_idx = abs(signed_group_idx) - 1
+
+            current_group = groups[group_idx]
             current_group.append(item)
 
             if is_last:
                 yield self.postprocessor_fn(current_group)
-                current_group = []
+                current_group.clear()
 
         # Handle any remaining items if the stream ends mid-group
-        if current_group:
-            yield self.postprocessor_fn(current_group)
+        for group in groups:
+            if len(group) != 0:
+                # this should not happen
+                warning(
+                    "Output stream ended before group was closed; flushing remaining items."
+                )
+                yield self.postprocessor_fn(group)
