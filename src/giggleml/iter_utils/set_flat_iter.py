@@ -1,4 +1,5 @@
 from collections.abc import Iterator, Sequence
+from functools import cache
 from math import ceil
 
 from giggleml.utils.types import SizedIterable
@@ -25,6 +26,10 @@ class SetFlatIter[T]:
             ceil(size / round_to_multiple) * round_to_multiple - size
             for size in self._group_lengths
         ]
+
+    @cache
+    def __len__(self) -> int:
+        return sum(self._group_lengths)
 
     def __iter__(self) -> Iterator[T | None]:
         """
