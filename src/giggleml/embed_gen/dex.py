@@ -168,9 +168,11 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         # Setup DataLoader with the internal (picklable) collation method
         data_loader = DataLoader(
             dataset,
+            shuffle=False,
             batch_size=batch_size,
             collate_fn=self._internal_collate,
             num_workers=num_workers,
+            persistent_workers=num_workers != 0,
             pin_memory=device.type == "cuda",
         )
 
