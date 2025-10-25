@@ -14,7 +14,6 @@ from giggleml.utils.torch_utils import (
     get_world_size,
     guess_device,
     is_distributed,
-    rprint,
 )
 
 # Type aliases for pipeline components
@@ -104,6 +103,22 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
     @param collate_fn must be picklable for DataLoader compatibility.
     """
 
+    class _InternalCollate:
+        """Internal collator to separate data from flags before calling user collate_fn."""
+
+        def __init__(self, base_collate_fn: CollateFn) -> None:
+            self.collate_fn: CollateFn = base_collate_fn
+
+        def __call__(
+            self, batch: list[tuple[int, U_pre]]
+        ) -> tuple[list[int], Batch_in]:
+            indices, items = zip(*batch)
+            items = list(items)
+            indices = list(indices)
+            # Call the user-provided collate function with only the data
+            user_batch = self.collate_fn(items)
+            return indices, user_batch
+
     def __init__(
         self,
         model: torch.nn.Module,
@@ -118,17 +133,6 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         self.postprocessor_fn = postprocessor_fn
         self.collate_fn = collate_fn
         self.decollate_fn = decollate_fn
-
-    def _internal_collate(
-        self, batch: list[tuple[int, U_pre]]
-    ) -> tuple[list[int], Batch_in]:
-        """Internal collator to separate data from flags before calling user collate_fn."""
-        indices, items = zip(*batch)
-        items = list(items)
-        indices = list(indices)
-        # Call the user-provided collate function with only the data
-        user_batch = self.collate_fn(items)
-        return indices, user_batch
 
     def simulate[T](self, data: Iterable[T], batch_size: int) -> Iterator[Iterable[T]]:
         """Pass data through, without executing the pipeline, for indices tracking"""
@@ -175,7 +179,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
             dataset,
             shuffle=False,
             batch_size=batch_size,
-            collate_fn=self._internal_collate,
+            collate_fn=self._InternalCollate(self.collate_fn),
             num_workers=num_workers,
             persistent_workers=num_workers != 0,
             pin_memory=device.type == "cuda",
