@@ -27,7 +27,7 @@ type _DexOut = tuple[Idx | None, Tensor | None]
 
 
 class _DexBatch[T](NamedTuple):
-    indices: Iterable[Idx | None]
+    indices: list[Idx | None]
     default_batch: T
 
 
@@ -90,7 +90,8 @@ class GenomicEmbedder:
 
         # Create direct zarr consumer. It no longer needs the complex
         # rank_indices_iterator, as indices are now part of the data.
-        zarr_consumer = self._create_direct_zarr_consumer(output_paths)
+        output_counts = [len(ds) for ds in datasets]
+        zarr_consumer = self._create_direct_zarr_consumer(output_paths, output_counts)
 
         # Execute pipeline with direct writing
         self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
@@ -151,6 +152,7 @@ class GenomicEmbedder:
     def _create_direct_zarr_consumer(
         self,
         output_paths: Sequence[str],
+        output_counts: Sequence[int],
     ) -> ConsumerFn[_DexOut]:
         """
         Create a consumer that writes directly to final zarr files.
@@ -158,13 +160,14 @@ class GenomicEmbedder:
         """
 
         # Convert torch dtype to zarr-compatible string
-        model_dtype = self.model.embed_dtype
-        zarr_dtype = str(model_dtype)[6:]  # "torch.float32" -> "float32"
+        zarr_dtype = str(self.model.embed_dtype)[6:]  # "torch.float32" -> "float32"
         zarr_writer = MultiZarrWriter(
             output_paths=output_paths,
             shape=(0, self.embed_dim),
+            initial_lengths=output_counts,
             chunks=(self.batch_size, self.embed_dim),
             dtype=zarr_dtype,
+            # grow_size=self.batch_size * get_world_size() * 2,
         )
 
         def zarr_consumer(batch_output: Iterable[_DexOut]) -> None:
@@ -246,7 +249,7 @@ class _Collate:
         else:
             processed_batch = clean_intervals
 
-        return _DexBatch(indices, self.model_collate_fn(processed_batch))
+        return _DexBatch(list(indices), self.model_collate_fn(processed_batch))
 
 
 class _ModelWrap(nn.Module):
@@ -288,4 +291,5 @@ class _Postprocessor:
             # Average multiple chunk embeddings
             clean_embeds = [x for x in embeddings if x is not None]
             stacked = torch.stack(clean_embeds)
-            return idx, torch.mean(stacked, dim=0)
+            mean = torch.mean(stacked, dim=0)
+            return idx, mean
