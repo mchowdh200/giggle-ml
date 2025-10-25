@@ -5,8 +5,6 @@ from typing import overload
 import torch
 import torch.distributed as dist
 
-from giggleml.utils.torch_utils import rprint
-
 
 class RankIter[T]:
     """
@@ -33,8 +31,6 @@ class RankIter[T]:
         self.rank = dist.get_rank() if self.is_dist else 0
         self.world_size = dist.get_world_size() if self.is_dist else 1
 
-        rprint(f"RankIter.__init__: dist.is_initialized()={dist.is_initialized()}")
-
     def iter(self, data: Iterable[T]) -> Iterator[T]:
         """
         Iterate through elements, sharded by rank and/or worker.
@@ -48,11 +44,6 @@ class RankIter[T]:
 
         # 2. Get worker info from the worker process (or None if num_workers=0)
         worker_info = torch.utils.data.get_worker_info()
-        if worker_info:
-            rprint(
-                f"RankIter.__iter__: worker_info={worker_info}, dist.is_initialized()={dist.is_initialized()}"
-            )
-
         data_iter = iter(data)
 
         if worker_info is None:
