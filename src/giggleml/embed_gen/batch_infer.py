@@ -51,13 +51,20 @@ class GenomicEmbedder:
         self.num_workers = num_workers
         self.embed_dim = model.embed_dim
 
-    def raw(self, datasets: Sequence[IntervalDataset], consumer: EmbedConsumer) -> None:
+    def raw(
+        self,
+        datasets: Sequence[IntervalDataset],
+        consumer: EmbedConsumer,
+        respect_boundaries: bool = False,
+    ) -> None:
         """Process datasets with a generic consumer function.
 
         The consumer receives individual tensors in the order they are processed,
         without any regrouping or post-processing.
+
+        @arg respect_boundaries: If True, returned blocks will not span multiple chunks
         """
-        dex, set_flat_iter = self._create_dex_pipeline(datasets)
+        dex, set_flat_iter = self._create_dex_pipeline(datasets, respect_boundaries)
 
         def raw_consumer_wrapper(output: Iterable[_DexOut]) -> None:
             clean = [x for x in output if x[0] is not None and x[1] is not None]
@@ -69,11 +76,14 @@ class GenomicEmbedder:
         self,
         datasets: Sequence[IntervalDataset],
         output_paths: Sequence[str],
+        respect_boundaries: bool = True,
     ) -> None:
         """Process datasets and write results to zarr files with direct writing.
 
         Results are written directly to final zarr files. The new batching
         strategy ensures indices are correctly paired with outputs.
+
+        @arg respect_boundaries: If True, returned blocks will not span multiple chunks
         """
         if not datasets:
             raise ValueError("At least one dataset is required")
@@ -86,7 +96,7 @@ class GenomicEmbedder:
             )
 
         # Create pipeline
-        dex, set_flat_iter = self._create_dex_pipeline(datasets)
+        dex, set_flat_iter = self._create_dex_pipeline(datasets, respect_boundaries)
 
         # Create direct zarr consumer. It no longer needs the complex
         # rank_indices_iterator, as indices are now part of the data.
@@ -97,7 +107,7 @@ class GenomicEmbedder:
         self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
 
     def _create_dex_pipeline(
-        self, datasets: Sequence[IntervalDataset]
+        self, datasets: Sequence[IntervalDataset], respect_boundaries: bool = True
     ) -> tuple[_Dex, SetFlatIter[GenomicInterval]]:
         """Create and configure the Dex pipeline for processing datasets."""
         fasta_path = self._validate_fasta_paths(datasets)
@@ -120,7 +130,9 @@ class GenomicEmbedder:
             collate_fn=collate_fn,
             decollate_fn=decollate_fn,
         )
-        set_flat_iter = SetFlatIter(datasets, round_to_multiple=self.batch_size)
+        set_flat_iter = SetFlatIter(
+            datasets, round_to_multiple=self.batch_size if respect_boundaries else 1
+        )
         return dex, set_flat_iter
 
     def _execute_pipeline(
