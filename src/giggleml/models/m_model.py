@@ -164,7 +164,15 @@ class MModel(nn.Module):
         freeze_model(self.hyena_dna)
 
         # 2. create element-wise embeddings
+
         phi_embeds = list()
+        phi_set_indices = list()
+
+        def collect_outputs(block: Sequence[tuple[Idx, torch.Tensor]]):
+            indices, embeds = zip(*block)
+            phi_set_indices.extend(i for (i, _) in indices)
+            phi_embeds.extend(embeds)
+
         # The RowMModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
         # We have to conditionally unwrap self because tools like fabric like to wrap the model in
         # unpicklable shells.
@@ -172,14 +180,12 @@ class MModel(nn.Module):
             "MModel", self.module if hasattr(self, "module") else self
         )
         GenomicEmbedder(RowMModel(unwrapped_self), batch_size, sub_workers).raw(
-            data, phi_embeds.extend
+            data, collect_outputs
         )
 
         # 3. set-level mean
-        structure = SetFlatIter(data)
-        set_indices = structure.set_indices()
         set_means = torch.stack(
-            [i for (_, i) in distributed_scatter_mean_iter(set_indices, phi_embeds)]
+            [i for (_, i) in distributed_scatter_mean_iter(phi_set_indices, phi_embeds)]
         )
 
         # 3. rho pass
