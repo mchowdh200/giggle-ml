@@ -34,6 +34,7 @@ def test_pipeline():
             embed_model=CountACGT(),
             batch_size=2,
             worker_count=worker_count,
+            sub_workers=2,
         )
         bed = BedDataset("tests/test.bed", "tests/test.fa")
         embed = pipeline.embed(bed, "tests/test_out.tmp")
