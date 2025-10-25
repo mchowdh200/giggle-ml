@@ -28,10 +28,9 @@ from torch.utils.checkpoint import checkpoint
 from typing_extensions import override
 
 from giggleml.data_wrangling.interval_dataset import IntervalDataset
-from giggleml.embed_gen.batch_infer import GenomicEmbedder
+from giggleml.embed_gen.batch_infer import GenomicEmbedder, Idx
 from giggleml.embed_gen.dex import Dex
 from giggleml.iter_utils.distributed_scatter_mean import distributed_scatter_mean_iter
-from giggleml.iter_utils.set_flat_iter import SetFlatIter
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
 from giggleml.utils.torch_utils import all_gather_concat, freeze_model
@@ -90,8 +89,6 @@ class MModel(nn.Module):
 
     @override
     def forward(self, batch: list[dict[str, torch.Tensor]]) -> torch.Tensor:
-        raise NotImplementedError  # see fixme comment
-
         # 1. phi pass
         phi_embeds = torch.cat(
             [self.set_contents_forward(item) for item in batch], dim=0
@@ -101,16 +98,13 @@ class MModel(nn.Module):
 
         dev = phi_embeds.device
         dtype: torch.dtype = phi_embeds.dtype
-        # FIXME:
-        # this SetFlatIter should probably not be called on the batch because the length of each in the batch
-        # does not correspond to the amount of intervals in that item. This function is provided
-        # mostly as a convenience method or example that avoids the overhead of the distributed embedding engine.
-        # it is untested.
-        set_indices = torch.tensor(
-            list(SetFlatIter(batch).set_indices()), device=dev, dtype=torch.int64
-        )
+
         set_sizes = torch.tensor(
-            [len(block) for block in batch], device=dev, dtype=dtype
+            [len(item["input_ids"]) for item in batch],
+            device=dev,
+        )
+        set_indices = torch.arange(0, len(batch), device=dev).repeat_interleave(
+            set_sizes
         )
 
         set_means = torch.zeros(
