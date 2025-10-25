@@ -23,9 +23,9 @@ class CountACGT(GenomicModel):
         super().__init__()
         self.max_seq_len = max_seq_len
         self.embed_dim = 4
+        self.collate = self._collate
 
-    @override
-    def collate(self, batch: Sequence[str]) -> Sequence[str]:
+    def _collate(self, batch: Sequence[str]) -> Sequence[str]:
         for item in batch:
             if self.max_seq_len is not None and len(item) > self.max_seq_len:
                 raise ValueError("Sequence exceeds max length; refusing to truncate.")
@@ -64,9 +64,9 @@ class TrivialModel(GenomicModel):
         super().__init__()
         self.max_seq_len = max_seq_len
         self.embed_dim = 1
+        self.collate = self._collate
 
-    @override
-    def collate(self, batch: Sequence[GenomicInterval]) -> Sequence[GenomicInterval]:
+    def _collate(self, batch: Sequence[GenomicInterval]) -> Sequence[GenomicInterval]:
         for item in batch:
             if self.max_seq_len is not None and len(item) > self.max_seq_len:
                 raise ValueError("Sequence exceeds max length; refusing to truncate.")

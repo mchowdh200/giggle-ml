@@ -1,6 +1,6 @@
 from abc import ABC
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch import nn
@@ -21,9 +21,9 @@ class GenomicModel(ABC, nn.Module):
     embed_dim: int  # Dimension of the output embeddings
     embed_dtype: torch.dtype = torch.float32  # Data type of the output embeddings
 
-    def collate(self, batch: Sequence[Any]) -> Any:
-        """Pre-process the batch of inputs before it reaches the embed call"""
-        return batch
+    # not a function so that subtypes can use a picklable reference for collate, separate from the model
+    collate: Callable[[Sequence[Any]], Any]
+    """Pre-process the batch of inputs before it reaches the embed call"""
 
 
 # ===================

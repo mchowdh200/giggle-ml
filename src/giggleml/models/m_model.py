@@ -20,7 +20,7 @@ M Model, deep sets architecture, hyenaDNA pre-processing
 """
 
 from collections.abc import Sequence
-from typing import Any, cast, final
+from typing import Any, final
 
 import torch
 import torch.nn as nn
@@ -56,6 +56,7 @@ class MModel(nn.Module):
     ):
         super().__init__()
 
+        self.size = size
         self.hyena_dna = HyenaDNA(size)
         self.phi_hidden_dim_factor = phi_hidden_dim_factor  # for __repr__
         self.rho_hidden_dim_factor = rho_hidden_dim_factor  # for __repr__
@@ -174,12 +175,7 @@ class MModel(nn.Module):
             phi_embeds.extend(embeds)
 
         # The RowMModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
-        # We have to conditionally unwrap self because tools like fabric like to wrap the model in
-        # unpicklable shells.
-        unwrapped_self = cast(
-            "MModel", self.module if hasattr(self, "module") else self
-        )
-        GenomicEmbedder(RowMModel(unwrapped_self), batch_size, sub_workers).raw(
+        GenomicEmbedder(RowMModel(self), batch_size, sub_workers).raw(
             data, collect_outputs
         )
 
@@ -242,10 +238,7 @@ class RowMModel(GenomicModel):
         self.max_seq_len: int | None = self.hyena_dna.max_seq_len
         self.embed_dim: int = self.hyena_dna.embed_dim
         self.embed_dtype: torch.dtype = self.hyena_dna.embed_dtype
-
-    @override
-    def collate(self, batch: Sequence[str]):
-        return self.mmodel.tokenize([batch])
+        self.collate = HyenaDNA(mmodel.size).collate
 
     @override
     def forward(self, batch: dict[str, torch.Tensor]):

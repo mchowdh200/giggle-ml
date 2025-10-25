@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from functools import cached_property
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch.types import Device
@@ -80,6 +80,7 @@ class HyenaDNA(GenomicModel):
         self.checkpoint: str = name
         self.embed_dim: int = e_dim
         self.size_type: str = size  # used for __repr__ only
+        self.collate: Callable[[Sequence[str]], dict[str, torch.Tensor]] = self._collate
 
         self._device: Device | None = None
 
@@ -128,8 +129,7 @@ class HyenaDNA(GenomicModel):
         self._device = device
         return super().to(*args, **kwargs)
 
-    @override
-    def collate(self, batch: Sequence[str]) -> dict[str, torch.Tensor]:
+    def _collate(self, batch: Sequence[str]) -> dict[str, torch.Tensor]:
         # everything produced is placed or kept on the CPU because this might
         # run on a DataLoader sub-process which would need to pull the results
         # back to the main process and it can't transfer unless everything's CPU-only.
