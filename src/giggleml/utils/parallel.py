@@ -61,7 +61,7 @@ def _setup_dist_env(
     os.environ["RANK"] = str(rank)
     os.environ["LOCAL_RANK"] = str(rank)
     os.environ["WORLD_SIZE"] = str(world_size)
-    
+
     dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
 
 
@@ -78,13 +78,14 @@ def _worker_wrapper(
     master_port: str,
     backend: str,
     fn: Callable[..., Any],
-    *args: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
 ) -> None:
     """Wrapper function that sets up distributed environment for each worker process."""
     _setup_dist_env(rank, world_size, master_addr, master_port, backend)
-    
+
     try:
-        fn(*args)
+        fn(*args, **kwargs)
     finally:
         _cleanup_dist()
 
@@ -196,13 +197,14 @@ class Parallel:
         self.master_addr = master_addr
         self.master_port = master_port
 
-    def __call__(self, fn: Callable[..., Any], *args: Any) -> None:
+    def __call__(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
         """Run a function in a distributed environment.
 
         Args:
             fn: The function to run in each worker process. Will be called with the
                 provided args in each worker. Must be pickle-able for multiprocess mode.
             *args: Arguments to pass to the worker function.
+            *kargs: Keyword arguments to pass to the worker function.
         """
         # Check if we can run locally instead of spawning processes
         has_accelerators = torch.cuda.is_available() or (
@@ -212,19 +214,27 @@ class Parallel:
         if self.world_size == 1 and not has_accelerators:
             print("Running locally (world_size=1, no accelerators)")
             _setup_dist_env(0, 1, self.master_addr, self.master_port, self.backend)
-            
+
             try:
                 fn(*args)
             finally:
                 _cleanup_dist()
         else:
-            print(f"Running distributed with world_size={self.world_size}, backend={self.backend}")
+            print(
+                f"Running distributed with world_size={self.world_size}, backend={self.backend}"
+            )
             # Spawn worker processes
             mp.spawn(
                 _worker_wrapper,
-                args=(self.world_size, self.master_addr, self.master_port, self.backend, fn, *args),
+                args=(
+                    self.world_size,
+                    self.master_addr,
+                    self.master_port,
+                    self.backend,
+                    fn,
+                    args,
+                    kwargs,
+                ),
                 nprocs=self.world_size,
                 join=True,
             )
-
-
