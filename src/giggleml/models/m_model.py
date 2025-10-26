@@ -187,10 +187,13 @@ class MModel(nn.Module):
         # 3. rho pass
         local_rho_embeds = list()
         rho_dex = Dex(self.rho)
-        rho_dex.execute(set_means, local_rho_embeds.extend, batch_size, sub_workers)
+        # Dex default collate is so fast that we can avoid sub-workers
+        #   and must, because we can't transfer grad tensors between workers
+        rho_dex.execute(set_means, local_rho_embeds.extend, batch_size, num_workers=0)
 
         # 4. regroup
-        total_rho_embeds = all_gather_concat(torch.stack(local_rho_embeds))
+        local_rho_embeds_tensor = torch.stack(local_rho_embeds).cpu()
+        total_rho_embeds = all_gather_concat(local_rho_embeds_tensor)
         total_ordering = rho_dex.simulate_global_concat(range(len(data)), batch_size)
         return total_rho_embeds[total_ordering]
 
