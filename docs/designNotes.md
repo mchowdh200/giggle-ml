@@ -61,3 +61,15 @@ Breaking the pipeline into pre/postprocess, model, de/collate steps is "safe" be
   - Tiles at increasing sizes (base size)\*2^K for the K-th layer. Each layer has a few offsets that linearly divide the tile spacing for that layer.
   - There are (layers \* offsets per layer) full-genome tilings.
   - Interval -> Tile Composition Algorithm: greedy, picks the largest most centered tile within the interval first. Recursively tiles the remainder. Refuses to yield a tile that adds more "noise" than coverage.
+
+# Untested experimental variables
+
+- foundation model type?
+  - do foundation models with large context do worse on small sequences?
+  - where do errors in the sequences matter most wrt embedding error?
+    - especially +/- nucleotides at start/end
+  - is mean aggregation of sequence chunks naive?
+- long-range proximity and embedding distance relationship?
+- how well do we generalize to unseen bed files?
+  - what about bed files "between" roadmap epigenomics bed files?
+- is it important to train tiling-aware?
