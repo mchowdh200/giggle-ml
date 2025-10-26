@@ -15,6 +15,9 @@ class Nothing:
     def __call__[T](self, arg: T, *args: object) -> T: ...
 
     def __call__[T](self, arg: T | None = None, *args: object) -> T | None:
+        if len(args) != 0:
+            # what do you expect to do, return multiple args?
+            raise RuntimeError("Nothing can only be called with zero or one argument")
         return arg
 
     def __iter__(self):
