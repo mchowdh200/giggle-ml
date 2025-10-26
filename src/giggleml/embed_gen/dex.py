@@ -238,7 +238,8 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         self, num_workers: int, items: Iterable[tuple[int, V_post]]
     ) -> Iterator[W_out]:
         """Regroups items by group index and applies postprocessing."""
-        groups: list[list[V_post]] = [list() for _ in range(num_workers)]
+        group_count = max(num_workers, 1)
+        groups: list[list[V_post]] = [list() for _ in range(group_count)]
 
         for signed_group_idx, item in items:
             is_last = signed_group_idx < 0
