@@ -23,6 +23,7 @@ from collections.abc import Sequence
 from typing import Any, final
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 from typing_extensions import override
@@ -161,6 +162,10 @@ class MModel(nn.Module):
             Tensor of final set embeddings for this rank's portion of the data only
         """
 
+        # 0. setup things
+        gloo_group = dist.new_group(backend="gloo")  # for cpu gathering
+        torch.set_float32_matmul_precision("medium")  # we're on half prec anyway
+
         # 1. freeze HyenaDNA parameters
         freeze_model(self.hyena_dna)
 
@@ -169,31 +174,41 @@ class MModel(nn.Module):
         phi_embeds = list()
         phi_set_indices = list()
 
-        def collect_outputs(block: Sequence[tuple[Idx, torch.Tensor]]):
+        def collect_phi(block: Sequence[tuple[Idx, torch.Tensor]]):
             indices, embeds = zip(*block)
             phi_set_indices.extend(i for (i, _) in indices)
+            embeds = [embed.to("cpu", non_blocking=True) for embed in embeds]
             phi_embeds.extend(embeds)
 
         # The RowMModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
-        GenomicEmbedder(RowMModel(self), batch_size, sub_workers).raw(
-            data, collect_outputs
-        )
+        GenomicEmbedder(RowMModel(self), batch_size, sub_workers).raw(data, collect_phi)
 
         # 3. set-level mean
         set_means = torch.stack(
-            [i for (_, i) in distributed_scatter_mean_iter(phi_set_indices, phi_embeds)]
+            [
+                i
+                for (_, i) in distributed_scatter_mean_iter(
+                    phi_set_indices, phi_embeds, gloo_group
+                )
+            ]
         )
 
         # 3. rho pass
+
         local_rho_embeds = list()
         rho_dex = Dex(self.rho)
+
+        def collect_rho(block: Sequence[torch.Tensor]):
+            block = [block.to("cpu", non_blocking=True) for block in block]
+            local_rho_embeds.extend(block)
+
         # Dex default collate is so fast that we can avoid sub-workers
         #   and must, because we can't transfer grad tensors between workers
-        rho_dex.execute(set_means, local_rho_embeds.extend, batch_size, num_workers=0)
+        rho_dex.execute(set_means, collect_rho, batch_size, num_workers=0)
 
         # 4. regroup
         local_rho_embeds_tensor = torch.stack(local_rho_embeds).cpu()
-        total_rho_embeds = all_gather_concat(local_rho_embeds_tensor)
+        total_rho_embeds = all_gather_concat(local_rho_embeds_tensor, gloo_group)
         total_ordering = rho_dex.simulate_global_concat(range(len(data)), batch_size)
         return total_rho_embeds[total_ordering]
 
