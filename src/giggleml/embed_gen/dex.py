@@ -14,7 +14,7 @@ from torch.utils.data import (
 
 # Assumes these local utility imports exist
 from giggleml.iter_utils.rank_iter import RankIter
-from giggleml.utils.nothing import nothing, yield_from, yield_through
+from giggleml.utils.nothing import yield_from, yield_through
 from giggleml.utils.torch_utils import (
     get_world_size,
     guess_device,
@@ -28,7 +28,7 @@ type PreprocessorFn[T_in, U_pre] = Callable[[T_in], Iterable[U_pre]]
 type PostprocessorFn[V_post, W_out] = Callable[[list[V_post]], W_out]
 """Aggregates multiple model outputs back into a single result."""
 
-type ConsumerFn[W_out] = Callable[[Iterable[W_out]], None]
+type ConsumerFn[W_out] = Callable[[list[W_out]], None]
 """Handles final outputs (e.g., caching, writing to files)."""
 
 type CollateFn[U_pre, Batch_in] = Callable[[list[U_pre]], Batch_in]
@@ -36,6 +36,14 @@ type CollateFn[U_pre, Batch_in] = Callable[[list[U_pre]], Batch_in]
 
 type DecollateFn[Batch_out, V_post] = Callable[[Batch_out], Iterable[V_post]]
 """Splits model batch outputs back into individual items."""
+
+
+def DefaultPostprocessFn[T](items: list[T]) -> T:
+    if len(items) != 1:
+        raise RuntimeError(
+            "Default postprocessor_fn cannot handle combining multiple items"
+        )
+    return items[0]
 
 
 class _StreamingPreprocessorDataset[T_in, U_pre](IterableDataset):
@@ -128,7 +136,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         self,
         model: torch.nn.Module,
         preprocessor_fn: PreprocessorFn[T_in, U_pre] = yield_through,
-        postprocessor_fn: PostprocessorFn[V_post, W_out] = nothing,
+        postprocessor_fn: PostprocessorFn[V_post, W_out] = DefaultPostprocessFn,
         collate_fn: CollateFn[U_pre, Batch_in] = default_collate,
         decollate_fn: DecollateFn[Batch_out, V_post] = yield_from,
     ):
@@ -201,7 +209,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
 
         # 4. Send results to the consumer
         for block in itertools.batched(final_results, batch_size):
-            consumer_fn(block)
+            consumer_fn(list(block))
 
     def _model_pass(
         self, loader: DataLoader, model: torch.nn.Module, device: torch.device
