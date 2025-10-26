@@ -1,9 +1,13 @@
+from pathlib import Path
 from unittest.mock import patch
 
 import torch
 
+from giggleml.data_wrangling import fasta
+from giggleml.data_wrangling.interval_dataset import MemoryIntervalDataset
 from giggleml.models.hyena_dna import HyenaDNA
 from giggleml.models.m_model import MModel
+from giggleml.utils.parallel import Parallel
 from giggleml.utils.torch_utils import guess_device
 
 
@@ -246,3 +250,42 @@ def test_mmodel_call():
     for embed in results:
         assert len(embed) == model.final_embed_dim
         assert embed.dtype == torch.float16
+
+
+def _test_mmodel_dist_embed():
+    model: MModel = MModel("1k").to(guess_device())
+    data_shape = (10, 5, 7)
+    intervals = [
+        [
+            (
+                "chr4",
+                data_shape[2] * (data_shape[1] * i + j),
+                data_shape[2] * (data_shape[1] * i + j) + data_shape[2],
+            )
+            for j in range(data_shape[1])
+        ]
+        for i in range(data_shape[0])
+    ]
+    datasets = [
+        MemoryIntervalDataset(group, associated_fasta_path=Path("tests/test.fa"))
+        for group in intervals
+    ]
+
+    distributed_results = model.distributed_embed(
+        data=datasets,
+        batch_size=4,
+        sub_workers=2,
+    ).cpu()
+
+    sequences = [fasta.map(group, Path("tests/test.fa")) for group in intervals]
+    direct_results = model(model.tokenize(sequences)).cpu()
+
+    # we can't actually test that these results are equal until we train the model
+    # or provide a deterministic parameter initialization
+
+    assert distributed_results.shape == direct_results.shape
+    # assert torch.allclose(distributed_results, direct_results, atol=1e-2)
+
+
+def test_mmodel_dist_embed():
+    Parallel(world_size=3)(_test_mmodel_dist_embed)
