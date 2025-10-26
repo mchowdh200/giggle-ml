@@ -75,7 +75,7 @@ def all_gather_concat(
     # 1. Gather the size of the first dimension from each rank.
     local_size = torch.tensor([tensor.shape[0]], device=tensor.device, dtype=torch.long)
     sizes = [torch.zeros_like(local_size) for _ in range(world_size)]
-    dist.all_gather(sizes, local_size)
+    dist.all_gather(sizes, local_size, group)
 
     # 2. Determine the maximum size.
     max_size = int(max(size.item() for size in sizes))
