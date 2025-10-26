@@ -26,12 +26,20 @@ class Nothing:
         yield  # unreachable, but makes this a generator
 
 
-class YieldThrough[T]:
+class YieldFrom[T]:
     """A callable that yields all items from an iterable unchanged."""
 
     def __call__(self, iterable: Iterable[T]) -> Iterator[T]:
         yield from iterable
 
 
+class YieldThrough[T]:
+    """A callable that yields the item unchanged."""
+
+    def __call__(self, thing: T) -> Iterator[T]:
+        yield thing
+
+
 nothing = Nothing()
 yield_through = YieldThrough()
+yield_from = YieldFrom()

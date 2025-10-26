@@ -14,7 +14,7 @@ from torch.utils.data import (
 
 # Assumes these local utility imports exist
 from giggleml.iter_utils.rank_iter import RankIter
-from giggleml.utils.nothing import nothing, yield_through
+from giggleml.utils.nothing import nothing, yield_from, yield_through
 from giggleml.utils.torch_utils import (
     get_world_size,
     guess_device,
@@ -130,7 +130,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         preprocessor_fn: PreprocessorFn[T_in, U_pre] = yield_through,
         postprocessor_fn: PostprocessorFn[V_post, W_out] = nothing,
         collate_fn: CollateFn[U_pre, Batch_in] = default_collate,
-        decollate_fn: DecollateFn[Batch_out, V_post] = yield_through,
+        decollate_fn: DecollateFn[Batch_out, V_post] = yield_from,
     ):
         """Initialize Dex with model and pipeline functions."""
         self.model: torch.nn.Module = model
