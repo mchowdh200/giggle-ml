@@ -41,7 +41,9 @@ def freeze_model[T: torch.nn.Module](model: T, unfreeze: bool = False) -> T:
     return model
 
 
-def all_gather_concat(tensor: torch.Tensor) -> torch.Tensor:
+def all_gather_concat(
+    tensor: torch.Tensor, group: dist.ProcessGroup | None = None
+) -> torch.Tensor:
     """
     Gathers tensors of different sizes from all processes and concatenates them.
 
@@ -103,7 +105,7 @@ def all_gather_concat(tensor: torch.Tensor) -> torch.Tensor:
     # Let's reshape for the gather operation.
     # The list will contain tensors that are views into the larger tensor.
     tensor_list = list(gathered_padded_tensors.chunk(world_size, dim=0))
-    dist.all_gather(tensor_list, padded_tensor)
+    dist.all_gather(tensor_list, padded_tensor, group)
 
     # 5. Trim the padding from each tensor in the gathered list.
     result_tensors = []

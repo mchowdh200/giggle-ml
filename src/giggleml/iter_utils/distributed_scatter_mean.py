@@ -10,6 +10,7 @@ from giggleml.utils.torch_utils import get_world_size, is_distributed
 def distributed_scatter_mean(
     set_indices: Iterable[int],
     rank_data: Iterable[torch.Tensor],
+    dist_group: dist.ProcessGroup | None = None,
 ) -> dict[int, torch.Tensor]:
     """
     Computes distributed set-wise means over scattered data.
@@ -38,7 +39,9 @@ def distributed_scatter_mean(
 
     # Phase 2: Gather results from all ranks if in a distributed environment.
     if is_distributed():
-        global_sums, global_counts = _all_gather_and_reduce(local_sums, local_counts)
+        global_sums, global_counts = _all_gather_and_reduce(
+            local_sums, local_counts, dist_group
+        )
     else:
         global_sums, global_counts = local_sums, local_counts
 
@@ -49,6 +52,7 @@ def distributed_scatter_mean(
 def distributed_scatter_mean_iter(
     set_indices: Iterable[int],
     rank_data: Iterable[torch.Tensor],
+    dist_group: dist.ProcessGroup | None = None,
 ) -> Iterator[tuple[int, torch.Tensor]]:
     """
     Computes all set means and yields them as an iterator.
@@ -65,7 +69,7 @@ def distributed_scatter_mean_iter(
     Yields:
         Tuples of (set_id, mean_tensor), sorted by set_id for determinism.
     """
-    means = distributed_scatter_mean(set_indices, rank_data)
+    means = distributed_scatter_mean(set_indices, rank_data, dist_group)
     # Yield results sorted by key for deterministic ordering.
     yield from sorted(means.items())
 
@@ -95,7 +99,9 @@ def _local_aggregate(
 
 
 def _all_gather_and_reduce(
-    local_sums: dict[int, torch.Tensor], local_counts: dict[int, int]
+    local_sums: dict[int, torch.Tensor],
+    local_counts: dict[int, int],
+    dist_group: dist.ProcessGroup | None = None,
 ) -> tuple[dict[int, torch.Tensor], dict[int, int]]:
     """
     Gathers local aggregates from all ranks and reduces them into global ones.
@@ -108,8 +114,8 @@ def _all_gather_and_reduce(
     gathered_sums: list[dict[int, torch.Tensor]] = [{} for _ in range(world_size)]
     gathered_counts: list[dict[int, int]] = [{} for _ in range(world_size)]
 
-    dist.all_gather_object(gathered_sums, local_sums)
-    dist.all_gather_object(gathered_counts, local_counts)
+    dist.all_gather_object(gathered_sums, local_sums, dist_group)
+    dist.all_gather_object(gathered_counts, local_counts, dist_group)
 
     # Reduce the gathered lists into single global dictionaries.
     global_sums: dict[int, torch.Tensor] = {}
