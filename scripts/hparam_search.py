@@ -12,6 +12,13 @@ from giggleml.train.hparam_config import (
     ValidationResult,
 )
 from giggleml.train.train_orchestrator import Finetuner, TrainConfig
+from giggleml.utils.torch_utils import get_rank
+
+
+def print0(*args: Any, **kwargs: Any) -> None:
+    if get_rank() != 0:
+        return
+    print(*args, **kwargs)
 
 
 def run_training_with_hyperparams(
@@ -28,7 +35,7 @@ def run_training_with_hyperparams(
         val_loss
     """
     try:
-        print(f"Running hyperparameter optimization with hyperparams: {hyperparams}")
+        print0(f"Running hyperparameter optimization with hyperparams: {hyperparams}")
 
         # Create TrainConfig with hyperparameters
         config = TrainConfig(
@@ -77,24 +84,24 @@ def main():
     # Initialize hyperparameter search
     if args.conservative:
         config = HyperparameterConfig.conservative()
-        print("Using conservative hyperparameter search space")
+        print0("Using conservative hyperparameter search space")
     else:
         config = HyperparameterConfig.default()
-        print("Using default hyperparameter search space")
+        print0("Using default hyperparameter search space")
 
     search_results = HyperparameterSearchResults(results_path)
 
     combinations = config.grid_search_combinations()
-    print(f"Starting hyperparameter search with {len(combinations)} combinations")
-    print(f"Results will be saved to: {results_path}")
+    print0(f"Starting hyperparameter search with {len(combinations)} combinations")
+    print0(f"Results will be saved to: {results_path}")
 
     # Get already completed combinations to avoid re-running
-    print(f"Found {len(search_results.results)} existing results")
+    print0(f"Found {len(search_results.results)} existing results")
 
     # Handle resumption of partial runs
     if args.resume:
         partial_results = search_results.get_partial_results()
-        print(f"Found {len(partial_results)} partial results that can be resumed")
+        print0(f"Found {len(partial_results)} partial results that can be resumed")
 
     # Run grid search
     for i, hyperparams in enumerate(combinations):
@@ -103,13 +110,13 @@ def main():
 
         # Check if already completed
         if search_results.is_hyperparams_completed(hyperparams):
-            print(
+            print0(
                 f"Skipping combination {i + 1}/{len(combinations)} (already completed)"
             )
             continue
 
-        print(f"\n=== Combination {i + 1}/{len(combinations)} ===")
-        print(f"Hyperparameters: {hyperparams}")
+        print0(f"\n=== Combination {i + 1}/{len(combinations)} ===")
+        print0(f"Hyperparameters: {hyperparams}")
 
         # Note: Resumption is now handled automatically by the new API through checkpoint loading
         if args.resume:
@@ -119,7 +126,7 @@ def main():
                     result.hyperparams == hyperparams
                     and result.completed_epoch < result.epoch
                 ):
-                    print("Found partial result that may be resumed automatically")
+                    print0("Found partial result that may be resumed automatically")
                     break
 
         try:
@@ -135,30 +142,31 @@ def main():
             )
 
             search_results.add_result(result)
-            print(f"Result: Val Loss={val_loss:.4f}")
+            print0(f"Result: Val Loss={val_loss:.4f}")
 
         except Exception as e:
             print(f"Error running combination {hyperparams}: {e}")
             raise
 
-    # Print best results
-    best = search_results.get_best_result()
-    if best:
-        print("\n=== BEST RESULT ===")
-        print(f"Hyperparameters: {best.hyperparams}")
-        print(f"Validation Loss: {best.val_loss:.4f}")
+    if get_rank() == 0:
+        # Print best results
+        best = search_results.get_best_result()
+        if best:
+            print0("\n=== BEST RESULT ===")
+            print0(f"Hyperparameters: {best.hyperparams}")
+            print0(f"Validation Loss: {best.val_loss:.4f}")
 
-        # Save best hyperparameters separately for easy access
-        best_path = results_dir / "best_hyperparams.json"
-        import json
+            # Save best hyperparameters separately for easy access
+            best_path = results_dir / "best_hyperparams.json"
+            import json
 
-        with open(best_path, "w") as f:
-            json.dump(best.hyperparams, f, indent=2)
-        print(f"Best hyperparameters saved to: {best_path}")
-    else:
-        print("No successful results found")
+            with open(best_path, "w") as f:
+                json.dump(best.hyperparams, f, indent=2)
+            print0(f"Best hyperparameters saved to: {best_path}")
+        else:
+            print0("No successful results found")
 
-    print(f"\nHyperparameter search completed. Full results in: {results_path}")
+    print0(f"\nHyperparameter search completed. Full results in: {results_path}")
 
 
 if __name__ == "__main__":
