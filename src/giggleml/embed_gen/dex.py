@@ -5,7 +5,12 @@ from logging import warning
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.utils.data import DataLoader, IterableDataset, get_worker_info
+from torch.utils.data import (
+    DataLoader,
+    IterableDataset,
+    default_collate,
+    get_worker_info,
+)
 
 # Assumes these local utility imports exist
 from giggleml.iter_utils.rank_iter import RankIter
@@ -124,7 +129,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         model: torch.nn.Module,
         preprocessor_fn: PreprocessorFn[T_in, U_pre] = yield_through,
         postprocessor_fn: PostprocessorFn[V_post, W_out] = nothing,
-        collate_fn: CollateFn[U_pre, Batch_in] = nothing,
+        collate_fn: CollateFn[U_pre, Batch_in] = default_collate,
         decollate_fn: DecollateFn[Batch_out, V_post] = yield_through,
     ):
         """Initialize Dex with model and pipeline functions."""
