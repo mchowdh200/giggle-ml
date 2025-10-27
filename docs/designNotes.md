@@ -64,11 +64,13 @@ Breaking the pipeline into pre/postprocess, model, de/collate steps is "safe" be
 
 # Untested experimental variables
 
-- foundation model type?
+- foundation model things:
+  - best foundation model type?
   - do foundation models with large context do worse on small sequences?
   - where do errors in the sequences matter most wrt embedding error?
     - especially +/- nucleotides at start/end
-  - is mean aggregation of sequence chunks naive?
+  - is mean aggregation of sequence chunks naive? (it assumes chunks are positionally invariant)
+    - should we use a baby deep-sets architecture to stich chunk embeds? Be wary of [vanishing gradients](https://pmc.ncbi.nlm.nih.gov/articles/PMC10465016/#:~:text=At%20high%20depths%2C%20Deep%20Sets,see%20Section%206%20for%20details)
 - long-range proximity and embedding distance relationship?
 - how well do we generalize to unseen bed files?
   - what about bed files "between" roadmap epigenomics bed files?
