@@ -253,8 +253,8 @@ def test_mmodel_call():
 
 
 def _test_mmodel_dist_embed():
-    model: MModel = MModel("1k").to(guess_device())
-    data_shape = (10, 5, 7)
+    model: MModel = MModel("1k").cpu()
+    data_shape = (7, 3, 5)
     intervals = [
         [
             (
@@ -288,4 +288,4 @@ def _test_mmodel_dist_embed():
 
 
 def test_mmodel_dist_embed():
-    Parallel(world_size=3).run(_test_mmodel_dist_embed)
+    Parallel(world_size=2).run(_test_mmodel_dist_embed)

@@ -165,6 +165,8 @@ class MModel(nn.Module):
             Tensor of final set embeddings for this rank's portion of the data only
         """
 
+        assert len(data) > batch_size * (get_world_size() - 1)
+
         # 0. setup things
         gloo_group = dist.new_group(backend="gloo")  # for cpu gathering
         torch.set_float32_matmul_precision("medium")  # we're on half prec anyway
