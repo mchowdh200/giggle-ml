@@ -121,3 +121,12 @@ def rprint(*args: Any, **kwargs: Any):
     """rank print"""
     rank = get_rank()
     print(f"[rank {rank}]", *args, **kwargs)
+
+
+def get_module_device(module: torch.nn.Module) -> torch.device:
+    try:
+        # Get the first parameter from the generator
+        return next(module.parameters()).device
+    except StopIteration:
+        # This handles the case for parameter-less modules
+        return torch.device("cpu")

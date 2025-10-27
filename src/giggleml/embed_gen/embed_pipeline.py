@@ -11,6 +11,7 @@ from torch import Tensor
 from giggleml.embed_gen.batch_infer import GenomicEmbedder, Idx
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.utils.parallel import Parallel
+from giggleml.utils.torch_utils import guess_device
 from giggleml.utils.types import lazy
 
 from ..data_wrangling import fasta
@@ -161,7 +162,10 @@ class DirectPipeline(EmbedPipeline):
         # File-based mode: use distributed zarr writing
         # Run in distributed environment with picklable worker function
         Parallel(self.worker_count).run(
-            GenomicEmbedder(self.model, self.batch_size, self.sub_workers).to_disk,
+            _worker,
+            self.model,
+            self.batch_size,
+            self.sub_workers,
             intervals,
             out,
         )
@@ -173,3 +177,14 @@ class DirectPipeline(EmbedPipeline):
         if single_input:
             return out_embeds[0]
         return out_embeds
+
+
+def _worker(
+    model: GenomicModel,
+    batch_size: int,
+    sub_workers: int,
+    intervals: Sequence[IntervalDataset],
+    out: Sequence[str],
+):
+    model = model.to(guess_device())
+    GenomicEmbedder(model, batch_size, sub_workers).to_disk(intervals, out)

@@ -16,8 +16,8 @@ from torch.utils.data import (
 from giggleml.iter_utils.rank_iter import RankIter
 from giggleml.utils.nothing import yield_from, yield_through
 from giggleml.utils.torch_utils import (
+    get_module_device,
     get_world_size,
-    guess_device,
     is_distributed,
 )
 
@@ -174,12 +174,14 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         batch_size: int,
         num_workers: int = 0,
     ):
-        """Execute the full pipeline on input data."""
+        """
+        Execute the full pipeline on input data.
+        The model is not moved, tensors are moved to where the model is currently.
+        """
         # Setup device and distributed model if applicable
         model = self.model
         current_rank = dist.get_rank() if is_distributed() else 0
-        device = guess_device(current_rank)
-        model.to(device)
+        device = get_module_device(model)
 
         if is_distributed():
             mp.set_start_method("spawn", force=True)
