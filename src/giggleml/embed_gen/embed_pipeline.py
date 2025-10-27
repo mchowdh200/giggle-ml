@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from giggleml.embed_gen.batch_infer import GenomicEmbedder
+from giggleml.embed_gen.batch_infer import GenomicEmbedder, Idx
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.utils.parallel import Parallel
 from giggleml.utils.types import lazy
@@ -145,8 +145,8 @@ class DirectPipeline(EmbedPipeline):
             # In-memory mode: collect embeddings and return as tensors
             collected_embeddings = []
 
-            def embedding_collector(embeddings: Iterable[Tensor]) -> None:
-                for embedding in embeddings:
+            def embedding_collector(embeddings: Iterable[tuple[Idx, Tensor]]) -> None:
+                for idx, embedding in embeddings:
                     collected_embeddings.append(embedding)
 
             self.infer.raw(intervals, embedding_collector)
@@ -160,7 +160,7 @@ class DirectPipeline(EmbedPipeline):
 
         # File-based mode: use distributed zarr writing
         # Run in distributed environment with picklable worker function
-        Parallel(self.worker_count)(
+        Parallel(self.worker_count).run(
             GenomicEmbedder(self.model, self.batch_size, self.sub_workers).to_disk,
             intervals,
             out,

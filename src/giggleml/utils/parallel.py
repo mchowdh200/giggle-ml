@@ -3,8 +3,13 @@
 This module provides automatic hardware detection, parameter inference, and optimized
 execution paths for distributed PyTorch workloads. It can run locally for simple cases
 or spawn multiple processes when true distribution is needed.
+
+Supports two modes of operation:
+1. Decorator: @Parallel()
+2. Direct Call: parallel.run(fn, *args, **kwargs)
 """
 
+import functools
 import multiprocessing
 import os
 import socket
@@ -91,67 +96,49 @@ def _worker_wrapper(
 
 
 class Parallel:
-    """Intelligent distributed setup using torch.multiprocessing to simulate torchrun behavior.
+    """Intelligent distributed setup for PyTorch via decorator or direct call.
 
     This class provides automatic hardware detection, parameter inference, and optimized
     execution paths for distributed PyTorch workloads. It can run locally for simple cases
     or spawn multiple processes when true distribution is needed.
 
-    Execution Modes:
-        - Local execution: world_size=1 + no accelerators → runs in current process
-        - Multiprocess: world_size>1 or accelerators present → spawns worker processes
-
-    Auto-Detection Features:
-        - Hardware-aware backend selection (NCCL for CUDA, GLOO for CPU/MPS)
-        - Intelligent world_size inference based on available GPUs/cores
-        - Automatic port allocation to avoid conflicts
-        - Comprehensive parameter validation with helpful error messages
-
     Args:
-        world_size: Number of processes to spawn. If None, automatically inferred:
-            - CUDA systems: number of available GPUs (torch.cuda.device_count())
-            - MPS systems: 2 processes (optimal for Apple Silicon)
-            - CPU systems: min(cpu_count, 4) (capped for performance)
-        backend: Distributed backend to use. If None, automatically selected:
-            - CUDA systems: "nccl" (optimal for GPU communication)
-            - MPS/CPU systems: "gloo" (universal compatibility)
-            - Supported options: "gloo", "nccl", "mpi"
-        master_addr: Master node address for coordination (default: "localhost").
+        world_size: Number of processes to spawn. If None, automatically inferred.
+        backend: Distributed backend ("nccl", "gloo", "mpi"). If None, auto-selected.
+        master_addr: Master node address (default: "localhost").
         master_port: Master node port. If None, automatically finds a free port.
 
     Raises:
-        ValueError: If world_size <= 0, world_size > 1024, invalid backend,
-                   or NCCL backend requested without CUDA.
+        ValueError: For invalid configuration (e.g., world_size <= 0, or
+                    NCCL backend requested without CUDA).
 
-    Examples:
-        Basic usage with auto-detection:
-        >>> def worker_fn(data_path):
-        ...     rank = dist.get_rank()
-        ...     world_size = dist.get_world_size()
-        ...     print(f"Rank {rank}/{world_size}: Processing {data_path}")
-        ...     # Your distributed code here...
-        ...
-        >>> # Automatically detects: backend, world_size, execution mode
-        >>> parallel = Parallel()
-        >>> parallel(worker_fn, "data/train.txt")
+    ---
+    ### Example 1: Decorator Usage
 
-        Manual configuration:
-        >>> # Force specific configuration
-        >>> parallel = Parallel(world_size=4, backend="gloo")
-        >>> parallel(worker_fn, "data/train.txt")
+    >>> @Parallel()
+    ... def worker_fn(data_path, val_path):
+    ...     rank = dist.get_rank()
+    ...     print(f"Rank {rank}: Processing {data_path} & {val_path}")
+    ...
+    >>> # This call will now be executed in parallel
+    >>> worker_fn("data/train.txt", val_path="data/val.txt")
 
-        CPU-only single process (runs locally):
-        >>> # On CPU-only system with world_size=1 → local execution
-        >>> parallel = Parallel(world_size=1)
-        >>> parallel(worker_fn, "data/test.txt")
+    ---
+    ### Example 2: Direct Call Usage
 
+    >>> def another_worker_fn(data_path):
+    ...     rank = dist.get_rank()
+    ...     print(f"Rank {rank}: Processing {data_path}")
+    ...
+    >>> # Instantiate with auto-detection
+    >>> parallel = Parallel()
+    >>> # Run the function directly
+    >>> parallel.run(another_worker_fn, "data/train.txt")
+
+    ---
     Notes:
-        - Worker functions have full access to torch.distributed API
-        - Each process gets a unique rank from 0 to world_size-1
-        - Distributed environment is automatically initialized and cleaned up
-        - Local execution mode eliminates multiprocessing overhead when possible
-        - All collective operations (all_reduce, all_gather, etc.) work in both modes
-        - For multiprocess mode, the function must be importable (not defined in __main__)
+        - Return values are only supported in local execution mode (world_size=1).
+          Multiprocess execution via `mp.spawn` does not propagate return values.
     """
 
     def __init__(
@@ -197,16 +184,10 @@ class Parallel:
         self.master_addr = master_addr
         self.master_port = master_port
 
-    def __call__(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
-        """Run a function in a distributed environment.
-
-        Args:
-            fn: The function to run in each worker process. Will be called with the
-                provided args in each worker. Must be pickle-able for multiprocess mode.
-            *args: Arguments to pass to the worker function.
-            *kargs: Keyword arguments to pass to the worker function.
-        """
-        # Check if we can run locally instead of spawning processes
+    def _execute[T](
+        self, fn: Callable[..., T], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> T | None:
+        """Internal execution logic shared by decorator and .run()"""
         has_accelerators = torch.cuda.is_available() or (
             hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
         )
@@ -216,14 +197,14 @@ class Parallel:
             _setup_dist_env(0, 1, self.master_addr, self.master_port, self.backend)
 
             try:
-                fn(*args)
+                result = fn(*args, **kwargs)
             finally:
                 _cleanup_dist()
+            return result
         else:
             print(
                 f"Running distributed with world_size={self.world_size}, backend={self.backend}"
             )
-            # Spawn worker processes
             mp.spawn(
                 _worker_wrapper,
                 args=(
@@ -238,3 +219,42 @@ class Parallel:
                 nprocs=self.world_size,
                 join=True,
             )
+            # mp.spawn does not support return values
+            return None
+
+    def __call__[**P, T](self, fn: Callable[P, T]) -> Callable[P, T]:
+        """
+        Acts as the decorator, receiving the function to be wrapped.
+
+        Args:
+            fn: The function to be run in a distributed environment.
+
+        Returns:
+            A wrapper function that, when called, will launch the distributed execution.
+        """
+
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            """
+            The wrapper that replaces the decorated function.
+            This is what gets executed when the decorated function is called.
+            """
+            return self._execute(fn, args, kwargs)
+
+        return wrapper
+
+    def run[T](self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T | None:
+        """
+        Run a function in a distributed environment (direct call).
+
+        This provides the original (non-decorator) behavior.
+
+        Args:
+            fn: The function to run in each worker process.
+            *args: Arguments to pass to the worker function.
+            **kwargs: Keyword arguments to pass to the worker function.
+
+        Returns:
+            The result of `fn` if run locally, otherwise None.
+        """
+        return self._execute(fn, args, kwargs)

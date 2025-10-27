@@ -288,4 +288,4 @@ def _test_mmodel_dist_embed():
 
 
 def test_mmodel_dist_embed():
-    Parallel(world_size=3)(_test_mmodel_dist_embed)
+    Parallel(world_size=3).run(_test_mmodel_dist_embed)
