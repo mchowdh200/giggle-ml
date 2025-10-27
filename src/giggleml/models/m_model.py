@@ -5,7 +5,7 @@ M Model, deep sets architecture, hyenaDNA pre-processing
 
           | hyenaDNA    | M Model Core
           |             |   MLP, phi
-          |             |   (!) activations NOT saved by default
+          |             |
           |             |
     ACGT... -> d1-vec  --> d2-vec  ---
     ACGT... -> d1-vec  --> d2-vec   |
@@ -23,9 +23,7 @@ from collections.abc import Sequence
 from typing import Any, final
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 from typing_extensions import override
 
 from giggleml.data_wrangling.interval_dataset import IntervalDataset
@@ -36,7 +34,7 @@ from giggleml.iter_utils.distributed_scatter_mean import (
 )
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
-from giggleml.utils.torch_utils import all_gather_concat, freeze_model
+from giggleml.utils.torch_utils import all_gather_concat, freeze_model, get_world_size
 
 
 @final
@@ -128,15 +126,7 @@ class MModel(nn.Module):
 
         # Step 1: Get sequence embeddings from HyenaDNA
         hdna_embeds = self.hyena_dna(item)
-
         # Step 2: Apply phi network to each sequence embedding
-        if self.use_gradient_checkpointing and self.training:
-            # prevent None
-            # TODO: requires custom checkpointing to avoid input caching in vram
-            activs = checkpoint(self.phi, hdna_embeds, use_reentrant=False)
-            assert activs is not None
-            return activs
-
         return self.phi(hdna_embeds)
 
     def set_means_forward(self, batch: torch.Tensor) -> torch.Tensor:
@@ -168,7 +158,6 @@ class MModel(nn.Module):
         assert len(data) > batch_size * (get_world_size() - 1)
 
         # 0. setup things
-        gloo_group = dist.new_group(backend="gloo")  # for cpu gathering
         torch.set_float32_matmul_precision("medium")  # we're on half prec anyway
 
         # 1. freeze HyenaDNA parameters
@@ -182,7 +171,7 @@ class MModel(nn.Module):
         def collect_phi(block: Sequence[tuple[Idx, torch.Tensor]]):
             indices, embeds = zip(*block)
             phi_set_indices.extend(i for (i, _) in indices)
-            embeds = [embed.to("cpu", non_blocking=True) for embed in embeds]
+            # embeds = [embed.to("cpu", non_blocking=True) for embed in embeds]
             phi_embeds.extend(embeds)
 
         # The RowMModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
@@ -193,7 +182,7 @@ class MModel(nn.Module):
         phi_indices_tensor = (
             torch.tensor(phi_set_indices).unsqueeze(-1).expand_as(phi_tensor)
         )
-        set_means = distributed_scatter_mean(phi_tensor, phi_indices_tensor, gloo_group)
+        set_means = distributed_scatter_mean(phi_tensor, phi_indices_tensor)
 
         # 3. rho pass
 
@@ -201,7 +190,7 @@ class MModel(nn.Module):
         rho_dex = Dex(self.rho)
 
         def collect_rho(block: Sequence[torch.Tensor]):
-            block = [block.to("cpu", non_blocking=True) for block in block]
+            # block = [block.to("cpu", non_blocking=True) for block in block]
             local_rho_embeds.extend(block)
 
         # Dex default collate is so fast that we can avoid sub-workers
@@ -209,8 +198,8 @@ class MModel(nn.Module):
         rho_dex.execute(set_means, collect_rho, batch_size, num_workers=0)
 
         # 4. regroup
-        local_rho_embeds_tensor = torch.stack(local_rho_embeds).cpu()
-        total_rho_embeds = all_gather_concat(local_rho_embeds_tensor, gloo_group)
+        local_rho_embeds_tensor = torch.stack(local_rho_embeds)
+        total_rho_embeds = all_gather_concat(local_rho_embeds_tensor)
         total_ordering = rho_dex.simulate_global_concat(range(len(data)), batch_size)
         return total_rho_embeds[total_ordering]
 
