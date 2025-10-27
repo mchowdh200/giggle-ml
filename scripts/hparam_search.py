@@ -70,9 +70,6 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Hyperparameter search for HyenaDNA")
-    parser.add_argument(
-        "--conservative", action="store_true", help="Use conservative search space"
-    )
     parser.add_argument("--resume", action="store_true", help="Resume partial runs")
     args = parser.parse_args()
 
@@ -82,12 +79,8 @@ def main():
     results_path = results_dir / "search_results.json"
 
     # Initialize hyperparameter search
-    if args.conservative:
-        config = HyperparameterConfig.conservative()
-        print0("Using conservative hyperparameter search space")
-    else:
-        config = HyperparameterConfig.default()
-        print0("Using default hyperparameter search space")
+    config = HyperparameterConfig.default()
+    print0("Using default hyperparameter search space")
 
     search_results = HyperparameterSearchResults(results_path)
 
