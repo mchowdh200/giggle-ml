@@ -31,7 +31,9 @@ from typing_extensions import override
 from giggleml.data_wrangling.interval_dataset import IntervalDataset
 from giggleml.embed_gen.batch_infer import GenomicEmbedder, Idx
 from giggleml.embed_gen.dex import Dex
-from giggleml.iter_utils.distributed_scatter_mean import distributed_scatter_mean_iter
+from giggleml.iter_utils.distributed_scatter_mean import (
+    distributed_scatter_mean,
+)
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
 from giggleml.utils.torch_utils import all_gather_concat, freeze_model
@@ -130,6 +132,7 @@ class MModel(nn.Module):
         # Step 2: Apply phi network to each sequence embedding
         if self.use_gradient_checkpointing and self.training:
             # prevent None
+            # TODO: requires custom checkpointing to avoid input caching in vram
             activs = checkpoint(self.phi, hdna_embeds, use_reentrant=False)
             assert activs is not None
             return activs
@@ -184,14 +187,11 @@ class MModel(nn.Module):
         GenomicEmbedder(RowMModel(self), batch_size, sub_workers).raw(data, collect_phi)
 
         # 3. set-level mean
-        set_means = torch.stack(
-            [
-                i
-                for (_, i) in distributed_scatter_mean_iter(
-                    phi_set_indices, phi_embeds, gloo_group
-                )
-            ]
+        phi_tensor = torch.stack(phi_embeds)
+        phi_indices_tensor = (
+            torch.tensor(phi_set_indices).unsqueeze(-1).expand_as(phi_tensor)
         )
+        set_means = distributed_scatter_mean(phi_tensor, phi_indices_tensor, gloo_group)
 
         # 3. rho pass
 

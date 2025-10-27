@@ -1,230 +1,225 @@
 import torch
+import torch.distributed as dist
 
-from giggleml.iter_utils.distributed_scatter_mean import (
-    distributed_scatter_mean,
-    distributed_scatter_mean_iter,
-)
+from giggleml.iter_utils.distributed_scatter_mean import distributed_scatter_mean
 from giggleml.utils.parallel import Parallel
-from giggleml.utils.torch_utils import get_rank, get_world_size
 
 
-def test_all_ranks_empty():
-    Parallel(world_size=3).run(_test_all_ranks_empty)
+def test_works_with_1d_feature():  # Removed rank, world_size args
+    Parallel(2).run(_test_works_with_1d_feature)
 
 
-def _test_all_ranks_empty():
+def _test_works_with_1d_feature():  # Removed rank, world_size args
     """
-    Tests the case where no rank provides any data.
-    The result should be an empty dictionary.
+    Tests the function with tensors of shape [N, 1], which should work.
+    Assumes world_size = 2.
     """
-    indices = []
-    data = []
+    # Assume environment is already set up
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    assert world_size == 2, "This test is designed to be run with world_size=2"
 
-    result = distributed_scatter_mean(indices, data)
+    device = (
+        torch.device(f"cuda:{rank}")
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
 
-    assert result == {}, "Expected an empty dict when no data is provided"
-    print("test_all_ranks_empty: PASSED")
-
-
-def test_one_rank_empty():
-    Parallel(world_size=3).run(_test_one_rank_empty)
-
-
-def _test_one_rank_empty():
-    """
-    Tests the case where at least one rank has data, but rank 0 does not.
-    This validates the prototype tensor discovery logic.
-    (Requires world_size > 1)
-    """
-    rank = get_rank()
-    world_size = get_world_size()
-
-    if world_size == 1:
-        print("test_one_rank_empty: SKIPPED (requires world_size > 1)")
-        return
-
+    # Each rank has different data
     if rank == 0:
-        indices = []
-        data = []
-    else:
-        # All other ranks contribute to set 5
-        indices = [5, 5]
-        data = [torch.tensor([2.0]), torch.tensor([4.0])]  # local mean is 3.0
+        # data: [10, 20], indices: [0, 1]
+        local_data = torch.tensor([[10.0], [20.0]], dtype=torch.float32).to(device)
+        indices = torch.tensor([[0], [1]], dtype=torch.long).to(device)
+    else:  # rank == 1
+        # data: [30, 40], indices: [0, 0]
+        local_data = torch.tensor([[30.0], [40.0]], dtype=torch.float32).to(device)
+        indices = torch.tensor([[0], [0]], dtype=torch.long).to(device)
 
-    result = distributed_scatter_mean(indices, data)
-
-    # Each of the (world_size - 1) ranks contributes a sum of 6.0 and count of 2.
-    # Global sum = 6.0 * (world_size - 1)
-    # Global count = 2 * (world_size - 1)
-    # Global mean = (6.0 * (ws - 1)) / (2 * (ws - 1)) = 3.0
-    expected_mean = torch.tensor([3.0])
-
-    assert 5 in result, "Set 5 should be present in the result"
-    assert torch.allclose(result[5], expected_mean), (
-        f"Expected mean {expected_mean}, got {result[5]}"
-    )
-    print("test_one_rank_empty: PASSED")
-
-
-def test_basic_overlap():
-    Parallel(world_size=3).run(_test_basic_overlap)
-
-
-def _test_basic_overlap():
-    """
-    Tests the primary use case where ranks have overlapping and unique sets.
-    - Set 100 is shared by all ranks.
-    - Set `rank` is unique to each rank.
-    """
-    rank = get_rank()
-    world_size = get_world_size()
-
-    # Each rank contributes [1., 2.] to set 100
-    # and [rank, rank] to its own unique set.
-    indices = [100, rank, 100]
-    data = [
-        torch.tensor([1.0, 2.0]),
-        torch.tensor([float(rank), float(rank)]),
-        torch.tensor([1.0, 2.0]),  # Add a second item for set 100
-    ]
-
-    result = distributed_scatter_mean(indices, data)
-
-    # --- Check expectations ---
-
-    # 1. Check the shared set (100)
-    # Each rank's local sum for 100 is [2.0, 4.0], count is 2.
-    # Global sum = [2.0, 4.0] * world_size
-    # Global count = 2 * world_size
-    # Global mean = ([2.0, 4.0] * ws) / (2 * ws) = [1.0, 2.0]
-    expected_mean_100 = torch.tensor([1.0, 2.0])
-    assert 100 in result
-    assert torch.allclose(result[100], expected_mean_100), (
-        f"Set 100 failed: {result[100]}"
-    )
-
-    # 2. Check the unique set for this rank
-    # Global sum = [rank, rank] * 1 (from one rank)
-    # Global count = 1
-    # Global mean = [rank, rank]
-    # Note: data was [float(rank), float(rank)] and there was one such item.
-    # The local sum is [rank, rank], count is 1.
-    # Global sum is [rank, rank], count is 1.
-    # Mean is [rank, rank]. This looks wrong in the original test logic.
-    # Let's re-check the data for test_basic_overlap:
-    # data = [
-    #     torch.tensor([1.0, 2.0]), # -> set 100
-    #     torch.tensor([float(rank), float(rank)]), # -> set rank
-    #     torch.tensor([1.0, 2.0]), # -> set 100
-    # ]
-    # Local sum for set `rank` is [rank, rank], count is 1.
-    # Global sum for set `rank` (from rank `rank`) is [rank, rank], count is 1.
-    # Global mean is [rank, rank] / 1 = [rank, rank].
-    # Ah, the original logic was correct.
-    expected_mean_rank = torch.tensor([float(rank), float(rank)])
-    assert rank in result
-    assert torch.allclose(result[rank], expected_mean_rank), (
-        f"Set {rank} failed: {result[rank]}"
-    )
-
-    # 3. Check total number of keys
-    expected_num_keys = world_size + 1  # (sets 0..ws-1) + set 100
-    assert len(result) == expected_num_keys, (
-        f"Expected {expected_num_keys} keys, got {len(result)}"
-    )
-
-    print("test_basic_overlap: PASSED")
-
-
-def test_iterator_wrapper():
-    Parallel(world_size=3).run(_test_iterator_wrapper)
-
-
-def _test_iterator_wrapper():
-    """
-    Tests that the iterator wrapper provides the same data, sorted by key.
-    """
-    rank = get_rank()
-
-    # Simpler data than test_basic_overlap to avoid confusion
-    indices = [100, rank]
-    data = [torch.tensor([1.0, 2.0]), torch.tensor([float(rank), float(rank)])]
-
-    # Get the dictionary result first
-    dict_result = distributed_scatter_mean(indices, data)
-    expected_list = sorted(dict_result.items())
-
-    # Get the iterator result
-    iter_result = list(distributed_scatter_mean_iter(indices, data))
-
-    assert len(iter_result) == len(expected_list), (
-        "Iterator and dict have different lengths"
-    )
-
-    for (iter_key, iter_val), (exp_key, exp_val) in zip(iter_result, expected_list):
-        assert iter_key == exp_key, "Iterator keys are not sorted or do not match"
-        assert torch.allclose(iter_val, exp_val), "Iterator values do not match"
-
-    print("test_iterator_wrapper: PASSED")
-
-
-def test_autograd_differentiability():
-    Parallel(world_size=3).run(_test_autograd_differentiability)
-
-
-def _test_autograd_differentiability():
-    """
-    Tests that gradients can flow back through the scatter-mean operation.
-    """
-    rank = get_rank()
-    world_size = get_world_size()
-
-    # Input tensors that require gradients
-    t1 = torch.tensor([1.0, 2.0], requires_grad=True)
-    t2 = torch.tensor([float(rank), 10.0], requires_grad=True)
-
-    indices = [100, rank]  # Set 100 is shared, set `rank` is unique
-    data = [t1, t2]
+    # Calculate expected result manually
+    # Index 0: 10.0 (r0) + 30.0 (r1) + 40.0 (r1) = 80.0. Count = 3. Mean = 80/3
+    # Index 1: 20.0 (r0). Count = 1. Mean = 20/1
+    expected_mean = torch.tensor([[80.0 / 3.0], [20.0]], dtype=torch.float32).to(device)
 
     # Run the function
-    result = distributed_scatter_mean(indices, data)
+    result = distributed_scatter_mean(local_data, indices)
 
-    # All ranks sum up their results. This is a common pattern.
-    # The sum() must be identical across all ranks.
+    # Check result
+    assert torch.allclose(result, expected_mean), (
+        f"Expected {expected_mean}, but got {result}"
+    )
 
-    # Initialize total_sum as a 0-dim tensor, not a Python float.
-    # This preserves the computation graph.
-    total_sum = torch.tensor(0.0)
-    for key in sorted(result.keys()):  # Sort for deterministic sum
-        # This is now tensor addition
-        total_sum = total_sum + result[key].sum()
+    # Removed _cleanup_distributed()
 
-    # Perform backward pass
-    try:
-        total_sum.backward()
-    except RuntimeError as e:
-        assert False, f"Backward pass failed: {e}"
 
-    # --- Check gradients ---
+def test_works_with_2d_feature():  # Renamed from test_fails_with_2d_feature
+    Parallel(2).run(_test_works_with_2d_feature)
 
-    # 1. Grad for t1 (shared set 100)
-    # result[100] = (t1_rank0 + t1_rank1 + ...) / world_size
-    # total_sum = result[100].sum() + ...
-    # d(total_sum) / d(t1_rankN) = d(result[100].sum()) / d(t1_rankN)
-    # = d( (t1_rank0.sum() + ...) / world_size ) / d(t1_rankN)
-    # = (1 / world_size) * d(t1_rankN.sum()) / d(t1_rankN)
-    # = (1 / world_size) * 1.0 (for each element)
-    assert t1.grad is not None, "t1 has no gradient"
-    expected_t1_grad = torch.ones_like(t1) / world_size
-    assert torch.allclose(t1.grad, expected_t1_grad), f"t1 grad mismatch: {t1.grad}"
 
-    # 2. Grad for t2 (unique set `rank`)
-    # result[rank] = (t2_rank) / 1
-    # total_sum = ... + result[rank].sum() + ...
-    # d(total_sum) / d(t2_rank) = d(result[rank].sum()) / d(t2_rank)
-    # = d( t2_rank.sum() / 1 ) / d(t2_rank) = 1.0
-    assert t2.grad is not None, "t2 has no gradient"
-    expected_t2_grad = torch.ones_like(t2)
-    assert torch.allclose(t2.grad, expected_t2_grad), f"t2 grad mismatch: {t2.grad}"
+def _test_works_with_2d_feature():  # Renamed from test_fails_with_2d_feature
+    """
+    Tests the function with tensors of shape [N, 2], which should now work
+    with the improved function.
+    Assumes world_size = 2.
+    """
+    # Assume environment is already set up
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    assert world_size == 2, "This test is designed to be run with world_size=2"
 
-    print("test_autograd_differentiability: PASSED")
+    device = (
+        torch.device(f"cuda:{rank}")
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
+
+    # Each rank has different data
+    if rank == 0:
+        local_data = torch.tensor([[10.0, 1.0], [20.0, 2.0]], dtype=torch.float32).to(
+            device
+        )
+        indices = torch.tensor([[0, 0], [1, 1]], dtype=torch.long).to(device)
+    else:  # rank == 1
+        local_data = torch.tensor([[30.0, 3.0], [40.0, 4.0]], dtype=torch.float32).to(
+            device
+        )
+        indices = torch.tensor([[0, 0], [0, 0]], dtype=torch.long).to(device)
+
+    # This function call is no longer expected to fail
+    result = distributed_scatter_mean(local_data, indices)
+
+    # --- Manual Calculation ---
+    # total_sums (from all-reduce):
+    # sums[0,0] = 10.0 (r0) + 30.0 (r1) + 40.0 (r1) = 80.0
+    # sums[0,1] = 1.0 (r0) + 3.0 (r1) + 4.0 (r1) = 8.0
+    # sums[1,0] = 20.0 (r0)
+    # sums[1,1] = 2.0 (r0)
+    # total_sums = [[80.0, 8.0], [20.0, 2.0]]
+    #
+    # total_counts (from all-reduce):
+    # counts[0,0] = 1 (r0) + 1 (r1) + 1 (r1) = 3
+    # counts[0,1] = 1 (r0) + 1 (r1) + 1 (r1) = 3
+    # counts[1,0] = 1 (r0)
+    # counts[1,1] = 1 (r0)
+    # total_counts = [[3.0, 3.0], [1.0, 1.0]]
+    #
+    # mean = total_sums / total_counts
+    expected_mean = torch.tensor(
+        [[80.0 / 3.0, 8.0 / 3.0], [20.0 / 1.0, 2.0 / 1.0]], dtype=torch.float32
+    ).to(device)
+
+    # Check result
+    assert torch.allclose(result, expected_mean), (
+        f"Expected {expected_mean}, but got {result}"
+    )
+
+    # Removed _cleanup_distributed()
+
+
+def test_gradient_flow():  # Removed rank, world_size args
+    Parallel(2).run(_test_gradient_flow)
+
+
+def _test_gradient_flow():  # Removed rank, world_size args
+    """
+    Tests that gradients can flow backward through the function.
+    Uses the 1D feature case that is known to work.
+    Assumes world_size = 2.
+    """
+    # Assume environment is already set up
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    assert world_size == 2, "This test is designed to be run with world_size=2"
+
+    device = (
+        torch.device(f"cuda:{rank}")
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
+
+    # Each rank has different data
+    if rank == 0:
+        local_data = torch.tensor(
+            [[10.0], [20.0]], dtype=torch.float32, requires_grad=True
+        ).to(device)
+        indices = torch.tensor([[0], [1]], dtype=torch.long).to(device)
+    else:  # rank == 1
+        local_data = torch.tensor(
+            [[30.0], [40.0]], dtype=torch.float32, requires_grad=True
+        ).to(device)
+        indices = torch.tensor([[0], [0]], dtype=torch.long).to(device)
+
+    # Run the function
+    result = distributed_scatter_mean(local_data, indices)
+
+    # Backpropagate a simple sum
+    result.sum().backward()
+
+    # Check if gradients are computed
+    assert local_data.grad is not None
+
+    # Manual gradient calculation:
+    # result[0] = (local_0_r0 + local_0_r1 + local_1_r1) / 3
+    # result[1] = (local_1_r0) / 1
+    # loss = result[0] + result[1]
+    #
+    # Grads for Rank 0:
+    # d_loss / d_local_0_r0 = 1/3
+    # d_loss / d_local_1_r0 = 1
+    # Expected grad_r0 = [[1/3], [1.0]]
+    #
+    # Grads for Rank 1:
+    # d_loss / d_local_0_r1 = 1/3
+    # d_loss / d_local_1_r1 = 1/3
+    # Expected grad_r1 = [[1/3], [1/3]]
+
+    if rank == 0:
+        expected_grad = torch.tensor([[1.0 / 3.0], [1.0]], device=device)
+    else:
+        expected_grad = torch.tensor([[1.0 / 3.0], [1.0 / 3.0]], device=device)
+
+    assert torch.allclose(local_data.grad, expected_grad)
+
+
+def test_works_with_1d_tensor():
+    Parallel(2).run(_test_works_with_1d_tensor)
+
+
+def _test_works_with_1d_tensor():
+    """
+    Tests the function with tensors of shape [N], which should work.
+    Assumes world_size = 2.
+    """
+    # Assume environment is already set up
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    assert world_size == 2, "This test is designed to be run with world_size=2"
+
+    device = (
+        torch.device(f"cuda:{rank}")
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
+
+    # Each rank has different data
+    if rank == 0:
+        # data: [10, 20], indices: [0, 1]
+        local_data = torch.tensor([10.0, 20.0], dtype=torch.float32).to(device)
+        indices = torch.tensor([0, 1], dtype=torch.long).to(device)
+    else:  # rank == 1
+        # data: [30, 40], indices: [0, 0]
+        local_data = torch.tensor([30.0, 40.0], dtype=torch.float32).to(device)
+        indices = torch.tensor([0, 0], dtype=torch.long).to(device)
+
+    # Calculate expected result manually
+    # Index 0: 10.0 (r0) + 30.0 (r1) + 40.0 (r1) = 80.0. Count = 3. Mean = 80/3
+    # Index 1: 20.0 (r0). Count = 1. Mean = 20/1
+    expected_mean = torch.tensor([80.0 / 3.0, 20.0], dtype=torch.float32).to(device)
+
+    # Run the function
+    result = distributed_scatter_mean(local_data, indices)
+
+    # Check result
+    assert result.shape == expected_mean.shape
+    assert torch.allclose(result, expected_mean), (
+        f"Expected {expected_mean}, but got {result}"
+    )
