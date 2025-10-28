@@ -34,7 +34,11 @@ from giggleml.iter_utils.distributed_scatter_mean import (
 )
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
-from giggleml.utils.torch_utils import all_gather_concat, freeze_model, get_world_size
+from giggleml.utils.torch_utils import (
+    all_gather_concat,
+    freeze_model,
+    get_world_size,
+)
 
 
 @final
@@ -155,7 +159,7 @@ class MModel(nn.Module):
             Tensor of final set embeddings for this rank's portion of the data only
         """
 
-        assert len(data) > batch_size * (get_world_size() - 1)
+        assert sum(map(len, data)) > batch_size * (get_world_size() - 1)
 
         # 0. setup things
         torch.set_float32_matmul_precision("medium")  # we're on half prec anyway
@@ -180,7 +184,9 @@ class MModel(nn.Module):
         # 3. set-level mean
         phi_tensor = torch.stack(phi_embeds)
         phi_indices_tensor = (
-            torch.tensor(phi_set_indices).unsqueeze(-1).expand_as(phi_tensor)
+            torch.tensor(phi_set_indices, device=phi_tensor.device)
+            .unsqueeze(-1)
+            .expand_as(phi_tensor)
         )
         set_means = distributed_scatter_mean(phi_tensor, phi_indices_tensor)
 
@@ -193,6 +199,7 @@ class MModel(nn.Module):
             # block = [block.to("cpu", non_blocking=True) for block in block]
             local_rho_embeds.extend(block)
 
+        batch_size = min(batch_size, len(data) // get_world_size())
         # Dex default collate is so fast that we can avoid sub-workers
         #   and must, because we can't transfer grad tensors between workers
         rho_dex.execute(set_means, collect_rho, batch_size, num_workers=0)
