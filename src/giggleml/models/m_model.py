@@ -34,8 +34,8 @@ from giggleml.iter_utils.distributed_scatter_mean import (
 )
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
+from giggleml.utils.all_gather_cat import all_gather_cat
 from giggleml.utils.torch_utils import (
-    all_gather_concat,
     freeze_model,
     get_world_size,
 )
@@ -206,7 +206,7 @@ class MModel(nn.Module):
 
         # 4. regroup
         local_rho_embeds_tensor = torch.stack(local_rho_embeds)
-        total_rho_embeds = all_gather_concat(local_rho_embeds_tensor)
+        total_rho_embeds = all_gather_cat(local_rho_embeds_tensor)
         total_ordering = rho_dex.simulate_global_concat(range(len(data)), batch_size)
         return total_rho_embeds[total_ordering]
 
