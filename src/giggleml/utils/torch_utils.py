@@ -23,7 +23,9 @@ def get_world_size() -> int:
     return 1
 
 
-def guess_device(rank: int = 0) -> torch.device:
+def guess_device(rank: int | None = None) -> torch.device:
+    rank = rank or get_rank()
+
     if torch.accelerator.is_available():
         if torch.backends.mps.is_built():
             return torch.device(f"mps:{rank}")  # for mac use
