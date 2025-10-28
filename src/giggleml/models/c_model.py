@@ -1,9 +1,10 @@
 """
-M Model, deep sets architecture, hyenaDNA pre-processing
+C Model, deep sets architecture, hyenaDNA pre-processing
+if giggle is a giggle, this is a chuckle
 
-    (interval set -> sequence set --)-> sequence embeddings -> [M Model] -> (a single) set embedding
+    (interval set -> sequence set --)-> sequence embeddings -> [C Model] -> (a single) set embedding
 
-          | hyenaDNA    | M Model Core
+          | hyenaDNA    | C Model Core
           |             |   MLP, phi
           |             |
           |             |
@@ -42,7 +43,7 @@ from giggleml.utils.torch_utils import (
 
 
 @final
-class MModel(nn.Module):
+class CModel(nn.Module):
     """
     Note that this model takes in sets of sequence sets as input batches.
     The forward method, related procedures, including tokenize, have been
@@ -144,7 +145,7 @@ class MModel(nn.Module):
         Generate set-level embeddings using distributed processing.
 
         This method should be called on all ranks in a distributed setting.
-        It processes interval datasets through the complete M Model pipeline:
+        It processes interval datasets through the complete C Model pipeline:
         1. Freezes HyenaDNA parameters for efficiency
         2. Generates phi embeddings for all sequences using batch inference
         3. Computes set-level means using distributed scatter operations
@@ -178,8 +179,8 @@ class MModel(nn.Module):
             # embeds = [embed.to("cpu", non_blocking=True) for embed in embeds]
             phi_embeds.extend(embeds)
 
-        # The RowMModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
-        GenomicEmbedder(RowMModel(self), batch_size, sub_workers).raw(data, collect_phi)
+        # The RowCModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
+        GenomicEmbedder(RowCModel(self), batch_size, sub_workers).raw(data, collect_phi)
 
         # 3. set-level mean
         phi_tensor = torch.stack(phi_embeds)
@@ -211,7 +212,7 @@ class MModel(nn.Module):
         return total_rho_embeds[total_ordering]
 
     @override
-    def train(self, mode: bool = True) -> "MModel":
+    def train(self, mode: bool = True) -> "CModel":
         super().train(mode)
         self.hyena_dna.eval()
         return self
@@ -224,14 +225,14 @@ class MModel(nn.Module):
         return next(self.hot_parameters()).device
 
     @override
-    def to(self, *args: Any, **kwargs: Any) -> "MModel":
+    def to(self, *args: Any, **kwargs: Any) -> "CModel":
         self.hyena_dna.to(*args, **kwargs)
         return super().to(*args, **kwargs)
 
     @override
     def __repr__(self) -> str:
         return (
-            f"MModel(size={self.hyena_dna.size_type}, "
+            f"CModel(size={self.hyena_dna.size_type}, "
             f"phi_hidden_dim_factor={self.phi_hidden_dim_factor}, "
             f"rho_hidden_dim_factor={self.rho_hidden_dim_factor}, "
             f"final_embed_dim_factor={self.final_embed_dim_factor}, "
@@ -240,27 +241,27 @@ class MModel(nn.Module):
 
 
 @final
-class RowMModel(GenomicModel):
+class RowCModel(GenomicModel):
     """
-    Simplified MModel that only performs the element-wise (within the sets) operations
+    Simplified CModel that only performs the element-wise (within the sets) operations
     """
 
     wants: str = "sequences"
 
-    def __init__(self, mmodel: MModel):
+    def __init__(self, cmodel: CModel):
         super().__init__()
-        self.mmodel: MModel = mmodel
-        self.hyena_dna: HyenaDNA = mmodel.hyena_dna
+        self.cmodel: CModel = cmodel
+        self.hyena_dna: HyenaDNA = cmodel.hyena_dna
         self.max_seq_len: int | None = self.hyena_dna.max_seq_len
         self.embed_dim: int = self.hyena_dna.embed_dim
         self.embed_dtype: torch.dtype = self.hyena_dna.embed_dtype
-        self.collate = HyenaDNA(mmodel.size).collate
+        self.collate = HyenaDNA(cmodel.size).collate
 
     @override
     def forward(self, batch: dict[str, torch.Tensor]):
-        return self.mmodel.set_contents_forward(batch)
+        return self.cmodel.set_contents_forward(batch)
 
     @override
     def train(self, mode: bool = True):
-        self.mmodel.train(mode)
+        self.cmodel.train(mode)
         return self

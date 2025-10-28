@@ -18,7 +18,7 @@ Both are applicable to learn the metric.
 
 Hard triplets are normally mined by selecting, for an anchor, a positive element that the embedding model thinks is particularly different. But my data consists only of elements and a continuous similarity value between elements. If elements are sufficiently similar, we call it positive. So, it's a graph. I can't sample sufficiently distant anchors in the graph for which to draw clusters around those anchors, because the clusters would have overlap. If clusters have overlap, I must be sure not to define elements in distinct neighborhoods as negative. The solution obvious, but trickier. The mining batch is not a set of distinct clusters, it is series of sub-graphs where any node can be anchor so long as we determine its unique positive neighborhood.
 
-## M Model
+## C Model
 
 Why?
 
@@ -26,7 +26,7 @@ Why?
 - Naive set level triplet mining is too expensive. Already exceeding A100 80GB memory limits with a batch size of 16 and 20 intervals per item. 20 intervals is questionable because CLT kicks in at 40 as a rule of thumb. And 16 is very small for proper triplet mining. Additionally, maxing out GPU memory incurs a strong performance penalty because we have no reserve space for triplet mining over the combined batch between all GPUs.
 
 Deep sets architecture on HyenaDNA embeddings  
-`interval set --fasta--> sequence set --HyenaDNA--> sequence embeddings --M Model--> (a single) set embedding`
+`interval set --fasta--> sequence set --HyenaDNA--> sequence embeddings --C Model--> (a single) set embedding`
 
 HyenaDNA sequence embeddings across all sets in the batch are passed through $\phi$. We use gradient checkpointing over the $\phi$ MLP -- activations are thrown out, but inputs (into the MLP) cached. The loss can be calculated with a low memory footprint using this technique. The backward pass is efficient because gradient accumulation occurs automatically by pytorch. A running average over the $\phi$ gradients; no entire set of activations in memory at once. It's effectively no limit on the size of sets we can process because we've pushed the memory complexity into the time complexity and made the model lightweight.
 

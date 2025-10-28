@@ -6,7 +6,7 @@ import torch
 from giggleml.data_wrangling import fasta
 from giggleml.data_wrangling.interval_dataset import MemoryIntervalDataset
 from giggleml.models.hyena_dna import HyenaDNA
-from giggleml.models.m_model import MModel
+from giggleml.models.c_model import CModel
 from giggleml.utils.parallel import Parallel
 from giggleml.utils.torch_utils import guess_device
 
@@ -52,12 +52,12 @@ def test_region2_vec():
 
 
 # INFO: ----------------
-#         MModel
+#         CModel
 # ----------------------
 
 
-def test_mmodel_init():
-    model = MModel(
+def test_cmodel_init():
+    model = CModel(
         size="1k",
         phi_hidden_dim_factor=2,
         rho_hidden_dim_factor=1,
@@ -65,7 +65,7 @@ def test_mmodel_init():
         use_gradient_checkpointing=False,
     )
 
-    # Test that MModel is now a standalone nn.Module
+    # Test that CModel is now a standalone nn.Module
     assert isinstance(model, torch.nn.Module)
     assert hasattr(model, "hyena_dna")
     assert isinstance(model.hyena_dna, HyenaDNA)
@@ -82,9 +82,9 @@ def test_mmodel_init():
     assert len(model.rho) == 3
 
 
-def test_mmodel_set_contents_forward():
+def test_cmodel_set_contents_forward():
     """Test the set_contents_forward method (element-wise operations)."""
-    model = MModel(size="1k", use_gradient_checkpointing=False)
+    model = CModel(size="1k", use_gradient_checkpointing=False)
     device = guess_device()
     model.to(device).half()
     model.eval()
@@ -108,9 +108,9 @@ def test_mmodel_set_contents_forward():
         assert result.device.type == device.type
 
 
-def test_mmodel_set_means_forward():
+def test_cmodel_set_means_forward():
     """Test the set_means_forward method (rho network)."""
-    model = MModel(size="1k")
+    model = CModel(size="1k")
     device = guess_device()
     model.to(device).half()
     model.eval()
@@ -130,14 +130,14 @@ def test_mmodel_set_means_forward():
     assert result.device.type == device.type
 
 
-def test_mmodel_gradient_checkpointing_flag():
+def test_cmodel_gradient_checkpointing_flag():
     """Test that gradient checkpointing flag is properly stored."""
     # Test with gradient checkpointing disabled
-    model_no_gc = MModel(size="1k", use_gradient_checkpointing=False)
+    model_no_gc = CModel(size="1k", use_gradient_checkpointing=False)
     assert not model_no_gc.use_gradient_checkpointing
 
     # Test with gradient checkpointing enabled
-    model_gc = MModel(size="1k", use_gradient_checkpointing=True)
+    model_gc = CModel(size="1k", use_gradient_checkpointing=True)
     assert model_gc.use_gradient_checkpointing
 
     # Test that model structure is correct regardless of checkpointing flag
@@ -147,12 +147,12 @@ def test_mmodel_gradient_checkpointing_flag():
     assert isinstance(model_gc.rho, torch.nn.Sequential)
 
 
-def test_mmodel_train_mode():
-    model = MModel(size="1k")
+def test_cmodel_train_mode():
+    model = CModel(size="1k")
 
     model.train(True)
     assert model.training
-    # HyenaDNA should be kept in eval mode even when MModel is in training mode
+    # HyenaDNA should be kept in eval mode even when CModel is in training mode
     assert not model.hyena_dna.training
 
     model.train(False)
@@ -160,9 +160,9 @@ def test_mmodel_train_mode():
     assert not model.hyena_dna.training
 
 
-def test_mmodel_tokenize():
+def test_cmodel_tokenize():
     """Test the tokenize method that wraps HyenaDNA.collate."""
-    model = MModel(size="1k")
+    model = CModel(size="1k")
 
     sequences = ["ACGT", "TTGG"]
     result = model.tokenize([sequences])[0]
@@ -171,8 +171,8 @@ def test_mmodel_tokenize():
     assert isinstance(result["input_ids"], torch.Tensor)
 
 
-def test_mmodel_hot_parameters():
-    model = MModel(size="1k")
+def test_cmodel_hot_parameters():
+    model = CModel(size="1k")
 
     total_params = list(model.parameters())
     hot_params = list(model.hot_parameters())
@@ -181,9 +181,9 @@ def test_mmodel_hot_parameters():
     assert len(hot_params) <= len(total_params)
 
 
-def test_mmodel_distributed_embed_structure():
+def test_cmodel_distributed_embed_structure():
     """Test that distributed_embed has the correct signature and basic structure."""
-    model = MModel(size="1k", rho_hidden_dim_factor=2)
+    model = CModel(size="1k", rho_hidden_dim_factor=2)
 
     # Check that the method exists and has correct signature
     assert hasattr(model, "distributed_embed")
@@ -201,22 +201,22 @@ def test_mmodel_distributed_embed_structure():
     assert len(params) == 3  # self is not included in inspect.signature
 
 
-def test_row_mmodel():
-    """Test the RowMModel helper class."""
-    from giggleml.models.m_model import RowMModel
+def test_row_cmodel():
+    """Test the RowCModel helper class."""
+    from giggleml.models.c_model import RowCModel
 
-    mmodel = MModel(size="1k")
-    row_model = RowMModel(mmodel)
+    cmodel = CModel(size="1k")
+    row_model = RowCModel(cmodel)
 
     assert row_model.wants == "sequences"
-    assert hasattr(row_model, "mmodel")
+    assert hasattr(row_model, "cmodel")
     assert hasattr(row_model, "hyena_dna")
-    assert row_model.hyena_dna == mmodel.hyena_dna
-    assert row_model.embed_dim == mmodel.hyena_dna.embed_dim
+    assert row_model.hyena_dna == cmodel.hyena_dna
+    assert row_model.embed_dim == cmodel.hyena_dna.embed_dim
 
 
-def test_mmodel_repr():
-    model = MModel(
+def test_cmodel_repr():
+    model = CModel(
         size="1k",
         phi_hidden_dim_factor=3,
         rho_hidden_dim_factor=2,
@@ -227,14 +227,14 @@ def test_mmodel_repr():
     repr_str = repr(model)
     # The repr method accesses self.size_type, which should come from hyena_dna
     expected = (
-        f"MModel(size={model.hyena_dna.size_type}, phi_hidden_dim_factor=3, rho_hidden_dim_factor=2, "
+        f"CModel(size={model.hyena_dna.size_type}, phi_hidden_dim_factor=3, rho_hidden_dim_factor=2, "
         "final_embed_dim_factor=1, use_gradient_checkpointing=True)"
     )
     assert repr_str == expected
 
 
-def test_mmodel_call():
-    model = MModel("1k")
+def test_cmodel_call():
+    model = CModel("1k")
     device = guess_device()
     model.to(device)
     assert model.device == device
@@ -252,8 +252,8 @@ def test_mmodel_call():
         assert embed.dtype == torch.float16
 
 
-def _test_mmodel_dist_embed():
-    model: MModel = MModel("1k").cpu()
+def _test_cmodel_dist_embed():
+    model: CModel = CModel("1k").cpu()
     data_shape = (7, 3, 5)
     intervals = [
         [
@@ -287,5 +287,5 @@ def _test_mmodel_dist_embed():
     # assert torch.allclose(distributed_results, direct_results, atol=1e-2)
 
 
-def test_mmodel_dist_embed():
-    Parallel(world_size=2).run(_test_mmodel_dist_embed)
+def test_cmodel_dist_embed():
+    Parallel(world_size=2).run(_test_cmodel_dist_embed)

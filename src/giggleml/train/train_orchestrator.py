@@ -17,7 +17,7 @@ from torch import Tensor, optim
 from torch.nn.modules.loss import TripletMarginLoss
 
 from giggleml.data_wrangling.interval_dataset import MemoryIntervalDataset
-from giggleml.models.m_model import MModel
+from giggleml.models.c_model import CModel
 from giggleml.train.graph_triplet_miner import GraphTripletMiner
 from giggleml.train.rme_clusters_dataset import MiningBatch, RmeSeqpareClusters
 from giggleml.train.seqpare_db import SeqpareDB
@@ -34,7 +34,7 @@ class TrainConfig:
     validation_freq: int = 5
     seed: int = 42
     base_data_dir: Path = Path("data")
-    base_model_dir: Path = Path("modelCkpts/mmodel_10272025")
+    base_model_dir: Path = Path("modelCkpts/cmodel_10272025")
     fasta_path: Path = field(init=False)
     rme_beds_path: Path = field(init=False)
     seqpare_dir: Path = field(init=False)
@@ -78,8 +78,8 @@ class TrainConfig:
 
         # --- Derived Paths ---
         self.fasta_path = self.base_data_dir / "hg/hg19.fa"
-        self.rme_beds_path = self.base_data_dir / "roadmap_epigenomics/beds"
-        self.seqpare_dir = self.base_data_dir / "roadmap_epigenomics/seqpareRanks"
+        self.rme_beds_path = self.base_data_dir / "rme_small/beds"
+        self.seqpare_dir = self.base_data_dir / "rme_small/seqpareRanks"
         self.log_dir = self.base_model_dir / "logs"
         self.checkpoint_dir = self.base_model_dir / "checkpoints"
 
@@ -94,7 +94,7 @@ class Finetuner:
     def __init__(self, config: TrainConfig):
         self.config = config
         self.fabric: Fabric | None = None
-        self.model: MModel | None = None
+        self.model: CModel | None = None
         self.optimizer: optim.AdamW | None = None
 
         self.triplet_miner: GraphTripletMiner | None = None
@@ -214,7 +214,7 @@ class Finetuner:
 
     def _setup_components(self):
         assert self.fabric
-        model = MModel("16k")
+        model = CModel("1k")
         optimizer = optim.AdamW(
             params=model.hot_parameters(),
             lr=self.config.learning_rate,

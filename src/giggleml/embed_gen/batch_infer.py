@@ -279,13 +279,13 @@ class _Decollate:
     def __call__(
         self, batch: _DexBatch[Tensor]
     ) -> Iterator[tuple[Idx | None, Tensor | None]]:
-        from_model = iter(batch[1])
+        froc_model = iter(batch[1])
 
         for idx in batch[0]:
             if idx is None:
                 yield (None, None)
             else:
-                yield (idx, next(from_model))
+                yield (idx, next(froc_model))
 
 
 class _Postprocessor:
