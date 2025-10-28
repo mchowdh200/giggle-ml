@@ -2,6 +2,40 @@ import torch
 import torch.distributed as dist
 
 
+
+def _euclidean_distance_matrix(
+    embeds_x: torch.Tensor, embeds_y: torch.Tensor
+) -> torch.Tensor:
+    """
+    Computes the pairwise L2 distance matrix using matrix multiplication.
+    This is more friendly to fp16 on CUDA than torch.cdist.
+    """
+    # embeds_x: [local_N, D]
+    # embeds_y: [N, D]
+
+    # Calculate squared norms
+    # x_norm_sq: [local_N, 1]
+    x_norm_sq = torch.sum(embeds_x**2, dim=1, keepdim=True)
+
+    # y_norm_sq: [1, N]
+    y_norm_sq = torch.sum(embeds_y**2, dim=1, keepdim=True).T
+
+    # Calculate dot product
+    # dot_prod: [local_N, N]
+    dot_prod = torch.matmul(embeds_x, embeds_y.T)
+
+    # Calculate squared L2 distance
+    # Broadcasting handles the addition:
+    # [local_N, 1] - [local_N, N] + [1, N] = [local_N, N]
+    dist_sq = x_norm_sq - 2 * dot_prod + y_norm_sq
+
+    # Clamp for numerical stability (floating point errors can -> small negatives)
+    dist_sq.clamp_min_(0.0)
+
+    # Return L2 distance
+    return torch.sqrt(dist_sq)
+
+
 class GraphTripletMiner:
     """
     Mines hard triplets from embeddings based on a graph adjacency matrix.
@@ -25,7 +59,7 @@ class GraphTripletMiner:
 
         if distance_metric == "euclidean":
             # cdist computes the matrix of all-pairs L2-distances
-            self.pdist_func = lambda x, y: torch.cdist(x, y, p=2.0)
+            self.pdist_func = _euclidean_distance_matrix
         elif distance_metric == "cosine":
             # Cosine distance = 1.0 - cosine_similarity
             self.pdist_func = self._cosine_distance_matrix
