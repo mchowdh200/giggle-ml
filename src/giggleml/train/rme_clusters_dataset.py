@@ -168,7 +168,8 @@ class RmeSeqpareClusters(IterableDataset):
                 f"Bed file for label '{anchor}' is empty. Check data integrity."
             )
 
-        return self._rng.choices(bed, k=self.intervals_per_group)
+        k = min(len(bed), self.intervals_per_group)
+        return self._rng.choices(bed, k=k)
 
     @lru_cache(max_size=128)
     def _fetch_bed(self, path: Path) -> list[GenomicInterval]:

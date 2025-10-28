@@ -25,6 +25,6 @@ uv pip install -e .
 data="data"
 # time python3 scripts/roadmapEpigenomicsEmbeds.py $data/roadmap_epigenomics $data/hg/hg19.fa
 # time snakemake --cores 1 all
-time uv run scripts/hparam_search.py
+time uv run torchrun --nproc_per_node=4 scripts/hparam_search.py
 
 echo Complete.
