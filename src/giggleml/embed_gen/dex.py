@@ -197,7 +197,8 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
             collate_fn=self._InternalCollate(self.collate_fn),
             num_workers=num_workers,
             persistent_workers=num_workers != 0,
-            pin_memory=device.type == "cuda",
+            # pin_memory=device.type == "cuda",
+            pin_memory=False,  # can't pin fp16 memory
         )
 
         # 1. Execute model on all batches
