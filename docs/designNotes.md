@@ -75,3 +75,13 @@ Breaking the pipeline into pre/postprocess, model, de/collate steps is "safe" be
 - how well do we generalize to unseen bed files?
   - what about bed files "between" roadmap epigenomics bed files?
 - is it important to train tiling-aware?
+- bed files are in fact not orderless....
+
+# Other random things things I did
+
+- a couple (fasta-mapped) bed file entropy measures
+- embedding sheffield tests & SWT
+- verifying the CLT applies to bed files...
+- umapped hdna on rme
+- all those direct interval-interval direct benchmarks against giggle
+  - testing how interval alteration introduces error
