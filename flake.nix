@@ -47,11 +47,12 @@
         };
       in
       {
-        devShells.default = pkgs.mkShell {
+        devShells.default = pkgs.mkShellNoCC {
           packages = with pkgs; [
             seqpare
             uv
             just
+            bedtools
             # wget
             # bedtools
             # samtools
