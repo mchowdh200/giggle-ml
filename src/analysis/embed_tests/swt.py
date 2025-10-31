@@ -1,100 +1,99 @@
+import argparse
 import os
-from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from random import random
 
+import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import pyplot as plt
-from matplotlib.ticker import MultipleLocator
 
-from analysis.utils import conf_int95
-from giggleml.data_wrangling.interval_dataset import IntervalDataset
-from giggleml.embed_gen.embed_pipeline import EmbedPipeline
-from giggleml.interval_transformer import IntervalTransformer
-from giggleml.interval_transforms import Slide
-from giggleml.utils.types import MmapF32
+from giggleml.data_wrangling.interval_dataset import MemoryIntervalDataset
+from giggleml.embed_gen.embed_pipeline import DirectPipeline
+from giggleml.models.hyena_dna import HyenaDNA
 
 
-def swt(
-    pipeline: EmbedPipeline,
-    inputs: Sequence[tuple[IntervalDataset, str]],
-    out_fig: str,
-    step_count: int = 11,
-    consider_limit: int = 128,
-):
-    print("Creating embeddings...")
-    # round to nearest multiple
-    consider_limit = step_count * (consider_limit // step_count)
+def swt(fastas: list[os.PathLike], out_path: os.PathLike, trials: int = 50):
+    def _trial(fasta: Path, ticks: Iterable[int], interval_size: int = 1000):
+        def _samples():
+            chr = "chr1"
+            start = int(random() * 1e8)
 
-    bins = defaultdict[int, list[list[float]]](list)
+            for tick in ticks:
+                yield (chr, start + tick, start + tick + interval_size)
 
-    for input_idx, (intervals, _) in enumerate(inputs):
-        inter_tran = IntervalTransformer(
-            intervals, Slide(step_count, stride_number=10), consider_limit
+        samples = list(_samples())
+        dataset = MemoryIntervalDataset(samples, fasta)
+        embeds = DirectPipeline(HyenaDNA("1k"), 5, 10).embed(dataset).detach().numpy()
+        diffs = [np.linalg.norm(item - embeds[0]) for item in embeds]
+        return diffs
+
+    def _mean(items: Iterable[float]) -> float:
+        items_list = list(items)
+        return sum(items_list) / len(items_list) if items_list else 0.0
+
+    def _err(items: Iterable[float]) -> float:
+        items_list = list(items)
+        return (
+            # *2 due to matplotlib
+            2 * 1.96 * np.std(items_list) / np.sqrt(len(items_list))
+            if items_list
+            else 0.0
         )
-        new_dataset = inter_tran.new_dataset
-        embed_out_path = "./swtEmbeds.tmp.npy"
-        embeds: MmapF32 = pipeline.embed(new_dataset, embed_out_path).data
-        print(" - Success")
 
-        # Analyze results
+    def _results(fasta: Path) -> tuple[list[int], list[float], list[float]]:
+        ticks = [2**x for x in range(28)]
+        samples = [_trial(fasta, ticks) for _ in range(trials)]
+        averages = [_mean(y) for y in zip(*samples)]
+        stderrs = [_err(y) for y in zip(*samples)]
+        return ticks, averages, stderrs
 
-        for i in range(len(embeds)):
-            j = (i // step_count) * step_count  # nearest multiple
+    out_path = Path(out_path)
+    data = [_results(Path(fasta)) for fasta in fastas]
 
-            new_embed = embeds[i]
-            original_embed = embeds[j]
-            embedding_distance = np.linalg.norm(new_embed - original_embed).item()
+    plt.figure(figsize=(10, 6))
 
-            new_interval = new_dataset[i]
-            original_interval = new_dataset[j]
-            original_size = original_interval[2] - original_interval[1]
-            # relative gap wrt size
-            gap = 10 * round(10 * (abs(new_interval[1] - original_interval[1]) / original_size))
-
-            if len(bins[gap]) <= input_idx:
-                bins[gap].append(list())
-
-            bins[gap][input_idx].append(embedding_distance)
-
-        os.remove(embed_out_path)
-        os.remove(embed_out_path + ".meta")
-
-    # Line graph
-
-    plt.clf()
-    plt.title("Sliding Window Test")
-    plt.xlabel("Relative Distance")
-    plt.ylabel("Euclidean Distance")
-
-    labels = list(bins.keys())
-    plt.xticks(labels, [f"{int(t)}%" if i % 2 == 0 else "" for i, t in enumerate(labels)])
-
-    for idx in range(len(inputs)):
-        avgs = [np.mean(results[idx]) for results in bins.values()]
-        error = [conf_int95(results[idx]) for results in bins.values()]
-
-        input_name = inputs[idx][1]
-        plt.plot(labels, avgs, label=input_name)
-
-        # Error bars
+    for fasta, (ticks, averages, errs) in zip(fastas, data):
         plt.errorbar(
-            labels,
-            avgs,
-            yerr=error,
-            fmt="o",
-            color="black",
-            ecolor="lightgray",
-            elinewidth=2,
-            capsize=0,
+            ticks,
+            averages,
+            yerr=errs,
+            fmt="o-",
+            label=Path(fasta).name,
+            capsize=3,
+            capthick=1,
         )
 
+    plt.xscale("log")
+    plt.xlabel("Distance (bp)")
+    plt.ylabel("Average Embedding Difference")
+    plt.title("Embedding Similarity vs Distance")
     plt.legend()
-    plt.show()
-    Path(out_fig).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_fig, dpi=300)
+    plt.grid(True, alpha=0.3)
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
 
 
-def cosine_similarity(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+def main():
+    parser = argparse.ArgumentParser(
+        description="Sliding Window Test - Analyze embedding similarity vs genomic distance"
+    )
+    parser.add_argument("fastas", nargs="+", help="Path(s) to FASTA files to analyze")
+    parser.add_argument(
+        "-o", "--output", required=True, help="Output path for the plot"
+    )
+    parser.add_argument(
+        "-t",
+        "--trials",
+        type=int,
+        default=50,
+        help="Number of trials to run (default: 50)",
+    )
+
+    args = parser.parse_args()
+
+    swt(args.fastas, args.output, args.trials)
+    print(f"Plot saved to {args.output}")
+
+
+if __name__ == "__main__":
+    main()
