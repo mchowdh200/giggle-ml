@@ -1,5 +1,5 @@
 import random
-from random import randint
+from random import choice, randint
 from time import time
 
 chrm_sizes_f = [
@@ -30,7 +30,7 @@ chrm_sizes_f = [
 ]
 
 chrm_sizes: list[int] = list(map(lambda x: round(x * 1e6), chrm_sizes_f))  # In Mbp
-chrm_names = [f"chr{i+1}" for i, _ in enumerate(chrm_sizes)]
+chrm_names = [f"chr{i + 1}" for i, _ in enumerate(chrm_sizes)]
 chrm_names[22] = "chrX"
 chrm_names[23] = "chrY"
 
@@ -141,3 +141,25 @@ def synthesize(fasta_out, out_files, seq_len_min, seq_len_max, seq_per_universe,
             out.append(chrm.fasta_format(chrm_name))
             out.append("\n")
         f.write("".join(out))
+
+
+def all_random_fasta(fasta_out, seed: int = 42):
+    random.seed(seed)
+    print("Using chromosome structure:", list(zip(chrm_names, chrm_sizes)))
+
+    with open(fasta_out, "w") as file:
+        for name, size in zip(chrm_names, chrm_sizes):
+            size += 750e3  # spare, to accommodate rounding
+            _nucleotide = lambda: choice("ACGT")
+            content = [_nucleotide() for _ in range(int(size))]
+            file.write(f">{name}\n")
+            file.write("".join(content) + "\n")
+            print(f"finished {name}")
+
+
+def main():
+    all_random_fasta("data/hg/synthetic.fa")
+
+
+if __name__ == "__main__":
+    main()
