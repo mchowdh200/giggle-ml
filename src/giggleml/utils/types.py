@@ -1,4 +1,5 @@
 from collections.abc import Iterable, Sized
+from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
 import numpy as np
@@ -16,6 +17,10 @@ def lazy[T](cls: T) -> T:
     it to be passed through pickling barriers without incurring the tax.
     """
     return cls
+
+
+# why doesn't python's PathLike look more like this?
+PathLike = Path | str
 
 
 TCo = TypeVar("T_co", covariant=True)
