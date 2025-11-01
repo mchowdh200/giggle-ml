@@ -2,13 +2,12 @@ import gzip
 import random
 from collections.abc import Iterator, Sequence
 from functools import cached_property
-from os import PathLike
 from pathlib import Path
 from typing import Callable, Protocol, final, override
 
 from giggleml.utils.path_utils import as_path
 
-from ..utils.types import GenomicInterval, lazy
+from ..utils.types import GenomicInterval, PathLike, lazy
 from .kind_dataset import KindDataset
 
 

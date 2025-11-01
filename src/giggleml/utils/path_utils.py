@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from typing import Any, cast, overload
 
+from giggleml.utils.types import PathLike
+
 
 def fix_bed_ext[T: str | Path](path: T) -> T:
     """
@@ -38,14 +40,14 @@ def fix_bed_ext[T: str | Path](path: T) -> T:
 
 
 @overload
-def as_path(path: os.PathLike) -> Path: ...
+def as_path(path: PathLike) -> Path: ...
 
 
 @overload
 def as_path(path: None) -> None: ...
 
 
-def as_path(path: os.PathLike | None) -> Path | None:
+def as_path(path: PathLike | None) -> Path | None:
     if path:
         return Path(path)
     return None
@@ -53,4 +55,4 @@ def as_path(path: os.PathLike | None) -> Path | None:
 
 def is_path_like(path: Any) -> bool:
     """because isinstance(x, PathLike) doesn't work in general case"""
-    return isinstance(path, (str, bytes, os.PathLike))
+    return isinstance(path, (str, bytes, PathLike))
