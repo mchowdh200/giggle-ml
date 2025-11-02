@@ -50,17 +50,25 @@ Breaking the pipeline into pre/postprocess, model, de/collate steps is "safe" be
 
 # Other
 
-## Tiling Algorithm
+## Tile Index
 
 3.2e9 base pairs vs ~3.9e11 for roadmap epigenomics
 
 - Memoization, to provide huge speed up.
 - Speed is important: will allow embedding all of UCSC?
 
+### Tiling Algorithm
+
 - Algorithm, 9/23/2025
   - Tiles at increasing sizes (base size)\*2^K for the K-th layer. Each layer has a few offsets that linearly divide the tile spacing for that layer.
   - There are (layers \* offsets per layer) full-genome tilings.
   - Interval -> Tile Composition Algorithm: greedy, picks the largest most centered tile within the interval first. Recursively tiles the remainder. Refuses to yield a tile that adds more "noise" than coverage.
+
+### Death
+
+No longer viable :(
+
+Recent experiments have revealed huge embedding error due to scale change. The hierarchical tiling strategy was previously thought to incur a 15% average error after hyperparameter adjustment, but because biological intervals are generally somewhat similar at a distance, it's effectively a 40% error -- destroyed the information. No set of hyperparameters could reduce this. The positional offset trick would likely dramatically reduce error because embedding error due to translation is very low for HyenaDNA. But dropping the hierarchy in tile composition would mean far more tiling sizes to encompass bed file variance and given the genome size, this is not feasible. For 3B 1k-tiles, we can only feasibly tile that about 200 times (10x size of rme). Including positional offsets, it's far too expensive.
 
 # Untested experimental variables
 
