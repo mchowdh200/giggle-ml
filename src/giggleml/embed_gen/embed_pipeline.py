@@ -186,5 +186,6 @@ def _worker(
     intervals: Sequence[IntervalDataset],
     out: Sequence[str],
 ):
-    model = model.to(guess_device())
-    GenomicEmbedder(model, batch_size, sub_workers).to_disk(intervals, out)
+    with torch.no_grad():
+        model = model.to(guess_device())
+        GenomicEmbedder(model, batch_size, sub_workers).to_disk(intervals, out)
