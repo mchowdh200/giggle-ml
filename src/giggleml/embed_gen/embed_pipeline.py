@@ -6,6 +6,7 @@ from typing import overload, override
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch import Tensor
 
 from giggleml.embed_gen.batch_infer import GenomicEmbedder, Idx
@@ -153,14 +154,24 @@ class DirectPipeline(EmbedPipeline):
                     for idx, embedding in embeddings:
                         collected_embeddings.append(embedding)
 
-                self.infer.raw(intervals, embedding_collector)
+                try:
+                    # if not dist.is_initialized():
+                    #     if dist.is_available():
+                    #         dist.init_process_group(backend="nccl")
 
-                if single_input:
-                    return torch.stack(collected_embeddings)
-                else:
-                    # Group embeddings by dataset based on the order they were processed
-                    # For now, return all as a single tensor - this may need refinement
-                    return torch.stack(collected_embeddings)
+                    # automatically move the model
+                    self.model = self.model.to(guess_device())
+                    self.infer.raw(intervals, embedding_collector)
+
+                    if single_input:
+                        return torch.stack(collected_embeddings)
+                    else:
+                        # Group embeddings by dataset based on the order they were processed
+                        # For now, return all as a single tensor - this may need refinement
+                        return torch.stack(collected_embeddings)
+                finally:
+                    if dist.is_initialized():
+                        dist.destroy_process_group()
 
         # File-based mode: use distributed zarr writing
         # Run in distributed environment with picklable worker function
@@ -190,5 +201,6 @@ def _worker(
     out: Sequence[str],
 ):
     with torch.no_grad():
+        # automatically move the model
         model = model.to(guess_device())
         GenomicEmbedder(model, batch_size, sub_workers).to_disk(intervals, out)
