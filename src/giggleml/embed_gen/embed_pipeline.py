@@ -143,21 +143,24 @@ class DirectPipeline(EmbedPipeline):
                     fasta.ensure_fa(fa_path)
 
         if out is None:
-            # In-memory mode: collect embeddings and return as tensors
-            collected_embeddings = []
+            with torch.no_grad():
+                # In-memory mode: collect embeddings and return as tensors
+                collected_embeddings = []
 
-            def embedding_collector(embeddings: Iterable[tuple[Idx, Tensor]]) -> None:
-                for idx, embedding in embeddings:
-                    collected_embeddings.append(embedding)
+                def embedding_collector(
+                    embeddings: Iterable[tuple[Idx, Tensor]],
+                ) -> None:
+                    for idx, embedding in embeddings:
+                        collected_embeddings.append(embedding)
 
-            self.infer.raw(intervals, embedding_collector)
+                self.infer.raw(intervals, embedding_collector)
 
-            if single_input:
-                return torch.stack(collected_embeddings)
-            else:
-                # Group embeddings by dataset based on the order they were processed
-                # For now, return all as a single tensor - this may need refinement
-                return torch.stack(collected_embeddings)
+                if single_input:
+                    return torch.stack(collected_embeddings)
+                else:
+                    # Group embeddings by dataset based on the order they were processed
+                    # For now, return all as a single tensor - this may need refinement
+                    return torch.stack(collected_embeddings)
 
         # File-based mode: use distributed zarr writing
         # Run in distributed environment with picklable worker function
