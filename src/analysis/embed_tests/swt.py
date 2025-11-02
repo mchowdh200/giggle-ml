@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 
 from giggleml.data_wrangling.interval_dataset import MemoryIntervalDataset
 from giggleml.embed_gen.embed_pipeline import DirectPipeline
-from giggleml.models.hyena_dna import HyenaDNA
+from giggleml.models.caduceus import Caduceus
 from giggleml.utils.types import GenomicInterval, PathLike
 
 
@@ -119,7 +119,7 @@ def swt(
     def _trial(fasta: Path):
         samples = list(_samples(ticks, *interval_size))
         dataset = MemoryIntervalDataset(samples, fasta)
-        embeds = DirectPipeline(HyenaDNA("16k"), 5, 10).embed(dataset).detach().numpy()
+        embeds = DirectPipeline(Caduceus("131k"), 5, 10).embed(dataset).cpu().numpy()
         diffs = [_dist(item, embeds[0]) for item in embeds]
         return diffs[1:]  # skip the extra item we added
 
@@ -171,8 +171,18 @@ def all_plot(
         # bottom row
         ax = swt(axes[1, i], fastas, ticks, (origin_size, size), trials)
         ax.set_title(f"{origin_size} by {size}")
-        ax.set_ylim(-1, 6)
-        ax.invert_yaxis()
+
+    # unify ylim among bottom row
+    ymin, ymax = axes[1, 0].get_ylim()
+
+    for i in range(len(other_sizes)):
+        local_min, local_max = axes[1, i].get_ylim()
+        ymin = min(ymin, local_min)
+        ymax = max(ymax, local_max)
+
+    for i in range(len(other_sizes)):
+        axes[1, i].set_ylim(ymin, ymax)
+        axes[1, i].invert_yaxis()
 
     fig.suptitle("Sliding Window Test")
     plt.tight_layout()
@@ -187,7 +197,7 @@ def main():
         (10, 100, 1000, 10000),
         trials=50,
     )
-    fig.savefig("experiments/swt_combo.png", dpi=300)
+    fig.savefig("experiments/swt_combo-cad.png", dpi=300)
     fig.show()
 
     # long
@@ -201,7 +211,7 @@ def main():
         trials=50,
         log_xscale=True,
     )
-    fig.savefig("experiments/swt_long_range.png", dpi=300)
+    fig.savefig("experiments/swt_long_range-cad.png", dpi=300)
     fig.show()
 
 
