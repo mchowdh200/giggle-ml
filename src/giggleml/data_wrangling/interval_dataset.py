@@ -101,9 +101,11 @@ class BedDataset(LateIntervalDataset):
         self.path: Path = as_path(path)
         assert sampling_rate >= 0 and sampling_rate <= 1
         self.sampling_rate: float = sampling_rate
+        self.limit: float = limit or float("inf")
+
         super().__init__(
             lazy_getter=self._load,
-            lazy_length=limit,
+            lazy_length=None,
             associated_fasta_path=associated_fasta_path,
         )
 
@@ -114,6 +116,9 @@ class BedDataset(LateIntervalDataset):
             intervals = list[GenomicInterval]()
 
             for line in file:
+                if len(intervals) >= self.limit:
+                    break
+
                 if line.startswith("#"):
                     continue
 
