@@ -12,6 +12,8 @@ from giggleml.embed_gen.multi_zarr_writer import MultiZarrWriter
 from giggleml.iter_utils.set_flat_iter import SetFlatIter
 from giggleml.iter_utils.zipper import Zipper
 from giggleml.models.genomic_model import GenomicModel
+from giggleml.utils.time_this import progress_logger
+from giggleml.utils.torch_utils import get_world_size
 from giggleml.utils.types import GenomicInterval, PathLike, lazy
 
 from .dex import (
@@ -77,6 +79,7 @@ class GenomicEmbedder:
         datasets: Sequence[IntervalDataset],
         output_paths: Sequence[PathLike],
         respect_boundaries: bool = True,
+        log: bool = True,
     ) -> None:
         """Process datasets and write results to zarr files with direct writing.
 
@@ -98,13 +101,22 @@ class GenomicEmbedder:
         # Create pipeline
         dex, set_flat_iter = self._create_dex_pipeline(datasets, respect_boundaries)
 
-        # Create direct zarr consumer. It no longer needs the complex
-        # rank_indices_iterator, as indices are now part of the data.
         output_counts = [len(ds) for ds in datasets]
-        zarr_consumer = self._create_direct_zarr_consumer(output_paths, output_counts)
+        expected_rank_output_count = round(
+            len(set_flat_iter) / self.batch_size / get_world_size()
+        )
 
-        # Execute pipeline with direct writing
-        self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
+        if log:
+            with progress_logger(expected_rank_output_count, "embedding") as log_ckpt:
+                zarr_consumer = self._create_direct_zarr_consumer(
+                    output_paths, output_counts, log_ckpt
+                )
+                self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
+        else:
+            zarr_consumer = self._create_direct_zarr_consumer(
+                output_paths, output_counts, lambda: None
+            )
+            self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
 
     def _create_dex_pipeline(
         self, datasets: Sequence[IntervalDataset], respect_boundaries: bool = True
@@ -165,6 +177,7 @@ class GenomicEmbedder:
         self,
         output_paths: Sequence[PathLike],
         output_counts: Sequence[int],
+        log_ckpt: Callable[[], None],
     ) -> ConsumerFn[_DexOut]:
         """
         Create a consumer that writes directly to final zarr files.
@@ -188,6 +201,7 @@ class GenomicEmbedder:
             )
             numpy_embeddings = [t.cpu().numpy() for t in embeddings]
             zarr_writer.write_batch(numpy_embeddings, indices)
+            log_ckpt()
 
         return zarr_consumer
 
