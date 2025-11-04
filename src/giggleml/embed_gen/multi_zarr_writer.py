@@ -9,6 +9,8 @@ import numpy as np
 import zarr
 from filelock import FileLock
 
+from giggleml.utils.types import PathLike
+
 
 @final
 class MultiZarrWriter:
@@ -21,7 +23,7 @@ class MultiZarrWriter:
 
     def __init__(
         self,
-        output_paths: Sequence[str],
+        output_paths: Sequence[PathLike],
         shape: tuple[int, ...],
         initial_lengths: Sequence[int] | None = None,
         chunks: tuple[int, ...] | bool | None = None,
@@ -116,10 +118,11 @@ class MultiZarrWriter:
         to get the ground truth, yields it for modification, and then updates
         the instance's current_zarr_array *if* it was the one being modified.
         """
+        out_path = str(self.output_paths[set_idx])
         lock_path = f"{self.output_paths[set_idx]}.resize.lock"
         with FileLock(lock_path, timeout=30):
             # After acquiring the lock, we MUST get the ground truth from disk.
-            z_refreshed = zarr.open(self.output_paths[set_idx], mode="a")
+            z_refreshed = zarr.open(out_path, mode="a")
             assert isinstance(z_refreshed, zarr.Array)
 
             try:
@@ -168,7 +171,7 @@ class MultiZarrWriter:
 
     def _open_or_create_zarr_file(self, set_idx: int) -> zarr.Array:
         """Open existing zarr file or create new one safely."""
-        output_path = self.output_paths[set_idx]
+        output_path = str(self.output_paths[set_idx])
         lock_path = f"{output_path}.init.lock"
         with FileLock(lock_path, timeout=30):
             if os.path.exists(output_path):

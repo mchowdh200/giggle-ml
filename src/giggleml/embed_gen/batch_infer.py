@@ -12,7 +12,7 @@ from giggleml.embed_gen.multi_zarr_writer import MultiZarrWriter
 from giggleml.iter_utils.set_flat_iter import SetFlatIter
 from giggleml.iter_utils.zipper import Zipper
 from giggleml.models.genomic_model import GenomicModel
-from giggleml.utils.types import GenomicInterval, lazy
+from giggleml.utils.types import GenomicInterval, PathLike, lazy
 
 from .dex import (
     ConsumerFn,
@@ -75,7 +75,7 @@ class GenomicEmbedder:
     def to_disk(
         self,
         datasets: Sequence[IntervalDataset],
-        output_paths: Sequence[str],
+        output_paths: Sequence[PathLike],
         respect_boundaries: bool = True,
     ) -> None:
         """Process datasets and write results to zarr files with direct writing.
@@ -163,7 +163,7 @@ class GenomicEmbedder:
 
     def _create_direct_zarr_consumer(
         self,
-        output_paths: Sequence[str],
+        output_paths: Sequence[PathLike],
         output_counts: Sequence[int],
     ) -> ConsumerFn[_DexOut]:
         """
