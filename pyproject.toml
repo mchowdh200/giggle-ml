@@ -20,11 +20,13 @@ dependencies = [
     "rust-just>=1.43.0",
     "scikit-learn>=1.6.1",
     "scipy>=1.15.2",
+    "seaborn>=0.13.2",
     "snakemake>=9.3.2",
     "statistics>=1.0.3.5",
     "tensorboard>=2.20.0",
     "torch>=2.7.1",
     "transformers>=4.51.3",
+    "umap-learn>=0.5.9.post2",
     "zarr>=3.1.3",
 ]
 
