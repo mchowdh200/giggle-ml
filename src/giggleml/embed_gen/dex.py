@@ -1,6 +1,7 @@
 import itertools
 from collections.abc import Callable, Iterable, Iterator
 from logging import warning
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -173,10 +174,13 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         consumer_fn: ConsumerFn[W_out],
         batch_size: int,
         num_workers: int = 0,
+        auto_reclaim: bool = True,
     ):
         """
         Execute the full pipeline on input data.
         The model is not moved, tensors are moved to where the model is currently.
+
+        @arg auto_reclaim: automatically pull results back to the cpu when possible
         """
         # Setup device and distributed model if applicable
         model = self.model
@@ -202,7 +206,9 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         )
 
         # 1. Execute model on all batches
-        model_output_batches = self._model_pass(data_loader, model, device)
+        model_output_batches = self._model_pass(
+            data_loader, model, device, auto_reclaim
+        )
 
         # 2. Flatten batched outputs back to an item stream with boundary flags
         output_item_stream = self._decollate_and_rebatch(model_output_batches)
@@ -215,7 +221,11 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
             consumer_fn(list(block))
 
     def _model_pass(
-        self, loader: DataLoader, model: torch.nn.Module, device: torch.device
+        self,
+        loader: DataLoader,
+        model: torch.nn.Module,
+        device: torch.device,
+        auto_reclaim: bool,
     ) -> Iterator[tuple[list[int], Batch_out]]:
         """Executes the model on batched data, handling device placement."""
         for group_indices, batch_input in loader:
@@ -232,8 +242,26 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
             else:
                 moved_batch = batch_input  # Assume it's a custom object
 
-            output = model(moved_batch)
-            yield group_indices, output
+            output: Batch_out = model(moved_batch)
+            cpu_output: Batch_out | None = None
+
+            # move to cpu
+            if auto_reclaim:
+                if isinstance(output, torch.Tensor):
+                    cpu_output = cast(Batch_out, output.cpu())
+                elif isinstance(output, (list, tuple)):
+                    # Handle models that return multiple tensors
+                    cpu_output = type(output)(
+                        item.cpu() if isinstance(item, torch.Tensor) else item
+                        for item in output
+                    )
+
+            if cpu_output is None:
+                # Assume custom object, or it's already on CPU
+                # or, the user wants the objects to remain on GPU
+                cpu_output = output
+
+            yield group_indices, cpu_output
 
     def _decollate_and_rebatch(
         self, model_output_batches: Iterable[tuple[list[int], Batch_out]]
