@@ -4,72 +4,59 @@ are mean aggregated the whole of results are represented as a dictionary and
 pickled.
 """
 
-import sys
 from collections.abc import Sequence
-from os.path import basename, dirname
+from pathlib import Path
+from typing import cast
 
-import numpy as np
-import torch
+import zarr
+from numpy.typing import NDArray
+from zarr.core.buffer import NDArrayLikeOrScalar
 
-from ..embed_gen import embed_io
+from giggleml.utils.types import PathLike
+
 from ..utils.path_pickle import pickle, unpickle
 
-EmbedDict = dict[str, np.ndarray]
 
-
-def build(embed_paths: Sequence[str], out_path: str | None = None) -> EmbedDict:
+def build(
+    embed_paths: Sequence[PathLike], out_path: PathLike | None = None
+) -> dict[str, NDArray]:
     """
-    @param embedPaths: a collection of .npy files holding
-    @param outPath: if None, its inferred as dirname(embedPaths)/master.pickle
+    maps each zarr array into an np array by taking the mean along dim zero.
+    builds and saves a { zarr -> mean } dict keyed by zarr dir name
 
-    Keys in the result dict do not have the .npy extension.
-        Eg, "x/y/z/item.npy" -> "item"
+    @param embed_paths: paths to zarr arrays
+    @param out_path: if None, its inferred as dir/embed_means.pickle where the dir is the first parent dir in the input paths
     """
 
     if len(embed_paths) == 0:
         raise ValueError("Did you mean to pass zero embed paths?")
 
-    for path in embed_paths:
-        if not path.endswith(".npy"):
-            raise ValueError("Expecting embedPaths to be a collection .npy files")
-
     if out_path is None:
-        for i in range(len(embed_paths)):
-            if dirname(embed_paths[i]) != dirname(embed_paths[i - 1]):
-                raise ValueError(
-                    "Unable to infer outPath if embedPaths have different parent directories"
-                )
-        out_path = dirname(embed_paths[0]) + "/master.pickle"
+        dir = Path(embed_paths[0]).parent
+        out_path = dir / "embed_means.pickle"
 
-    mean_embeds: list[np.ndarray] = list()
+    mean_embeds: dict[str, NDArray] = dict()
 
     for path in embed_paths:
-        embed = embed_io.parse(path).data
+        zarr_array = cast(zarr.Array, zarr.open(str(path)))
 
-        if len(embed.shape) == 1:
-            # Case A:
-            # we're dealing with a single embed, from a lone interval, which is
-            # unexpected because we were expecting to deal with embed sets
-            print(
-                f"An embed path corresponds to an embed produced by a single interval as "
-                "opposed to an embed set. ({path})",
-                file=sys.stderr,
-            )
-            mean_embeds.append(embed)
-        else:
-            # Case B: usual case
-            # embed should be shape (N, embedDim)
-            mean_embed = embed.mean(axis=0)
-            mean_embeds.append(mean_embed)
+        if zarr_array.shape[0] == 0:
+            continue
 
-    # x/y/z/basename.npy -> basename
-    names = [basename(path)[:-4] for path in embed_paths]
+        zarr_iter = iter(zarr_array)
+        running_sum: NDArrayLikeOrScalar = next(zarr_iter)
 
-    final = {name: embed for name, embed in zip(names, mean_embeds)}
-    pickle(out_path, final)
-    return final
+        for item in zarr_iter:
+            running_sum += item  # pyright: ignore[reportOperatorIssue]
+
+        mean = running_sum / zarr_array.shape[0]  # pyright: ignore[reportOperatorIssue]
+        name = Path(path).name
+        mean_embeds[name] = mean  # pyright: ignore[reportArgumentType]
+
+    pickle(out_path, mean_embeds)
+    return mean_embeds
 
 
-def parse(path: str) -> EmbedDict:
+def parse(path: PathLike) -> dict[str, NDArray]:
     # This is provided for the automatic type cast and semantic usage
     return unpickle(path)
