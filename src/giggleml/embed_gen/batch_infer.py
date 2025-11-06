@@ -1,3 +1,5 @@
+import contextlib
+import os
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, cast, final, override
@@ -106,17 +108,28 @@ class GenomicEmbedder:
             len(set_flat_iter) / self.batch_size / get_world_size()
         )
 
-        if log and get_rank() == 0:
-            with progress_logger(expected_rank_output_count, "embedding") as log_ckpt:
+        try:
+            if log and get_rank() == 0:
+                with progress_logger(
+                    expected_rank_output_count, "embedding"
+                ) as log_ckpt:
+                    zarr_consumer = self._create_direct_zarr_consumer(
+                        output_paths, output_counts, log_ckpt
+                    )
+                    self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
+            else:
                 zarr_consumer = self._create_direct_zarr_consumer(
-                    output_paths, output_counts, log_ckpt
+                    output_paths, output_counts, lambda: None
                 )
                 self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
-        else:
-            zarr_consumer = self._create_direct_zarr_consumer(
-                output_paths, output_counts, lambda: None
-            )
-            self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
+        finally:
+            # clean up residual locks. supposed to happen naturally, but not in
+            # case of interrupted job
+            for out in output_paths:
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(f"{str(out)}.init.lock")
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(f"{str(out)}.resize.lock")
 
     def _create_dex_pipeline(
         self, datasets: Sequence[IntervalDataset], respect_boundaries: bool = True
