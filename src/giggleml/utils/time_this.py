@@ -60,20 +60,38 @@ def time_this(label: str = ""):
         print(f"<<< {label}{elapsed_time:.4f} seconds")
 
 
+def _format_time(seconds: float) -> str:
+    """Converts a duration in seconds to a HH:MM:SS or MM:SS string."""
+    if seconds < 0:
+        return "0.0s"
+
+    # Handle sub-minute durations
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+
+    # Handle durations less than an hour
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        remaining_seconds = int(seconds % 60)
+        return f"{minutes:02d}m {remaining_seconds:02d}s"
+
+    # Handle all other (longer) durations
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        remaining_seconds = int(seconds % 60)
+        return f"{hours:d}h {minutes:02d}m {remaining_seconds:02d}s"
+
+
 @contextlib.contextmanager
 def progress_logger(total_steps: int, description: str = "Processing"):
     """
-    A context manager for logging progress with an ETA.
+    A context manager for logging progress with a human-readable ETA.
 
     Yields a callback function `checkpoint()` that should be called
     at each step. Assumes steps are evenly weighted.
-
-    Args:
-        total_steps (int): The total number of steps for the task.
-        description (str): A description of the task to log.
     """
 
-    # Handle edge case of no steps
     if total_steps <= 0:
         print(f"[{description}] Skipping (0 steps).")
 
@@ -83,13 +101,19 @@ def progress_logger(total_steps: int, description: str = "Processing"):
         try:
             yield no_op_checkpoint
         finally:
-            return  # Exit without printing "Finished"
+            return
 
     start_time = time.monotonic()
     current_step = 0
 
+    padding = " " * 10
+
     # Initial print
-    print(f"\r[{description}] Starting... (0/{total_steps})", end="")
+    print(
+        f"\r[{description}] Starting... (0/{total_steps}) "
+        f"| Elapsed: 0.0s | ETA: -{padding}",  # Added padding here too
+        end="",
+    )
     sys.stdout.flush()
 
     def checkpoint():
@@ -100,29 +124,21 @@ def progress_logger(total_steps: int, description: str = "Processing"):
         elapsed_time = time.monotonic() - start_time
 
         # --- Calculations ---
-        progress_fraction = current_step / total_steps
-        time_per_step = elapsed_time / current_step
-        remaining_steps = total_steps - current_step
-        eta_seconds = time_per_step * remaining_steps
+        progress_fraction = min(1.0, current_step / total_steps)
+
+        if progress_fraction > 0:
+            time_per_step = elapsed_time / current_step
+            remaining_steps = total_steps - current_step
+            eta_seconds = max(0.0, time_per_step * remaining_steps)
+        else:
+            eta_seconds = 0.0
 
         # --- Formatting ---
-        progress_percent = progress_fraction * 100
-        elapsed_str = f"{elapsed_time:.1f}s"
+        progress_percent = (current_step / total_steps) * 100
+        elapsed_str = _format_time(elapsed_time)
+        eta_str = _format_time(eta_seconds)
 
-        # Handle ETA formatting
-        if remaining_steps > 0:
-            eta_str = f"{eta_seconds:.1f}s"
-        else:
-            # Don't show ETA if we're done or gone over
-            eta_str = "0.0s"
-
-        # Ensure progress doesn't exceed 100% if called exactly right
-        if current_step == total_steps:
-            progress_percent = 100.0
-
-        # \r moves cursor to start of line.
-        # Extra padding clears previous, longer lines.
-        padding = " " * 10
+        # Print the updated line
         print(
             f"\r[{description}] {progress_percent:5.1f}% ({current_step}/{total_steps}) "
             f"| Elapsed: {elapsed_str} | ETA: {eta_str}{padding}",
@@ -131,22 +147,20 @@ def progress_logger(total_steps: int, description: str = "Processing"):
         sys.stdout.flush()
 
     try:
-        # Yield the callback for the 'with' block
         yield checkpoint
     except Exception as e:
-        # Handle errors gracefully
-        print(f"\n[{description}] Aborted with error: {e}")
+        # Clear the progress line on error
+        print(f"\r{' ' * (len(description) + 70)}{padding}\r", end="")
+        print(f"[{description}] Aborted with error: {e}")
         raise
     else:
-        # Success case: Print final summary
-        # This block runs if no exceptions were raised
+        # Success: Print final summary
         elapsed_time = time.monotonic() - start_time
 
-        # Final update to show 100% if the loop finished
-        # (This also neatly handles loops that finish faster than 0.1s)
+        # Ensure final print is 100% and 0 ETA
         print(
             f"\r[{description}] {100.0:5.1f}% ({total_steps}/{total_steps}) "
-            f"| Elapsed: {elapsed_time:.1f}s | ETA: 0.0s{padding}",
+            f"| Elapsed: {_format_time(elapsed_time)} | ETA: 0.0s{padding}",
             end="",
         )
-        print(f"\n[{description}] Finished in {elapsed_time:.2f}s.")
+        print(f"\n[{description}] Finished in {_format_time(elapsed_time)}.")
