@@ -13,7 +13,7 @@ from giggleml.iter_utils.set_flat_iter import SetFlatIter
 from giggleml.iter_utils.zipper import Zipper
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.utils.time_this import progress_logger
-from giggleml.utils.torch_utils import get_world_size
+from giggleml.utils.torch_utils import get_rank, get_world_size
 from giggleml.utils.types import GenomicInterval, PathLike, lazy
 
 from .dex import (
@@ -106,7 +106,7 @@ class GenomicEmbedder:
             len(set_flat_iter) / self.batch_size / get_world_size()
         )
 
-        if log:
+        if log and get_rank() == 0:
             with progress_logger(expected_rank_output_count, "embedding") as log_ckpt:
                 zarr_consumer = self._create_direct_zarr_consumer(
                     output_paths, output_counts, log_ckpt
