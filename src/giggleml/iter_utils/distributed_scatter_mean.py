@@ -2,6 +2,8 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 
+from giggleml.utils.autograd_aware_dist_ops import all_reduce_sum
+
 
 def distributed_scatter_mean(
     local: Tensor, indices: Tensor, group: dist.ProcessGroup | None = None
@@ -43,8 +45,8 @@ def distributed_scatter_mean(
     counts.scatter_add_(0, indices, torch.ones_like(indices, dtype=local.dtype))
 
     # all gather
-    dist.all_reduce(sums, op=dist.ReduceOp.SUM, group=group)
-    dist.all_reduce(counts, op=dist.ReduceOp.SUM, group=group)
+    all_reduce_sum(sums, group=group)
+    all_reduce_sum(counts, group=group)
 
     # mean
     return sums / counts
