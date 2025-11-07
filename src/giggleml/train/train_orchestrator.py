@@ -30,8 +30,8 @@ class TrainConfig:
     """Consolidated configuration for the training script."""
 
     mode: str = "train"  # train, val, or test
-    total_steps: int = 10_000
-    validation_freq: int = 100  # Run validation every 100 steps
+    total_steps: int = 200
+    validation_freq: int = 10
     seed: int = 42
     model_size: str = "16k"
     base_data_dir: Path = Path("data")
@@ -46,11 +46,10 @@ class TrainConfig:
     eps: float = 1e-6
     beta1: float = 0.9
     beta2: float = 0.999
-    weight_decay: float = 0.0
-
-    batch_size: int = 100
-    pk_ratio: float = 1.0  # p/k, clusters/(positives per cluster)
-    density: int = 30  # This is intervals_per_group
+    weight_decay: float = 1e-5
+    batch_size: int = 128
+    pk_ratio: float = 2  # p/k, clusters/(positives per cluster)
+    density: int = 32  # This is intervals_per_group
 
     positive_threshold: float = 0.1
     cv_ratios: dict[str, float] = field(
@@ -65,7 +64,7 @@ class TrainConfig:
     cluster_size: int = field(init=False)
 
     dex_batch_size: int = 64
-    dex_sub_workers: int = 4
+    dex_sub_workers: int = 0
 
     def __post_init__(self):
         """Set derived paths and validate parameters after initialization."""
