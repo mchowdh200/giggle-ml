@@ -11,7 +11,7 @@ dependencies = [
     "filelock>=3.18.0",
     "geniml>=0.6.0",
     "lightning>=2.5.2",
-    "mamba-ssm>=2.2.6.post3",
+    "mamba-ssm>=2.2.6.post3; sys_platform == 'linux'",
     "matplotlib>=3.10.1",
     "numpy>=2.2.5",
     "pandas>=2.3.1",
