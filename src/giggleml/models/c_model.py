@@ -110,6 +110,7 @@ class CModel(nn.Module):
             [len(item["input_ids"]) for item in batch],
             device=dev,
         )
+        assert torch.all(set_sizes != 0), "encountered a set with zero size"
         set_indices = torch.arange(0, len(batch), device=dev).repeat_interleave(
             set_sizes
         )
@@ -187,11 +188,7 @@ class CModel(nn.Module):
 
         # 3. set-level mean
         phi_tensor = torch.stack(phi_embeds)
-        phi_indices_tensor = (
-            torch.tensor(phi_set_indices, device=phi_tensor.device)
-            .unsqueeze(-1)
-            .expand_as(phi_tensor)
-        )
+        phi_indices_tensor = torch.tensor(phi_set_indices, device=phi_tensor.device)
         set_means = distributed_scatter_mean(phi_tensor, phi_indices_tensor)
 
         # 3. rho pass
