@@ -106,3 +106,63 @@ def all_gather_cat(
     local: torch.Tensor, group: dist.ProcessGroup | None = None
 ) -> torch.Tensor:
     return cast(torch.Tensor, DifferentiableAllGatherCat().apply(local, group))
+
+
+# INFO: ----------------------------
+#         all_reduce op=sum
+# ----------------------------------
+
+
+class DifferentiableAllReduceSum(torch.autograd.Function):
+    """
+    A custom autograd function for a distributed all_reduce (sum) operation.
+    The backward pass is also an all_reduce (sum).
+    """
+
+    @staticmethod
+    def forward(
+        ctx: FunctionCtx,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup | None = None,
+    ) -> torch.Tensor:
+        """
+        Forward pass:
+        1. Clones the input tensor (since all_reduce is in-place).
+        2. Performs all_reduce(sum) on the clone.
+        3. Returns the all-reduced tensor.
+        """
+        # all_reduce is an in-place operation. We clone the input
+        # to avoid modifying it in-place, which can cause issues.
+        output_tensor = input_tensor.clone()
+
+        # Perform the all-reduce operation
+        dist.all_reduce(output_tensor, op=dist.ReduceOp.SUM, group=group)
+        ctx.process_group = group  # pyright: ignore[reportAttributeAccessIssue]
+        return output_tensor
+
+    @staticmethod
+    def backward(ctx: FunctionCtx, *grad_outputs: torch.Tensor) -> torch.Tensor:
+        """
+        Backward pass:
+        As derived above, the backward pass is also an all_reduce(sum)
+        on the incoming gradients.
+        """
+        assert len(grad_outputs) == 1
+        grad_output = grad_outputs[0]
+
+        # Clone the grad_output for the in-place all_reduce
+        grad_input = grad_output.clone()
+
+        # Perform all_reduce(sum) on the gradients
+        group = ctx.process_group  # pyright: ignore[reportAttributeAccessIssue]
+        dist.all_reduce(grad_input, op=dist.ReduceOp.SUM, group=group)
+
+        # The function returns one gradient, corresponding to the
+        # one input (input_tensor) of the forward pass.
+        return grad_input
+
+
+def all_reduce_sum(
+    local: torch.Tensor, group: dist.ProcessGroup | None = None
+) -> torch.Tensor:
+    return cast(torch.Tensor, DifferentiableAllReduceSum().apply(local, group))
