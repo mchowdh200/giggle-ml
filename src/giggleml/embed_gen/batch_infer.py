@@ -60,6 +60,7 @@ class GenomicEmbedder:
         datasets: Sequence[IntervalDataset],
         consumer: EmbedConsumer,
         respect_boundaries: bool = False,
+        auto_reclaim: bool = False,
     ) -> None:
         """Process datasets with a generic consumer function.
 
@@ -67,6 +68,7 @@ class GenomicEmbedder:
         without any regrouping or post-processing.
 
         @arg respect_boundaries: If True, returned blocks will not span multiple chunks
+        @arg auto_reclaim: If True, auto move outputs to cpu
         """
         dex, set_flat_iter = self._create_dex_pipeline(datasets, respect_boundaries)
 
@@ -74,7 +76,7 @@ class GenomicEmbedder:
             clean = [x for x in output if x[0] is not None and x[1] is not None]
             consumer(cast(Sequence[tuple[Idx, Tensor]], clean))
 
-        self._execute_pipeline(dex, set_flat_iter, raw_consumer_wrapper)
+        self._execute_pipeline(dex, set_flat_iter, raw_consumer_wrapper, auto_reclaim)
 
     def to_disk(
         self,
@@ -165,6 +167,7 @@ class GenomicEmbedder:
         dex: _Dex,
         set_flat_iter: SetFlatIter[GenomicInterval],
         consumer: ConsumerFn[_DexOut],
+        auto_reclaim: bool = True,
     ) -> None:
         """Execute the Dex pipeline with the given consumer."""
 
@@ -173,6 +176,7 @@ class GenomicEmbedder:
             consumer_fn=consumer,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
+            auto_reclaim=auto_reclaim,
         )
 
     def _validate_fasta_paths(self, datasets: Sequence[IntervalDataset]) -> Path | None:
