@@ -121,7 +121,8 @@ class CModel(nn.Module):
         ) / set_sizes.unsqueeze(1)
 
         # 3. rho pass
-        return self.set_means_forward(set_means)
+        with torch.autocast("cuda", dtype=torch.float32):
+            return self.set_means_forward(set_means)
 
     def set_contents_forward(self, item: dict[str, torch.Tensor]) -> torch.Tensor:
         """
@@ -132,7 +133,10 @@ class CModel(nn.Module):
         # Step 1: Get sequence embeddings from HyenaDNA
         hdna_embeds = self.hyena_dna(item)
         # Step 2: Apply phi network to each sequence embedding
-        return self.phi(hdna_embeds)
+        with torch.autocast("cuda", dtype=torch.float32):
+            # autocast performs the op in higher prec, but keeps weights low precision
+            phi = self.phi(hdna_embeds).to(hdna_embeds.dtype)
+            return phi
 
     def set_means_forward(self, batch: torch.Tensor) -> torch.Tensor:
         """takes a batch of set means"""
@@ -176,7 +180,6 @@ class CModel(nn.Module):
         def collect_phi(block: Sequence[tuple[Idx, torch.Tensor]]):
             indices, embeds = zip(*block)
             phi_set_indices.extend(i for (i, _) in indices)
-            # embeds = [embed.to("cpu", non_blocking=True) for embed in embeds]
             phi_embeds.extend(embeds)
 
         # The RowCModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
@@ -204,6 +207,12 @@ class CModel(nn.Module):
         # Dex default collate is so fast that we can avoid sub-workers
         #   and must, because we can't transfer grad tensors between workers
         rho_dex.execute(set_means, collect_rho, batch_size, num_workers=0)
+        with torch.autocast("cuda", dtype=torch.float32):
+            # Dex default collate is so fast that we can avoid sub-workers
+            #   and must, because we can't transfer grad tensors between workers
+            rho_dex.execute(
+                set_means, collect_rho, batch_size, num_workers=0, auto_reclaim=False
+            )
 
         # 4. regroup
         local_rho_embeds_tensor = torch.stack(local_rho_embeds)
