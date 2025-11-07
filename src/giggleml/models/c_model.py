@@ -133,6 +133,7 @@ class CModel(nn.Module):
 
         # Step 1: Get sequence embeddings from HyenaDNA
         hdna_embeds = self.hyena_dna(item)
+
         # Step 2: Apply phi network to each sequence embedding
         with torch.autocast("cuda", dtype=torch.float32):
             # autocast performs the op in higher prec, but keeps weights low precision
@@ -156,7 +157,6 @@ class CModel(nn.Module):
         3. Computes set-level means using distributed scatter operations
         4. Applies rho network to produce final set embeddings
 
-        Args:
             data: List of IntervalDataset objects to process
             batch_size: Batch size for inference operations
             sub_workers: Number of sub-workers for parallel processing
@@ -201,9 +201,6 @@ class CModel(nn.Module):
             local_rho_embeds.extend(block)
 
         batch_size = min(batch_size, len(data) // get_world_size())
-        # Dex default collate is so fast that we can avoid sub-workers
-        #   and must, because we can't transfer grad tensors between workers
-        rho_dex.execute(set_means, collect_rho, batch_size, num_workers=0)
         with torch.autocast("cuda", dtype=torch.float32):
             # Dex default collate is so fast that we can avoid sub-workers
             #   and must, because we can't transfer grad tensors between workers
