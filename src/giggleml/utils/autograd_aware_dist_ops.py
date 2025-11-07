@@ -4,6 +4,10 @@ import torch
 import torch.distributed as dist
 from torch.autograd.function import FunctionCtx
 
+# INFO: ---------------------------
+#         all_gather + cat
+# ---------------------------------
+
 
 class DifferentiableAllGatherCat(torch.autograd.Function):
     """

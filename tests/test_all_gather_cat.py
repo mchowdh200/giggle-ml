@@ -2,9 +2,7 @@ import torch
 import torch.distributed as dist
 from torch.testing import assert_close
 
-from giggleml.utils.all_gather_cat import (
-    all_gather_cat,  # Better for floats than torch.equal
-)
+from giggleml.utils.autograd_aware_dist_ops import all_gather_cat
 from giggleml.utils.parallel import Parallel
 
 

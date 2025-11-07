@@ -35,7 +35,7 @@ from giggleml.iter_utils.distributed_scatter_mean import (
 )
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
-from giggleml.utils.all_gather_cat import all_gather_cat
+from giggleml.utils.autograd_aware_dist_ops import all_gather_cat
 from giggleml.utils.torch_utils import (
     freeze_model,
     get_world_size,
