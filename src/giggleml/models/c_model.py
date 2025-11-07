@@ -58,7 +58,6 @@ class CModel(nn.Module):
         phi_hidden_dim_factor: int = 4,
         rho_hidden_dim_factor: int = 2,
         final_embed_dim_factor: int = 1,
-        use_gradient_checkpointing: bool = True,
     ):
         super().__init__()
 
@@ -67,7 +66,6 @@ class CModel(nn.Module):
         self.phi_hidden_dim_factor = phi_hidden_dim_factor  # for __repr__
         self.rho_hidden_dim_factor = rho_hidden_dim_factor  # for __repr__
         self.final_embed_dim_factor = final_embed_dim_factor  # for __repr__
-        self.use_gradient_checkpointing = use_gradient_checkpointing
 
         hyena_embed_dim = self.hyena_dna.embed_dim
         phi_hidden_dim = phi_hidden_dim_factor * hyena_embed_dim
@@ -239,7 +237,6 @@ class CModel(nn.Module):
             f"phi_hidden_dim_factor={self.phi_hidden_dim_factor}, "
             f"rho_hidden_dim_factor={self.rho_hidden_dim_factor}, "
             f"final_embed_dim_factor={self.final_embed_dim_factor}, "
-            f"use_gradient_checkpointing={self.use_gradient_checkpointing})"
         )
 
 
