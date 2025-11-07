@@ -29,12 +29,13 @@ from giggleml.utils.types import GenomicInterval
 class TrainConfig:
     """Consolidated configuration for the training script."""
 
-    mode: str = "train"
-    epochs: int = 10
-    validation_freq: int = 5
+    mode: str = "train"  # train, val, or test
+    total_steps: int = 10_000
+    validation_freq: int = 100  # Run validation every 100 steps
     seed: int = 42
+    model_size: str = "16k"
     base_data_dir: Path = Path("data")
-    base_model_dir: Path = Path("modelCkpts/cmodel_10272025")
+    base_model_dir: Path = Path("modelCkpts/cmodel_11072025")
     fasta_path: Path = field(init=False)
     rme_beds_path: Path = field(init=False)
     seqpare_dir: Path = field(init=False)
@@ -42,12 +43,13 @@ class TrainConfig:
     checkpoint_dir: Path = field(init=False)
     margin: float = 3.0
     learning_rate: float = 1e-7
+    eps: float = 1e-6
     beta1: float = 0.9
     beta2: float = 0.999
     weight_decay: float = 0.0
 
     batch_size: int = 100
-    pk_ratio: float = 1.0
+    pk_ratio: float = 1.0  # p/k, clusters/(positives per cluster)
     density: int = 30  # This is intervals_per_group
 
     positive_threshold: float = 0.1
@@ -71,15 +73,16 @@ class TrainConfig:
         assert self.mode in ["train", "val", "test"], f"Invalid mode: {self.mode}"
         assert self.batch_size > 0, "batch_size must be positive"
         assert self.pk_ratio > 0, "pk_ratio must be positive"
-        assert self.epochs > 0, "epochs must be positive"
+        assert self.total_steps > 0, "total_steps must be positive"
         assert math.isclose(sum(self.cv_ratios.values()), 1.0), (
             "cv_ratios must sum to 1.0"
         )
 
         # --- Derived Paths ---
         self.fasta_path = self.base_data_dir / "hg/hg19.fa"
-        self.rme_beds_path = self.base_data_dir / "rme_small/beds"
-        self.seqpare_dir = self.base_data_dir / "rme_small/seqpareRanks"
+        rme = self.base_data_dir / "roadmap_epigenomics"
+        self.rme_beds_path = rme / "beds"
+        self.seqpare_dir = rme / "seqpareRanks"
         self.log_dir = self.base_model_dir / "logs"
         self.checkpoint_dir = self.base_model_dir / "checkpoints"
 
@@ -103,7 +106,7 @@ class Finetuner:
         self.train_dataset: RmeSeqpareClusters | None = None
         self.eval_dataset: RmeSeqpareClusters | None = None
 
-        self.start_epoch = 0
+        self.start_step = 0
         self._is_setup = False
 
     def setup(self):
@@ -127,21 +130,21 @@ class Finetuner:
 
         if self.config.mode == "test":
             self.fabric.print("Starting evaluation in test-only mode.")
-            return self._evaluate()
+            return self._evaluate()  # Use step=None for a single test run
 
         assert self.train_dataset, "Training dataset not initialized for train mode"
 
-        self.fabric.print(f"Starting training for {self.config.epochs} epochs.")
+        self.fabric.print(f"Starting training for {self.config.total_steps} steps.")
         train_data_iter = iter(self.train_dataset)
         final_eval_loss: float = -1.0
 
-        for epoch in range(self.start_epoch, self.config.epochs):
-            self._train_step(train_data_iter, epoch)
+        for step in range(self.start_step, self.config.total_steps):
+            self._train_step(train_data_iter, step)
 
-            if (epoch + 1) % self.config.validation_freq == 0:
-                final_eval_loss = self._evaluate(epoch)
-
-            self._save_checkpoint(epoch)
+            if (step + 1) % self.config.validation_freq == 0:
+                final_eval_loss = self._evaluate(step)
+                # Save checkpoint at the same frequency as validation
+                self._save_checkpoint(step)
 
         self.fabric.print("Training finished!")
         return final_eval_loss
@@ -208,16 +211,20 @@ class Finetuner:
         logger = TensorBoardLogger(root_dir=self.config.log_dir)
         world_size = int(os.environ.get("WORLD_SIZE") or 1)
         self.fabric = Fabric(
-            accelerator="auto", strategy="auto", devices=world_size, loggers=[logger]
+            accelerator="auto",
+            strategy="auto",
+            devices=world_size,
+            loggers=[logger],
         )
         self.fabric.launch()
 
     def _setup_components(self):
         assert self.fabric
-        model = CModel("1k")
+        model = CModel(self.config.model_size)
         optimizer = optim.AdamW(
             params=model.hot_parameters(),
             lr=self.config.learning_rate,
+            eps=self.config.eps,
             betas=(self.config.beta1, self.config.beta2),
             weight_decay=self.config.weight_decay,
         )
@@ -252,11 +259,11 @@ class Finetuner:
         # loads fields dynamically based on dict keys
         remaining_state = self.fabric.load(checkpoint_path, state_to_load)
 
-        if "epoch" in remaining_state:
-            self.start_epoch = remaining_state["epoch"] + 1
-            self.fabric.print(f"Resuming from epoch {self.start_epoch}")
+        if "step" in remaining_state:
+            self.start_step = remaining_state["step"] + 1
+            self.fabric.print(f"Resuming from step {self.start_step}")
 
-    def _save_checkpoint(self, epoch: int):
+    def _save_checkpoint(self, step: int):
         assert self.fabric and self.model and self.optimizer
         if self.config.mode != "train":
             return
@@ -266,129 +273,109 @@ class Finetuner:
         state = {
             "model": self.model,
             "optimizer": self.optimizer,
-            "epoch": epoch,
+            "step": step,
             "train_dataset": self.train_dataset,
         }
 
         self.fabric.save(checkpoint_path, state)
-        self.fabric.print(f"Checkpoint saved at epoch {epoch} to {checkpoint_path}")
+        self.fabric.print(f"Checkpoint saved at step {step} to {checkpoint_path}")
 
-    def _train_step(self, train_data_iter: Iterator[MiningBatch], step: int):
-        assert self.fabric and self.model and self.optimizer
-        assert self.triplet_miner and self.loss_fn
+    def _run_batch(
+        self, data_iter: Iterator[MiningBatch], is_training: bool
+    ) -> tuple[float, int]:
+        """
+        Runs a single batch of data through the model.
 
-        self.model.train()
-        self.optimizer.zero_grad()
-
-        # --- Data loading: Rank 0 fetches, then broadcasts to all ---
-        if self.fabric.global_rank == 0:
-            data_batch = next(train_data_iter)
-        else:
-            data_batch = (None, None)  # Placeholder for broadcast
-
-        # Broadcast the (node_intervals, adj_matrix) tuple from rank 0
-        data_batch = self.fabric.broadcast(data_batch, src=0)
-        node_intervals, adj_matrix = data_batch
-        assert node_intervals is not None
-        assert adj_matrix is not None
-        # All ranks now have the identical node_intervals and adj_matrix
-
-        # Call distributed_embed on all ranks with the *full* interval list.
-        # Assumes distributed_embed handles internal sharding and returns
-        # the identical, complete tensor on all ranks.
-        batch_tensor = self.model.distributed_embed(
-            self._batch_with_fasta(node_intervals),
-            self.config.dex_batch_size,
-            self.config.dex_sub_workers,
-        )
-
-        # Move to the correct device
-        batch_tensor = batch_tensor.to(self.fabric.device)
-        adj_matrix = adj_matrix.to(self.fabric.device)
-
-        # Sanity check
-        assert adj_matrix.shape[0] == len(batch_tensor), (
-            f"Adjacency matrix shape ({adj_matrix.shape[0]}) does not match "
-            f"embeddings shape ({batch_tensor.shape[0]})"
-        )
-
-        # --- In-line Mining and Loss Calculation (on flat tensor) ---
-        # All ranks do this simultaneously on identical data
-        anchor_idx, pos_idx, neg_idx = self.triplet_miner.mine(batch_tensor, adj_matrix)
-        assert len(anchor_idx) != 0
-
-        anchor_embeds = batch_tensor[anchor_idx]
-        positive_embeds = batch_tensor[pos_idx]
-        negative_embeds = batch_tensor[neg_idx]
-        loss = self.loss_fn(anchor_embeds, positive_embeds, negative_embeds)
-
-        self.fabric.backward(loss)
-        self.optimizer.step()
-
-        train_loss = loss.item()
-        triplets_found = anchor_idx.numel()
-        self.fabric.print(
-            f"Batch {step} | Rank {self.fabric.global_rank} | "
-            f"Train Loss: {train_loss:.4f} | Triplets: {triplets_found}"
-        )
-        self.fabric.log("train_loss", train_loss, step=step)
-
-    def _evaluate(self, step: int | None = None) -> float:
+        Handles both training (backprop) and evaluation (no_grad, all_reduce).
+        Returns the calculated loss (float) and number of triplets (int).
+        """
         assert self.fabric and self.model and self.triplet_miner and self.loss_fn
-        assert self.eval_dataset
 
-        self.model.eval()
-        eval_data_iter = iter(self.eval_dataset)
+        # 1. Set model mode and zero_grad if training
+        if is_training:
+            assert self.optimizer
+            self.model.train()
+            self.optimizer.zero_grad()
+        else:
+            self.model.eval()
 
-        # --- Data loading: Rank 0 fetches, then broadcasts to all ---
+        # 2. Data loading: Rank 0 fetches, then broadcasts to all
         if self.fabric.global_rank == 0:
-            data_batch = next(eval_data_iter)
+            data_batch = next(data_iter)
         else:
             data_batch = (None, None)  # Placeholder for broadcast
 
-        # Broadcast the (node_intervals, adj_matrix) tuple from rank 0
         data_batch = self.fabric.broadcast(data_batch, src=0)
         node_intervals, adj_matrix = data_batch
-        assert node_intervals is not None
-        assert adj_matrix is not None
-        # All ranks now have the identical node_intervals and eval_adj_matrix
+        assert node_intervals is not None and adj_matrix is not None
 
-        # Call distributed_embed on all ranks with the *full* interval list.
+        # 3. Call distributed_embed
         batch_tensor = self.model.distributed_embed(
             self._batch_with_fasta(node_intervals),
             self.config.dex_batch_size,
             self.config.dex_sub_workers,
         )
 
-        # Move to the correct device
+        # 4. Move to device
         batch_tensor = batch_tensor.to(self.fabric.device)
         adj_matrix = adj_matrix.to(self.fabric.device)
 
-        with torch.no_grad():
+        # 5. Mining and Loss Calculation
+        with torch.set_grad_enabled(is_training):
             anchor_idx, pos_idx, neg_idx = self.triplet_miner.mine(
                 batch_tensor, adj_matrix
             )
-            assert len(anchor_idx) != 0
+
+            # Handle empty batches
+            if anchor_idx.numel() == 0:
+                self.fabric.print("no triplets found in batch, skipping...")
+                return 0, 0
 
             anchor_embeds = batch_tensor[anchor_idx]
             positive_embeds = batch_tensor[pos_idx]
             negative_embeds = batch_tensor[neg_idx]
-            loss_tensor = self.loss_fn(anchor_embeds, positive_embeds, negative_embeds)
+            loss = self.loss_fn(anchor_embeds, positive_embeds, negative_embeds)
 
-        # This reduction is still necessary to get a single, averaged loss
-        # value from across all ranks (which calculated the same loss,
-        # but reduction is good practice and correct).
-        avg_loss_tensor: Tensor = cast(
-            Tensor, self.fabric.all_reduce(loss_tensor, reduce_op="mean")
-        )
-        loss = avg_loss_tensor.item()
+        # 6. Backward pass / Reduction
+        if is_training:
+            assert self.optimizer
+            self.fabric.backward(loss)
+            self.optimizer.step()
+            final_loss = loss.item()
+        else:
+            # For eval, average the loss across all ranks
+            avg_loss_tensor = cast(
+                Tensor, self.fabric.all_reduce(loss, reduce_op="mean")
+            )
+            final_loss = avg_loss_tensor.item()
+
+        return final_loss, anchor_idx.numel()
+
+    def _train_step(self, train_data_iter: Iterator[MiningBatch], step: int):
+        assert self.fabric
+        train_loss, triplets_found = self._run_batch(train_data_iter, is_training=True)
+
+        if triplets_found > 0:
+            self.fabric.print(
+                f"Step {step} | Rank {self.fabric.global_rank} | "
+                f"Train Loss: {train_loss:.4f} | Triplets: {triplets_found}"
+            )
+            self.fabric.log("train_loss", train_loss, step=step)
+            self.fabric.log("triplets_found", triplets_found, step=step)
+
+    def _evaluate(self, step: int | None = None) -> float:
+        assert self.fabric
+        assert self.eval_dataset
+        eval_data_iter = iter(self.eval_dataset)
+
+        loss, _ = self._run_batch(eval_data_iter, is_training=False)
 
         # --- Logging ---
         eval_split_name = "Test" if self.config.mode == "test" else "Validation"
         log_prefix = "test" if self.config.mode == "test" else "val"
 
         if step is not None:
-            self.fabric.print(f"Batch {step} | {eval_split_name} Loss: {loss:.4f}")
+            self.fabric.print(f"Step {step} | {eval_split_name} Loss: {loss:.4f}")
             self.fabric.log(f"{log_prefix}_loss", loss, step=step)
         else:
             self.fabric.print(f"{eval_split_name} Loss: {loss:.4f}")

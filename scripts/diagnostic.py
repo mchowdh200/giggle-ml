@@ -1,24 +1,31 @@
-from pathlib import Path
+import torch
 
-from giggleml.train.rme_clusters_dataset import RmeSeqpareClusters
-from giggleml.train.seqpare_db import SeqpareDB
+from giggleml.train.train_orchestrator import Finetuner, TrainConfig
+from giggleml.utils.torch_utils import rprint
 
 
 def main():
-    data_path = Path("data", "roadmap_epigenomics")
-    sdb = SeqpareDB(data_path / "seqpareRanks")
-    threshold = 0.96
-    dset = RmeSeqpareClusters(data_path / "beds", sdb, 1, 0, threshold)
+    conf = TrainConfig(
+        "val",
+        3,
+        3,
+        model_size="16k",
+        margin=3,
+        learning_rate=1e-7,
+        batch_size=16,
+        pk_ratio=1.5,
+        positive_threshold=0.96,
+        dex_batch_size=32,
+        dex_sub_workers=2,
+    )
 
-    # print(
-    #     [int(sum(sdb.fetch_mask(name, threshold))) for name in dset.allowed_rme_names]
-    # )
+    torch.autograd.set_detect_anomaly(True)
+    ft = Finetuner(conf)
+    ft.setup()
+    loss = ft.run()
 
-    dset_iter = iter(dset)
-
-    for i in range(1):
-        item = next(dset_iter)
-        print("good")
+    rprint()
+    rprint("final validation loss:", loss)
 
 
 if __name__ == "__main__":
