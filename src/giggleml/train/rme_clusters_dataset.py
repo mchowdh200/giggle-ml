@@ -124,7 +124,7 @@ class RmeSeqpareClusters(IterableDataset):
             # since _sample_neighbors can self-sample anchors, this is all sampled labels
             nodes = list(
                 itertools.chain.from_iterable(
-                    [self._sample_neighbors(anchor) for anchor in anchors]
+                    [self._sample_cluster(anchor) for anchor in anchors]
                 )
             )
             node_labels = [self.sdb.idx_to_label(idx) for idx in nodes]
@@ -144,7 +144,7 @@ class RmeSeqpareClusters(IterableDataset):
             # --- End Modified Lines ---
 
     @as_list
-    def _sample_neighbors(self, anchor: str) -> Iterator[int]:
+    def _sample_cluster(self, anchor: str) -> Iterator[int]:
         positive_mask = (
             self.sdb.fetch_mask(anchor, self.positive_threshold) & self._allowed_mask
         )
@@ -157,7 +157,11 @@ class RmeSeqpareClusters(IterableDataset):
                 f"Try lowering positive_threshold or expanding allowed_rme_names."
             )
 
-        for _ in range(self.groups_per_cluster):
+        # in case all neighbors are mutually dissimilar, this guarantees
+        # they have at least one similar item
+        yield self.sdb.label_to_idx(anchor)
+
+        for _ in range(self.groups_per_cluster - 1):
             yield self._rng.choice(positive_indices)
 
     def _sample_group(self, anchor: str) -> list[GenomicInterval]:
