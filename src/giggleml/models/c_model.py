@@ -44,47 +44,40 @@ from giggleml.utils.torch_utils import (
 
 @final
 class CModel(nn.Module):
-    """
-    Note that this model takes in sets of sequence sets as input batches.
-    The forward method, related procedures, including tokenize, have been
-    designed to operate on single items (sequence set)-- not batches.
-    This is due to its use in the parallel embedding pipeline which expects
-    a flat stream of items, not non-homogeneous sets.
-    """
-
     def __init__(
         self,
         size: str = "1k",
-        phi_hidden_dim_factor: int = 4,
-        rho_hidden_dim_factor: int = 2,
-        final_embed_dim_factor: int = 1,
+        phi_latent: int = 512,
+        rho_latent: int = 128,
+        phi_depth: int = 2,
+        rho_depth: int = 2,
     ):
         super().__init__()
-
         self.size = size
         self.hyena_dna = HyenaDNA(size)
-        self.phi_hidden_dim_factor = phi_hidden_dim_factor  # for __repr__
-        self.rho_hidden_dim_factor = rho_hidden_dim_factor  # for __repr__
-        self.final_embed_dim_factor = final_embed_dim_factor  # for __repr__
+        self.phi_latent: int = phi_latent
+        self.rho_latent: int = rho_latent
+        self.phi_depth: int = phi_depth
+        self.rho_depth: int = rho_depth
 
-        hyena_embed_dim = self.hyena_dna.embed_dim
-        phi_hidden_dim = phi_hidden_dim_factor * hyena_embed_dim
-        rho_hidden_dim = rho_hidden_dim_factor * hyena_embed_dim
-        self.final_embed_dim = final_embed_dim_factor * hyena_embed_dim
+        hdna_latent = self.hyena_dna.embed_dim
+        self.final_embed_dim = rho_latent
 
-        self.phi = nn.Sequential(
-            nn.Linear(hyena_embed_dim, phi_hidden_dim),
-            nn.Tanh(),
-            nn.Linear(phi_hidden_dim, phi_hidden_dim),
-            nn.Tanh(),
-            nn.Linear(phi_hidden_dim, rho_hidden_dim),
-        )
+        def block(x: int, z: int, depth: int):
+            assert depth > 0
+            y = round((x + z) / 2)
 
-        self.rho = nn.Sequential(
-            nn.Linear(rho_hidden_dim, rho_hidden_dim),
-            nn.Tanh(),
-            nn.Linear(rho_hidden_dim, self.final_embed_dim),
-        )
+            yield nn.Linear(x, y)
+            yield nn.Tanh()
+
+            for _ in range(depth - 1):
+                yield nn.Linear(y, y)
+                yield nn.Tanh()
+
+            yield nn.Linear(y, z)
+
+        self.phi = nn.Sequential(*block(hdna_latent, phi_latent, phi_depth))
+        self.rho = nn.Sequential(*block(phi_latent, rho_latent, rho_depth))
 
         # align with hyena dna dtype
         self.to(dtype=self.hyena_dna.embed_dtype)
@@ -233,10 +226,11 @@ class CModel(nn.Module):
     @override
     def __repr__(self) -> str:
         return (
-            f"CModel(size={self.hyena_dna.size_type}, "
-            f"phi_hidden_dim_factor={self.phi_hidden_dim_factor}, "
-            f"rho_hidden_dim_factor={self.rho_hidden_dim_factor}, "
-            f"final_embed_dim_factor={self.final_embed_dim_factor}, "
+            f"CModel(size={self.size}, "
+            f"phi_latent={self.phi_latent}, "
+            f"rho_latent={self.rho_latent}, "
+            f"phi_depth={self.phi_depth}, "
+            f"rho_depth={self.rho_depth})"
         )
 
 
