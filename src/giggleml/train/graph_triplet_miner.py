@@ -1,5 +1,3 @@
-# graph_triplet_miner.py
-
 import torch
 import torch.distributed as dist
 
@@ -64,88 +62,47 @@ def _euclidean_distance_matrix(
 
 class GraphTripletMiner:
     """
-    Mines hard triplets from embeddings using a graph adjacency matrix.
+    Mines hard or semi-hard triplets from embeddings using a graph adjacency matrix.
 
     Design notes:
     - This miner assumes *every* rank has an identical copy of `embeddings`
       and `adjacency_matrix`. Each rank mines triplets for a non-overlapping
       slice of anchors. No all_gather of triplets is performed by default.
-    - `margin` is interpreted in the distance space of the chosen `distance_metric`.
-        * If distance_metric == 'euclidean' (default), this miner uses squared L2
-          distances and the margin must be in squared-distance units.
-        * If distance_metric == 'cosine', margin is in cosine-distance units
-          (cosine-distance = 1 - cosine_similarity, in range ~[0, 2]).
-    - If you want ordinary (not squared) L2 distances, adjust the code and
-      margin interpretation accordingly (we prefer squared distances for speed).
+    - `margin` (loss margin) and `mining_margin` are interpreted in the
+      distance space of the chosen `distance_metric` (squared L2 units).
     """
 
     def __init__(
         self,
         margin: float = 1.0,
-        distance_metric: str = "euclidean",
         safe_fp_compute: bool = True,
+        mining_strategy: str = "hard",
+        mining_margin: float | None = None,
     ):
         """
         Args:
-            margin (float): Triplet margin in the chosen distance space.
-            distance_metric (str): 'euclidean' (squared L2) or 'cosine'.
+            margin (float): Triplet margin for the loss calculation.
             safe_fp_compute (bool): Compute dot-products/norms in float32 for
                 numeric stability when inputs are lower precision (fp16).
+            mining_strategy (str): 'hard' or 'semi-hard'.
+                - 'hard': Selects the hardest negative (min d_an).
+                - 'semi-hard': Selects the hardest negative *from the
+                  semi-hard region* (d_ap < d_an < d_ap + mining_margin).
+            mining_margin (Optional[float]): Defines the upper bound for
+                semi-hard mining. If None, defaults to `margin`.
         """
         self.margin = margin
-        self.distance_metric = distance_metric.lower()
         self.safe_fp_compute = safe_fp_compute
-
-        if self.distance_metric == "euclidean":
-            # Note: returns squared distances
-            self.pdist_func = lambda x, y: _euclidean_distance_matrix(
-                x, y, safe_compute=self.safe_fp_compute
-            )
-        elif self.distance_metric == "cosine":
-            self.pdist_func = self._cosine_distance_matrix
-        else:
-            raise ValueError(f"Unknown distance_metric: {distance_metric}")
-
-    def _cosine_distance_matrix(
-        self, embeds_x: torch.Tensor, embeds_y: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Computes pairwise cosine distance: 1.0 - cosine_similarity.
-
-        Returns:
-            Tensor [len(embeds_x), len(embeds_y)] with values typically in [0, 2].
-        Notes:
-            - We compute norms in float32 if inputs are lower-precision to improve stability.
-            - The returned distance is **not** squared; it is 1 - cosine_similarity.
-        """
-        # cast to float for stable norms if requested
-        compute_in_float = (
-            self.safe_fp_compute
-            and torch.is_floating_point(embeds_x)
-            and embeds_x.dtype != torch.float32
+        self.pdist_func = lambda x, y: _euclidean_distance_matrix(
+            x, y, safe_compute=self.safe_fp_compute
         )
 
-        if compute_in_float:
-            x = embeds_x.float()
-            y = embeds_y.float()
-        else:
-            x = embeds_x
-            y = embeds_y
+        if mining_strategy not in ("hard", "semi-hard"):
+            raise ValueError(f"Unknown mining_strategy: {mining_strategy}")
+        self.mining_strategy = mining_strategy
 
-        # normalize
-        x_norm = torch.norm(x, p=2, dim=1, keepdim=True).clamp_min(1e-12)
-        y_norm = torch.norm(y, p=2, dim=1, keepdim=True).clamp_min(1e-12)
-        normalized_x = x / x_norm
-        normalized_y = y / y_norm
-
-        sim_matrix = torch.matmul(normalized_x, normalized_y.T)
-        sim_matrix = torch.clamp(sim_matrix, -1.0, 1.0)
-
-        dist = 1.0 - sim_matrix  # cosine distance
-        if compute_in_float and embeds_x.dtype != torch.float32:
-            dist = dist.to(embeds_x.dtype)
-
-        return dist
+        # If no specific mining_margin is given, default it to the loss margin
+        self.mining_margin = mining_margin if mining_margin is not None else self.margin
 
     def _get_local_slice(
         self, num_nodes: int, world_size: int, rank: int
@@ -164,7 +121,7 @@ class GraphTripletMiner:
         self, embeddings: torch.Tensor, adjacency_matrix: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Mine hard triplets for anchors in this rank's slice.
+        Mine hard or semi-hard triplets for anchors in this rank's slice.
 
         Args:
             embeddings (torch.Tensor): [num_nodes, embed_dim], identical across ranks.
@@ -237,16 +194,52 @@ class GraphTripletMiner:
             empty = torch.tensor([], dtype=torch.long, device=device)
             return empty, empty, empty
 
-        # 7) find hardest positives and negatives for each anchor (in our slice)
-        # For positives: we want the **largest** distance among positives (hardest positive)
+        # 7) find hardest positives and negatives (based on mining strategy)
+
+        # --- 7a) Find hardest positives (anchor-positive distance) ---
+        # We always need the hardest positive.
         pos_dists = torch.where(local_valid_pos_mask, local_dist_matrix, -torch.inf)
         hard_pos_dist, hard_pos_idx = torch.max(pos_dists, dim=1)
 
-        # For negatives: we want the **smallest** distance among negatives (hardest negative)
-        neg_dists = torch.where(local_valid_neg_mask, local_dist_matrix, torch.inf)
+        # --- 7b) Find negatives (anchor-negative distance) ---
+        if self.mining_strategy == "hard":
+            # Original 'hard' mining: find the smallest distance among all valid negatives
+            neg_dists = torch.where(local_valid_neg_mask, local_dist_matrix, torch.inf)
+
+        elif self.mining_strategy == "semi-hard":
+            # 'Semi-hard' mining: find smallest distance d_an such that:
+            #   d_ap < d_an < d_ap + self.mining_margin
+
+            # Need d_ap broadcastable to [local_N, N]
+            d_ap_broadcast = hard_pos_dist.unsqueeze(1)
+
+            # Mask for negatives *outside* the positive (d_an > d_ap)
+            mask_gt_pos = local_dist_matrix > d_ap_broadcast
+
+            # Mask for negatives *inside* the mining margin (d_an < d_ap + mining_margin)
+            mask_lt_margin = local_dist_matrix < (d_ap_broadcast + self.mining_margin)
+
+            # Combine all masks
+            semi_hard_candidate_mask = (
+                local_valid_neg_mask & mask_gt_pos & mask_lt_margin
+            )
+
+            # Find the hardest negative *within this semi-hard region*
+            neg_dists = torch.where(
+                semi_hard_candidate_mask, local_dist_matrix, torch.inf
+            )
+
+        else:
+            # This should be caught in __init__, but as a safeguard:
+            raise ValueError(
+                f"Internal error: Unknown mining_strategy: {self.mining_strategy}"
+            )
+
+        # Find the hardest negative based on the logic above
         hard_neg_dist, hard_neg_idx = torch.min(neg_dists, dim=1)
 
         # 8) filter to valid anchors
+        # (This step is unchanged)
         anchor_idx_all_local = torch.arange(local_num_nodes, device=device)
         anchor_idx_valid = anchor_idx_all_local[valid_anchor_mask_local]
         pos_idx_valid = hard_pos_idx[valid_anchor_mask_local]  # global indices (0..N-1)
@@ -255,8 +248,13 @@ class GraphTripletMiner:
         d_ap = hard_pos_dist[valid_anchor_mask_local]
         d_an = hard_neg_dist[valid_anchor_mask_local]
 
+        # Note: If no negative was found for an anchor (e.g., no semi-hard
+        # negatives existed), d_an will be torch.inf here.
+
         # 9) margin violation check: d_ap - d_an + margin > 0
-        # Note: margin must be in same distance space as self.distance_metric.
+        # This check uses the *loss margin* (self.margin)
+        # If d_an is inf, triplet_violation will be -inf, which is > 0 == False.
+        # This correctly filters out anchors where no valid negative was found.
         triplet_violation = d_ap - d_an + self.margin
         violating_mask_local = triplet_violation > 0
 

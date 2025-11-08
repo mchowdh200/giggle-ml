@@ -135,13 +135,11 @@ class RmeSeqpareClusters(IterableDataset):
             ]
             interval_samples = [self._sample_group(label) for label in node_labels]
 
-            # --- Modified Lines ---
             # 1. Stack the list of numpy arrays into one contiguous numpy array
             adj_matrix_np = np.array(adjacency_matrix_list)
             # 2. Convert the numpy array to a torch tensor
             adj_matrix_tensor = torch.from_numpy(adj_matrix_np)
             yield MiningBatch(interval_samples, adj_matrix_tensor)
-            # --- End Modified Lines ---
 
     @as_list
     def _sample_cluster(self, anchor: str) -> Iterator[int]:

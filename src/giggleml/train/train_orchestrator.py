@@ -41,6 +41,8 @@ class TrainConfig:
     seqpare_dir: Path = field(init=False)
     checkpoint_dir: Path = field(init=False)
     margin: float = 3.0
+    mining_margin: float | None = None
+    mining_strategy: str = "semi-hard"
     learning_rate: float = 1e-7
     eps: float = 1e-6
     beta1: float = 0.9
@@ -234,7 +236,9 @@ class Finetuner:
 
         self.loss_fn = TripletMarginLoss(margin=self.config.margin, reduction="mean")
         self.triplet_miner = GraphTripletMiner(
-            margin=self.config.margin, distance_metric="euclidean"
+            margin=self.config.margin,
+            mining_strategy=self.config.mining_strategy,
+            mining_margin=self.config.mining_margin,
         )
 
     def _load_checkpoint(self):
@@ -325,30 +329,52 @@ class Finetuner:
                 batch_tensor, adj_matrix
             )
 
+            # 2. All-reduce to get the TOTAL triplet count across all ranks
+            total_active_triplets = int(
+                cast(
+                    Tensor,
+                    self.fabric.all_reduce(
+                        torch.tensor(
+                            anchor_idx.numel(),
+                            device=self.fabric.device,
+                            dtype=torch.long,
+                        ),
+                        reduce_op="sum",
+                    ),
+                ).item()
+            )
+
             # Handle empty batches
-            if anchor_idx.numel() == 0:
+            if total_active_triplets == 0:
                 self.fabric.print("no triplets found in batch, skipping...")
                 return 0, 0
 
-            anchor_embeds = batch_tensor[anchor_idx]
-            positive_embeds = batch_tensor[pos_idx]
-            negative_embeds = batch_tensor[neg_idx]
-            loss = self.loss_fn(anchor_embeds, positive_embeds, negative_embeds)
+            if anchor_idx.numel() > 0:
+                anchor_embeds = batch_tensor[anchor_idx]
+                positive_embeds = batch_tensor[pos_idx]
+                negative_embeds = batch_tensor[neg_idx]
+                loss = self.loss_fn(anchor_embeds, positive_embeds, negative_embeds)
+            else:
+                # This rank has 0 triplets, but others don't.
+                # Create a 0.0 loss tensor that's compatible with autograd.
+
+                # This is a hack to ensure autograd traverses the computational graph
+                # even in the zero loss case. Necessary, because distributed calls
+                # during the backward call (such as with custom autograd functions)
+                # must always be called on all ranks.
+                loss = batch_tensor.sum() * 0.0
 
         # 6. Backward pass / Reduction
         if is_training:
             assert self.optimizer
             self.fabric.backward(loss)
             self.optimizer.step()
-            final_loss = loss.item()
-        else:
-            # For eval, average the loss across all ranks
-            avg_loss_tensor = cast(
-                Tensor, self.fabric.all_reduce(loss, reduce_op="mean")
-            )
-            final_loss = avg_loss_tensor.item()
 
-        return final_loss, anchor_idx.numel()
+        # average the loss across all ranks
+        avg_loss_tensor = cast(Tensor, self.fabric.all_reduce(loss, reduce_op="mean"))
+        final_loss = avg_loss_tensor.item()
+
+        return final_loss, total_active_triplets
 
     def _train_step(self, train_data_iter: Iterator[MiningBatch], step: int):
         assert self.fabric
