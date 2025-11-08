@@ -14,7 +14,7 @@ from giggleml.embed_gen.multi_zarr_writer import MultiZarrWriter
 from giggleml.iter_utils.set_flat_iter import SetFlatIter
 from giggleml.iter_utils.zipper import Zipper
 from giggleml.models.genomic_model import GenomicModel
-from giggleml.utils.time_this import progress_logger
+from giggleml.utils.print_utils import progress_logger
 from giggleml.utils.torch_utils import get_rank, get_world_size
 from giggleml.utils.types import GenomicInterval, PathLike, lazy
 

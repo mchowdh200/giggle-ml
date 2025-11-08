@@ -4,9 +4,8 @@ import time
 from contextlib import contextmanager
 
 
-# INFO: provided by gemini
 @contextmanager
-def indent_output(indent=2):
+def indent_prints(indent=2):
     """
     A context manager to indent all printed output within the block.
     """
@@ -52,7 +51,7 @@ def time_this(label: str = ""):
             label = f"{label}: "
             print(f">>> {label}...")
 
-        with indent_output(3):
+        with indent_prints(3):
             yield
     finally:
         end_time = time.perf_counter()
