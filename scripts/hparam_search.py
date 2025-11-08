@@ -1,165 +1,189 @@
-#!/usr/bin/env python3
-"""
-Hyperparameter search script for HyenaDNA fine-tuning.
-"""
-
+import dataclasses
+import os
+from collections.abc import Iterable
+from dataclasses import replace
+from functools import cached_property
 from pathlib import Path
+from time import time
 from typing import Any
 
-from giggleml.train.hparam_config import (
-    HyperparameterConfig,
-    HyperparameterSearchResults,
-    ValidationResult,
-)
+import numpy as np
+import torch.distributed as dist
+
+from giggleml.models.c_model import CModel
 from giggleml.train.train_orchestrator import Finetuner, TrainConfig
-from giggleml.utils.torch_utils import get_rank
+from giggleml.utils import path_pickle
+from giggleml.utils.print_utils import indent_prints
+from giggleml.utils.torch_utils import (
+    get_rank,
+    get_world_size,
+    launch_fabric,
+    rprint,
+    rprint0,
+)
 
 
-def print0(*args: Any, **kwargs: Any) -> None:
-    if get_rank() != 0:
-        return
-    print(*args, **kwargs)
+class Cache:
+    def __init__(self, conf: TrainConfig) -> None:
+        self.path: Path = Path("modelCkpts", "hparam_search.pickle")
+        self.conf: TrainConfig = conf
 
+    @cached_property
+    def cache(self):
+        # INFO: output location
 
-def run_training_with_hyperparams(
-    hyperparams: dict[str, Any], results_dir: Path
-) -> float:
-    """
-    Run training on validation set with given hyperparameters for hyperparameter optimization.
+        if os.path.isfile(self.path):
+            return path_pickle.unpickle(self.path)
+        else:
+            return dict()
 
-    Args:
-        hyperparams: Dictionary of hyperparameters
-        results_dir: Directory to save results
+    def do(self, diffs: Iterable[dict[str, Any]]):
+        def do_one(diff: dict[str, Any]):
+            conf = replace(self.conf, **diff)
+            conf_dict = dataclasses.asdict(conf)
+            conf_dict["model"] = repr(conf.model)
+            conf_dict["cv_ratios"] = frozenset(conf_dict["cv_ratios"].items())
+            conf_frozen = frozenset(conf_dict.items())
 
-    Returns:
-        val_loss
-    """
-    try:
-        print0(f"Running hyperparameter optimization with hyperparams: {hyperparams}")
+            if conf_frozen not in self.cache:
+                with indent_prints(indent=4):
+                    t0 = time()
+                    ft = Finetuner(conf)
+                    ft.setup()
+                    losses, active_triplets = zip(*ft.run())
+                    t1 = time()
+                    dist.barrier()
+                    rprint0()
 
-        # Create TrainConfig with hyperparameters
-        config = TrainConfig(
-            mode="val",
-            learning_rate=hyperparams["learning_rate"],
-            margin=hyperparams["margin"],
-            batch_size=hyperparams["batch_size"],
-            pk_ratio=hyperparams["pk_ratio"],
-            density=hyperparams["density"],
-            epochs=hyperparams["epochs"],
-            beta1=hyperparams["beta1"],
-            beta2=hyperparams["beta2"],
-            weight_decay=hyperparams["weight_decay"],
-            validation_freq=1,  # Validate every epoch during search
-            seed=hyperparams.get("seed", 42),
-            base_model_dir=results_dir,
-        )
+                if get_rank() == 0:
+                    percent_active_triplets = (
+                        np.array(active_triplets) / conf.corrected_batch_size
+                    ).tolist()
 
-        # Create and run finetuner
-        finetuner = Finetuner(config)
-        val_loss = finetuner.run()
-        return val_loss
+                    self.cache[conf_frozen] = {
+                        "percent_active_triplets": percent_active_triplets,
+                        "active_triplets": active_triplets,
+                        "losses": losses,
+                        "time": t1 - t0,
+                        "world_size": get_world_size(),
+                        "config": conf_frozen,
+                    }
+                else:
+                    # only rank zero will save
+                    self.cache[conf_frozen] = None
 
-    except Exception as e:
-        print(f"Hyperparameter optimization failed with error: {e}")
-        # Re-raise the exception to fail explicitly
-        raise
+            if get_rank() == 0:
+                result = self.cache[conf_frozen].copy()
+                del result["config"]
+                rprint(diff)
+                rprint(result)
+
+        return [do_one(diff) for diff in diffs]
+
+    def save(self):
+        if get_rank() == 0:
+            path_pickle.pickle(self.path, self.cache)
 
 
 def main():
-    # Parse command line arguments
-    import argparse
+    launch_fabric()
 
-    parser = argparse.ArgumentParser(description="Hyperparameter search for HyenaDNA")
-    parser.add_argument("--resume", action="store_true", help="Resume partial runs")
-    args = parser.parse_args()
+    conf = TrainConfig(
+        "val",
+        total_steps=3,
+        validation_freq=1,
+        model=CModel("16k"),
+        margin=3,
+        learning_rate=1e-7,
+        pk_ratio=1.5,
+        positive_threshold=0.96,
+        batch_size=128,
+        density=32,
+        dex_batch_size=85,
+        dex_sub_workers=0,
+    )
 
-    # Setup paths
-    results_dir = Path("models/hdna_seqpare_hparam_search")
-    results_dir.mkdir(parents=True, exist_ok=True)
-    results_path = results_dir / "search_results.json"
+    cache = Cache(conf)
+    do = cache.do
 
-    # Initialize hyperparameter search
-    config = HyperparameterConfig.default()
-    print0("Using default hyperparameter search space")
+    try:
+        # rprint0("\n model shape")
+        # do(
+        #     {
+        #         "batch_size": 32,
+        #         "model": CModel("16k", *args),
+        #     }
+        #     for args in [
+        #         # quite large
+        #         (1024, 128, 2, 2),
+        #         (1024, 128, 1, 2),
+        #         (1024, 128, 2, 1),
+        #         (1024, 128, 1, 1),
+        #         # large
+        #         (512, 128, 2, 2),
+        #         (512, 128, 1, 2),
+        #         (512, 128, 2, 1),
+        #         (512, 128, 1, 1),
+        #         # medium
+        #         (256, 128, 2, 2),
+        #         (256, 128, 1, 2),
+        #         (256, 128, 2, 1),
+        #         (256, 128, 1, 1),
+        #         # small
+        #         (128, 128, 2, 2),
+        #         (128, 128, 1, 2),
+        #         (128, 128, 2, 1),
+        #         (128, 128, 1, 1),
+        #     ]
+        # )
 
-    search_results = HyperparameterSearchResults(results_path)
+        # rprint0("\n LR + model shape")
+        # do(
+        #     {
+        #         "batch_size": 64,
+        #         "total_steps": 4,
+        #         "learning_rate": lr,
+        #         "model": CModel("16k", *args),
+        #     }
+        #     for lr in [1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3]
+        #     for args in [
+        #         # quite large
+        #         (1024, 128, 2, 2),
+        #         (1024, 128, 1, 2),
+        #         (1024, 128, 2, 1),
+        #         # large
+        #         (512, 128, 2, 2),
+        #         (512, 128, 1, 2),
+        #         (512, 128, 2, 1),
+        #     ]
+        # )
 
-    combinations = config.grid_search_combinations()
-    print0(f"Starting hyperparameter search with {len(combinations)} combinations")
-    print0(f"Results will be saved to: {results_path}")
-
-    # Get already completed combinations to avoid re-running
-    print0(f"Found {len(search_results.results)} existing results")
-
-    # Handle resumption of partial runs
-    if args.resume:
-        partial_results = search_results.get_partial_results()
-        print0(f"Found {len(partial_results)} partial results that can be resumed")
-
-    # Run grid search
-    for i, hyperparams in enumerate(combinations):
-        # Add seed to hyperparams for reproducibility
-        hyperparams["seed"] = 42
-
-        # Check if already completed
-        if search_results.is_hyperparams_completed(hyperparams):
-            print0(
-                f"Skipping combination {i + 1}/{len(combinations)} (already completed)"
-            )
-            continue
-
-        print0(f"\n=== Combination {i + 1}/{len(combinations)} ===")
-        print0(f"Hyperparameters: {hyperparams}")
-
-        # Note: Resumption is now handled automatically by the new API through checkpoint loading
-        if args.resume:
-            # Check if there are partial results for logging purposes
-            for result in search_results.results:
-                if (
-                    result.hyperparams == hyperparams
-                    and result.completed_epoch < result.epoch
-                ):
-                    print0("Found partial result that may be resumed automatically")
-                    break
-
-        try:
-            val_loss = run_training_with_hyperparams(hyperparams, results_dir)
-
-            # Save result (train_loss set to 0.0 since we're only evaluating)
-            result = ValidationResult(
-                hyperparams=hyperparams,
-                val_loss=val_loss,
-                train_loss=0.0,  # Not applicable for evaluation-only mode
-                epoch=hyperparams["epochs"],
-                completed_epoch=hyperparams["epochs"],  # Mark as fully completed
-            )
-
-            search_results.add_result(result)
-            print0(f"Result: Val Loss={val_loss:.4f}")
-
-        except Exception as e:
-            print(f"Error running combination {hyperparams}: {e}")
-            raise
-
-    if get_rank() == 0:
-        # Print best results
-        best = search_results.get_best_result()
-        if best:
-            print0("\n=== BEST RESULT ===")
-            print0(f"Hyperparameters: {best.hyperparams}")
-            print0(f"Validation Loss: {best.val_loss:.4f}")
-
-            # Save best hyperparameters separately for easy access
-            best_path = results_dir / "best_hyperparams.json"
-            import json
-
-            with open(best_path, "w") as f:
-                json.dump(best.hyperparams, f, indent=2)
-            print0(f"Best hyperparameters saved to: {best_path}")
-        else:
-            print0("No successful results found")
-
-    print0(f"\nHyperparameter search completed. Full results in: {results_path}")
+        rprint0("\n margin, batch, pkr")
+        do(
+            {
+                "batch_size": 64,
+                "margin": margin,
+                "pk_ratio": pk_ratio,
+                "model": CModel("16k", 512, 128, 1, 2),
+            }
+            for margin in [0.5, 1, 2, 3, 4]
+            for pk_ratio in [0.25, 0.5, 16, 32]
+        )
+        # do(
+        #     {
+        #         "batch_size": batch_size,
+        #         "margin": margin,
+        #         "pk_ratio": pk_ratio,
+        #         "total_steps": 3,
+        #         "model": CModel("16k", 512, 128, 1, 2),
+        #     }
+        #     for batch_size in [32, 64, 128, 256]
+        #     for margin in [0.5, 1, 2, 3, 4]
+        #     for pk_ratio in [0.25, 0.5, 16, 32, 64, 128, 256]
+        #     if pk_ratio < batch_size
+        # )
+    finally:
+        cache.save()
 
 
 if __name__ == "__main__":

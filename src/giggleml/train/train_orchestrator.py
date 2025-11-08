@@ -4,7 +4,6 @@ Refactored for a clear, type-safe, two-phase initialization lifecycle.
 """
 
 import math
-import os
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +11,6 @@ from typing import Any, cast
 
 import torch
 from lightning_fabric import Fabric
-from lightning_fabric.loggers.tensorboard import TensorBoardLogger
 from torch import Tensor, optim
 from torch.nn.modules.loss import TripletMarginLoss
 
@@ -22,7 +20,9 @@ from giggleml.train.graph_triplet_miner import GraphTripletMiner
 from giggleml.train.rme_clusters_dataset import MiningBatch, RmeSeqpareClusters
 from giggleml.train.seqpare_db import SeqpareDB
 from giggleml.utils.cv_splits import create_cv_splits
+from giggleml.utils.torch_utils import launch_fabric
 from giggleml.utils.types import GenomicInterval
+from giggleml.utils.utils.collection_utils import as_list
 
 
 @dataclass
@@ -33,13 +33,12 @@ class TrainConfig:
     total_steps: int = 200
     validation_freq: int = 10
     seed: int = 42
-    model_size: str = "16k"
+    model: CModel = CModel("16k")
     base_data_dir: Path = Path("data")
     base_model_dir: Path = Path("modelCkpts/cmodel_11072025")
     fasta_path: Path = field(init=False)
     rme_beds_path: Path = field(init=False)
     seqpare_dir: Path = field(init=False)
-    log_dir: Path = field(init=False)
     checkpoint_dir: Path = field(init=False)
     margin: float = 3.0
     learning_rate: float = 1e-7
@@ -62,9 +61,22 @@ class TrainConfig:
 
     clusters_per_batch: int = field(init=False)
     cluster_size: int = field(init=False)
+    corrected_batch_size: int = field(init=False)
 
     dex_batch_size: int = 64
     dex_sub_workers: int = 0
+
+    @staticmethod
+    def calculate_graph_args(
+        target_batch_size: int, pk_ratio: float
+    ) -> tuple[int, int, int]:
+        # where batch size is approximately p*k
+        cluster_size_f = math.sqrt(target_batch_size / pk_ratio)  # k
+        clusters_per_batch_f = cluster_size_f * pk_ratio  # p
+        clusters_per_batch = max(1, round(clusters_per_batch_f))
+        cluster_size = max(1, round(cluster_size_f))
+        corrected_batch_size = clusters_per_batch * cluster_size
+        return corrected_batch_size, clusters_per_batch, cluster_size
 
     def __post_init__(self):
         """Set derived paths and validate parameters after initialization."""
@@ -82,14 +94,11 @@ class TrainConfig:
         rme = self.base_data_dir / "roadmap_epigenomics"
         self.rme_beds_path = rme / "beds"
         self.seqpare_dir = rme / "seqpareRanks"
-        self.log_dir = self.base_model_dir / "logs"
         self.checkpoint_dir = self.base_model_dir / "checkpoints"
 
-        # where batch size is approximately p*k
-        cluster_size_f = math.sqrt(self.batch_size / self.pk_ratio)  # k
-        clusters_per_batch_f = cluster_size_f * self.pk_ratio  # p
-        self.clusters_per_batch = max(1, round(clusters_per_batch_f))
-        self.cluster_size = max(1, round(cluster_size_f))
+        self.corrected_batch_size, self.clusters_per_batch, self.cluster_size = (
+            TrainConfig.calculate_graph_args(self.batch_size, self.pk_ratio)
+        )
 
 
 class Finetuner:
@@ -118,7 +127,8 @@ class Finetuner:
         self._load_checkpoint()
         self._is_setup = True
 
-    def run(self) -> float:
+    @as_list
+    def run(self) -> Iterator[tuple[float, int]]:
         self.setup()
         assert self.fabric, "Fabric not initialized"
         assert self.model, "Model not initialized"
@@ -135,37 +145,38 @@ class Finetuner:
 
         self.fabric.print(f"Starting training for {self.config.total_steps} steps.")
         train_data_iter = iter(self.train_dataset)
-        final_eval_loss: float = -1.0
 
         for step in range(self.start_step, self.config.total_steps):
             self._train_step(train_data_iter, step)
 
             if (step + 1) % self.config.validation_freq == 0:
-                final_eval_loss = self._evaluate(step)
+                yield self._evaluate(step)
                 # Save checkpoint at the same frequency as validation
                 self._save_checkpoint(step)
 
         self.fabric.print("Training finished!")
-        return final_eval_loss
 
     def _create_dataset(
         self,
         seqpare_db: SeqpareDB,
         allowed_rme_names: list[str],
-        clusters_amnt: int,
+        target_batch_size: int,
         seed: int,
     ) -> RmeSeqpareClusters:
         assert self.fabric
+        _, cluster_amnt, cluster_size = TrainConfig.calculate_graph_args(
+            target_batch_size, self.config.pk_ratio
+        )
         return RmeSeqpareClusters(
             road_epig_path=self.config.rme_beds_path,
             seqpare=seqpare_db,
             world_size=self.fabric.world_size,
             rank=self.fabric.global_rank,
             positive_threshold=self.config.positive_threshold,
-            groups_per_cluster=self.config.cluster_size,
+            groups_per_cluster=cluster_size,
             intervals_per_group=self.config.density,
             allowed_rme_names=allowed_rme_names,
-            clusters_amnt=clusters_amnt,
+            clusters_amnt=cluster_amnt,
             seed=seed,
         )
 
@@ -183,7 +194,7 @@ class Finetuner:
             self.train_dataset = self._create_dataset(
                 seqpare_db=seqpare_db,
                 allowed_rme_names=train_rme_names,
-                clusters_amnt=self.config.clusters_per_batch,
+                target_batch_size=self.config.batch_size,
                 seed=self.config.seed,
             )
         elif self.config.mode == "test":
@@ -194,32 +205,21 @@ class Finetuner:
         self.fabric.print(
             f"Setting up evaluation dataset with {len(eval_rme_names)} files."
         )
-        eval_clusters_amnt = (
-            2 * self.fabric.world_size
-            if self.config.mode == "val"
-            else max(5, self.config.clusters_per_batch // 2)
-        )
+        # INFO: it's unclear how to adjust subgraph batch_size as bed count changes
+        eval_batch_size = self.config.batch_size
         self.eval_dataset = self._create_dataset(
             seqpare_db=seqpare_db,
             allowed_rme_names=eval_rme_names,
-            clusters_amnt=eval_clusters_amnt,
+            target_batch_size=eval_batch_size,
             seed=self.config.seed + 1,
         )
 
     def _setup_fabric(self):
-        logger = TensorBoardLogger(root_dir=self.config.log_dir)
-        world_size = int(os.environ.get("WORLD_SIZE") or 1)
-        self.fabric = Fabric(
-            accelerator="auto",
-            strategy="auto",
-            devices=world_size,
-            loggers=[logger],
-        )
-        self.fabric.launch()
+        self.fabric = launch_fabric()
 
     def _setup_components(self):
         assert self.fabric
-        model = CModel(self.config.model_size)
+        model = self.config.model
         optimizer = optim.AdamW(
             params=model.hot_parameters(),
             lr=self.config.learning_rate,
@@ -356,30 +356,34 @@ class Finetuner:
 
         if triplets_found > 0:
             self.fabric.print(
-                f"Step {step} | Rank {self.fabric.global_rank} | "
-                f"Train Loss: {train_loss:.4f} | Triplets: {triplets_found}"
+                f"Step {step} | "
+                f"Train Loss: {train_loss:.4f} | Active Triplets: {triplets_found}"
             )
             self.fabric.log("train_loss", train_loss, step=step)
             self.fabric.log("triplets_found", triplets_found, step=step)
 
-    def _evaluate(self, step: int | None = None) -> float:
+    def _evaluate(self, step: int | None = None) -> tuple[float, int]:
         assert self.fabric
         assert self.eval_dataset
         eval_data_iter = iter(self.eval_dataset)
 
-        loss, _ = self._run_batch(eval_data_iter, is_training=False)
+        loss, active_triplets = self._run_batch(eval_data_iter, is_training=False)
 
         # --- Logging ---
         eval_split_name = "Test" if self.config.mode == "test" else "Validation"
         log_prefix = "test" if self.config.mode == "test" else "val"
 
         if step is not None:
-            self.fabric.print(f"Step {step} | {eval_split_name} Loss: {loss:.4f}")
+            self.fabric.print(
+                f"Step {step}"
+                f" | {eval_split_name} Loss: {loss:.4f}"
+                f" | Active Triplets: {active_triplets}"
+            )
             self.fabric.log(f"{log_prefix}_loss", loss, step=step)
         else:
             self.fabric.print(f"{eval_split_name} Loss: {loss:.4f}")
 
-        return loss
+        return loss, active_triplets
 
     def _batch_with_fasta(
         self, batch: Iterable[Sequence[GenomicInterval]]

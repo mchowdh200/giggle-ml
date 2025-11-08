@@ -13,7 +13,7 @@ def main():
         learning_rate=1e-7,
         pk_ratio=1.5,
         positive_threshold=0.96,
-        batch_size=128,
+        target_batch_size=128,
         density=32,
         dex_batch_size=85,
         dex_sub_workers=0,
