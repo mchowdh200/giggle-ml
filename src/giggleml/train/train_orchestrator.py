@@ -42,7 +42,7 @@ class TrainConfig:
     checkpoint_dir: Path = field(init=False)
     margin: float = 3.0
     mining_margin: float | None = None
-    mining_strategy: str = "semi-hard"
+    mining_strategy: str = "semi-hard"  # hard, semi-hard, or all
     learning_rate: float = 1e-7
     eps: float = 1e-6
     beta1: float = 0.9
