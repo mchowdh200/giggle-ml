@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
-import torch.distributed as dist
 import umap
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
@@ -17,6 +16,7 @@ from giggleml.embed_gen import mean_embed_dict
 from giggleml.embed_gen.batch_infer import GenomicEmbedder
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
+from giggleml.utils.parallel import dist_process_group
 from giggleml.utils.path_utils import fix_bed_ext
 from giggleml.utils.torch_utils import guess_device
 from giggleml.utils.types import PathLike
@@ -31,7 +31,7 @@ def embed(
     num_workers: int,
     limit: int,
 ) -> dict[str, NDArray]:
-    dist.init_process_group()
+    # dist.init_process_group()
 
     try:
         with torch.no_grad():
@@ -45,7 +45,8 @@ def embed(
             engine.to_disk(rme_datasets, out_paths, respect_boundaries=True, log=True)
             return mean_embed_dict.build(out_paths)  # take means
     finally:
-        dist.destroy_process_group()
+        pass
+        # dist.destroy_process_group()
 
 
 def plot_umap(
@@ -124,13 +125,14 @@ def umap_combo(embeds_dir: PathLike, out: PathLike, **umap_kwargs):
 
 
 if __name__ == "__main__":
-    rme_dir = Path("data/roadmap_epigenomics")
-    beds_dir = rme_dir / "beds"
-    out_dir = rme_dir / "embeds"
-    fasta = Path("data/hg/hg19.fa")
-    model = HyenaDNA("16k")
+    with dist_process_group():
+        rme_dir = Path("data/roadmap_epigenomics")
+        beds_dir = rme_dir / "beds"
+        out_dir = rme_dir / "embeds"
+        fasta = Path("data/hg/hg38.fa")
+        model = HyenaDNA("16k")
 
-    embed(beds_dir, out_dir, fasta, model, 32, 8, 50)
-    umap_combo(
-        out_dir, "experiments/roadmapEpigenomics/hyena_dna_umap.png", n_neighbors=50
-    )
+        embed(beds_dir, out_dir, fasta, model, 32, 0, 50)
+        umap_combo(
+            out_dir, "experiments/roadmapEpigenomics/hyena_dna_umap.png", n_neighbors=50
+        )

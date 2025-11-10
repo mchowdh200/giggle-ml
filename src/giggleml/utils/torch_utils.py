@@ -80,4 +80,5 @@ def launch_fabric():
     )
     fabric.launch()
     fabric.seed_everything(42)
+    dist.barrier()
     return fabric

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, NamedTuple, cast, final, override
 
 import torch
+import torch.distributed as dist
 from torch import Tensor, nn
 from torch.utils.data import IterableDataset
 
@@ -119,6 +120,7 @@ class GenomicEmbedder:
                         output_paths, output_counts, log_ckpt
                     )
                     self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
+                    dist.barrier()
             else:
                 zarr_consumer = self._create_direct_zarr_consumer(
                     output_paths, output_counts, lambda: None
