@@ -13,11 +13,19 @@ import functools
 import multiprocessing
 import os
 import socket
+from contextlib import contextmanager
 from typing import Any, Callable
 
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
+
+
+def _infer_port() -> int:
+    # Find a free port automatically
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 
 def _infer_backend() -> str:
@@ -53,46 +61,63 @@ def _infer_world_size() -> int:
         return min(multiprocessing.cpu_count(), 4)
 
 
-def _setup_dist_env(
-    rank: int,
-    world_size: int,
-    master_addr: str,
-    master_port: str,
-    backend: str,
-) -> None:
-    """Set up distributed environment variables and initialize process group."""
-    os.environ["MASTER_ADDR"] = master_addr
-    os.environ["MASTER_PORT"] = master_port
+@contextmanager
+def dist_process_group(
+    rank: int | None = None,
+    world_size: int | None = None,
+    master_addr: str | None = None,
+    master_port: str | None = None,
+    backend: str | None = None,
+):
+    if dist.is_initialized():
+        return
+
+    rank = rank or int(os.environ["RANK"])
+    assert rank is not None, "Missing rank"
     os.environ["RANK"] = str(rank)
-    os.environ["LOCAL_RANK"] = str(rank)
+
+    world_size = world_size or int(os.environ["WORLD_SIZE"])
+    assert world_size is not None, "Missing world_size"
     os.environ["WORLD_SIZE"] = str(world_size)
 
-    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+    master_port = master_port or os.environ["MASTER_PORT"]
+    assert master_port is not None, "Missing master_port"
+    os.environ["MASTER_PORT"] = master_port
 
+    master_addr = master_addr or os.environ["MASTER_ADDR"] or "localhost"
+    os.environ["MASTER_ADDR"] = master_addr
 
-def _cleanup_dist() -> None:
-    """Clean up the distributed process group if initialized."""
-    if dist.is_initialized():
-        dist.destroy_process_group()
+    backend = backend or _infer_backend()
+
+    try:
+        dist.init_process_group(
+            backend=backend, rank=rank, world_size=world_size, device_id=rank
+        )
+
+        if backend == "nccl":
+            torch.cuda.set_device(rank)
+
+        yield
+    finally:
+        if dist.is_initialized():
+            dist.barrier()
+            dist.destroy_process_group()
 
 
 def _worker_wrapper(
     rank: int,
     world_size: int,
-    master_addr: str,
-    master_port: str,
-    backend: str,
+    master_addr: str | None,
+    master_port: str | None,
+    backend: str | None,
     fn: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> None:
     """Wrapper function that sets up distributed environment for each worker process."""
-    _setup_dist_env(rank, world_size, master_addr, master_port, backend)
 
-    try:
+    with dist_process_group(rank, world_size, master_addr, master_port, backend):
         fn(*args, **kwargs)
-    finally:
-        _cleanup_dist()
 
 
 class Parallel:
@@ -148,41 +173,10 @@ class Parallel:
         master_addr: str = "localhost",
         master_port: str | None = None,
     ) -> None:
-        # Infer parameters if not provided
-        if world_size is None:
-            world_size = _infer_world_size()
-
-        if backend is None:
-            backend = _infer_backend()
-
-        if master_port is None:
-            # Find a free port automatically
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("", 0))
-                master_port = str(s.getsockname()[1])
-
-        # Validation guards
-        if world_size <= 0:
-            raise ValueError(f"world_size must be positive, got {world_size}")
-
-        if world_size > 1024:
-            raise ValueError(
-                f"world_size too large: {world_size}. Maximum supported is 1024"
-            )
-
-        if backend not in {"gloo", "nccl", "mpi"}:
-            raise ValueError(
-                f"Unsupported backend: {backend}. Must be one of: gloo, nccl, mpi"
-            )
-
-        # Backend-specific validation
-        if backend == "nccl" and not torch.cuda.is_available():
-            raise ValueError("NCCL backend requires CUDA, but CUDA is not available")
-
-        self.world_size = world_size
+        self.world_size = world_size or _infer_world_size()
         self.backend = backend
         self.master_addr = master_addr
-        self.master_port = master_port
+        self.master_port = master_port or str(_infer_port())
 
     def _execute[T](
         self, fn: Callable[..., T], args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -194,13 +188,10 @@ class Parallel:
 
         if self.world_size == 1 and not has_accelerators:
             print("Running locally (world_size=1, no accelerators)")
-            _setup_dist_env(0, 1, self.master_addr, self.master_port, self.backend)
-
-            try:
-                result = fn(*args, **kwargs)
-            finally:
-                _cleanup_dist()
-            return result
+            with dist_process_group(
+                0, 1, self.master_addr, self.master_port, self.backend
+            ):
+                return fn(*args, **kwargs)
         else:
             print(
                 f"Running distributed with world_size={self.world_size}, backend={self.backend}"
