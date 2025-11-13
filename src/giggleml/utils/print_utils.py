@@ -3,6 +3,8 @@ import sys
 import time
 from contextlib import contextmanager
 
+from giggleml.utils.torch_utils import get_rank
+
 
 @contextmanager
 def indent_prints(indent=2):
@@ -83,7 +85,9 @@ def _format_time(seconds: float) -> str:
 
 
 @contextlib.contextmanager
-def progress_logger(total_steps: int, description: str = "Processing"):
+def progress_logger(
+    total_steps: int, description: str, only_on_rank_zero: bool = False
+):
     """
     A context manager for logging progress with a human-readable ETA.
 
@@ -91,11 +95,17 @@ def progress_logger(total_steps: int, description: str = "Processing"):
     at each step. Assumes steps are evenly weighted.
     """
 
+    def no_op_checkpoint():
+        pass
+
+    if only_on_rank_zero and get_rank() != 0:
+        try:
+            yield no_op_checkpoint
+        finally:
+            return
+
     if total_steps <= 0:
         print(f"[{description}] Skipping (0 steps).")
-
-        def no_op_checkpoint():
-            pass
 
         try:
             yield no_op_checkpoint
@@ -137,7 +147,7 @@ def progress_logger(total_steps: int, description: str = "Processing"):
         elapsed_str = _format_time(elapsed_time)
         eta_str = _format_time(eta_seconds)
 
-        # Print the updated line
+        # print the updated line
         print(
             f"\r[{description}] {progress_percent:5.1f}% ({current_step}/{total_steps}) "
             f"| Elapsed: {elapsed_str} | ETA: {eta_str}{padding}",
@@ -153,7 +163,7 @@ def progress_logger(total_steps: int, description: str = "Processing"):
         print(f"[{description}] Aborted with error: {e}")
         raise
     else:
-        # Success: Print final summary
+        # Success: print final summary
         elapsed_time = time.monotonic() - start_time
 
         # Ensure final print is 100% and 0 ETA
