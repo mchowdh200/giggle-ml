@@ -7,7 +7,7 @@ import math
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import torch
 from lightning_fabric import Fabric
@@ -20,7 +20,7 @@ from giggleml.train.graph_triplet_miner import GraphTripletMiner
 from giggleml.train.rme_clusters_dataset import MiningBatch, RmeSeqpareClusters
 from giggleml.train.seqpare_db import SeqpareDB
 from giggleml.utils.cv_splits import create_cv_splits
-from giggleml.utils.torch_utils import launch_fabric
+from giggleml.utils.torch_utils import launch_fabric, rprint0
 from giggleml.utils.types import GenomicInterval
 from giggleml.utils.utils.collection_utils import as_list
 
@@ -103,6 +103,12 @@ class TrainConfig:
         )
 
 
+class StepResult(NamedTuple):
+    loss: float
+    active_triplets: int
+    max_triplets: int
+
+
 class Finetuner:
     def __init__(self, config: TrainConfig):
         self.config = config
@@ -130,7 +136,7 @@ class Finetuner:
         self._is_setup = True
 
     @as_list
-    def run(self) -> Iterator[tuple[float, int]]:
+    def run(self) -> Iterator[tuple[StepResult, StepResult]]:
         self.setup()
         assert self.fabric, "Fabric not initialized"
         assert self.model, "Model not initialized"
@@ -149,10 +155,11 @@ class Finetuner:
         train_data_iter = iter(self.train_dataset)
 
         for step in range(self.start_step, self.config.total_steps):
-            self._train_step(train_data_iter, step)
+            train_result = self._train_step(train_data_iter, step)
 
             if (step + 1) % self.config.validation_freq == 0:
-                yield self._evaluate(step)
+                eval_result = self._evaluate(step)
+                yield train_result, eval_result
                 # Save checkpoint at the same frequency as validation
                 self._save_checkpoint(step)
 
@@ -285,7 +292,7 @@ class Finetuner:
 
     def _run_batch(
         self, data_iter: Iterator[MiningBatch], is_training: bool
-    ) -> tuple[float, int]:
+    ) -> StepResult:
         """
         Runs a single batch of data through the model.
 
@@ -344,10 +351,22 @@ class Finetuner:
                 ).item()
             )
 
+            rprint0("adj, row edges:", adj_matrix.sum(dim=1))
+            rprint0("adj, symm diffs?", (adj_matrix.T != adj_matrix).abs().sum())
+
+            if self.config.mining_strategy != "all":
+                max_triplets = adj_matrix.shape[0]
+            else:
+                max_triplets = int(
+                    ((adj_matrix.sum(dim=1) - 1) * (adj_matrix == 0).sum(dim=1))
+                    .sum()
+                    .item()
+                )
+
             # Handle empty batches
             if total_active_triplets == 0:
                 self.fabric.print("no triplets found in batch, skipping...")
-                return 0, 0
+                return StepResult(0, 0, max_triplets)
 
             if anchor_idx.numel() > 0:
                 anchor_embeds = batch_tensor[anchor_idx]
@@ -374,11 +393,14 @@ class Finetuner:
         avg_loss_tensor = cast(Tensor, self.fabric.all_reduce(loss, reduce_op="mean"))
         final_loss = avg_loss_tensor.item()
 
-        return final_loss, total_active_triplets
+        return StepResult(final_loss, total_active_triplets, max_triplets)
 
-    def _train_step(self, train_data_iter: Iterator[MiningBatch], step: int):
+    def _train_step(
+        self, train_data_iter: Iterator[MiningBatch], step: int
+    ) -> StepResult:
         assert self.fabric
-        train_loss, triplets_found = self._run_batch(train_data_iter, is_training=True)
+        train_result = self._run_batch(train_data_iter, is_training=True)
+        train_loss, triplets_found, _ = train_result
 
         if triplets_found > 0:
             self.fabric.print(
@@ -388,12 +410,15 @@ class Finetuner:
             self.fabric.log("train_loss", train_loss, step=step)
             self.fabric.log("triplets_found", triplets_found, step=step)
 
-    def _evaluate(self, step: int | None = None) -> tuple[float, int]:
+        return train_result
+
+    def _evaluate(self, step: int | None = None) -> StepResult:
         assert self.fabric
         assert self.eval_dataset
         eval_data_iter = iter(self.eval_dataset)
 
-        loss, active_triplets = self._run_batch(eval_data_iter, is_training=False)
+        train_result = self._run_batch(eval_data_iter, is_training=False)
+        loss, active_triplets, _ = train_result
 
         # --- Logging ---
         eval_split_name = "Test" if self.config.mode == "test" else "Validation"
@@ -409,7 +434,7 @@ class Finetuner:
         else:
             self.fabric.print(f"{eval_split_name} Loss: {loss:.4f}")
 
-        return loss, active_triplets
+        return train_result
 
     def _batch_with_fasta(
         self, batch: Iterable[Sequence[GenomicInterval]]

@@ -2,7 +2,6 @@ import dataclasses
 import os
 from collections.abc import Iterable
 from dataclasses import replace
-from functools import cached_property
 from pathlib import Path
 from time import time
 from typing import Any
@@ -18,24 +17,19 @@ from giggleml.utils.torch_utils import (
     get_rank,
     get_world_size,
     launch_fabric,
-    rprint,
     rprint0,
 )
 
 
 class Cache:
-    def __init__(self, conf: TrainConfig) -> None:
-        self.path: Path = Path("modelCkpts", "hparam_search.pickle")
+    def __init__(self, path: Path, conf: TrainConfig) -> None:
+        self.path: Path = path
         self.conf: TrainConfig = conf
 
-    @cached_property
-    def cache(self):
-        # INFO: output location
-
         if os.path.isfile(self.path):
-            return path_pickle.unpickle(self.path)
+            self.cache: dict[frozenset, Any] = path_pickle.unpickle(self.path)
         else:
-            return dict()
+            self.cache = dict()
 
     def do(self, diffs: Iterable[dict[str, Any]]):
         def do_one(diff: dict[str, Any]):
@@ -50,33 +44,46 @@ class Cache:
                     t0 = time()
                     ft = Finetuner(conf)
                     ft.setup()
-                    losses, active_triplets = zip(*ft.run())
+                    results = ft.run()
                     t1 = time()
                     dist.barrier()
                     rprint0()
 
                 if get_rank() == 0:
-                    percent_active_triplets = (
-                        np.array(active_triplets) / conf.corrected_batch_size
-                    ).tolist()
-
-                    self.cache[conf_frozen] = {
-                        "percent_active_triplets": percent_active_triplets,
-                        "active_triplets": active_triplets,
-                        "losses": losses,
-                        "time": t1 - t0,
-                        "world_size": get_world_size(),
-                        "config": conf_frozen,
-                    }
+                    self.cache[conf_frozen] = (
+                        results,
+                        t1 - t0,
+                        get_world_size(),
+                    )
                 else:
-                    # only rank zero will save
+                    # note, only rank zero will save
                     self.cache[conf_frozen] = None
 
+            # report
             if get_rank() == 0:
-                result = self.cache[conf_frozen].copy()
-                del result["config"]
-                rprint(diff)
-                rprint(result)
+                results, duration, world_size = self.cache[conf_frozen]
+                train, eval = zip(*results)
+                train_loss, train_triplets, train_max_triplets = zip(*train)
+                eval_loss, eval_triplets, eval_max_triplets = zip(*eval)
+
+                active_triplets = np.array([train_triplets, eval_triplets])
+                max_triplets = np.array([train_max_triplets, eval_max_triplets])
+                percent_active_triplets = (
+                    active_triplets / max_triplets.round(decimals=3).tolist()
+                )
+
+                print("max trips", max_triplets)
+
+                print(diff)
+                print("eval")
+                with indent_prints(indent=2):
+                    print("eval_triplet_rate:", percent_active_triplets[1])
+                    print("eval_loss:", eval_loss)
+                print("train")
+                with indent_prints(indent=2):
+                    print("train_triplet_rate:", percent_active_triplets[0])
+                    print("train_loss:", train_loss)
+                print("duration:", duration, "world_size:", world_size, "\n")
 
         return [do_one(diff) for diff in diffs]
 
@@ -85,14 +92,22 @@ class Cache:
             path_pickle.pickle(self.path, self.cache)
 
 
+def header(*args, **kwargs):
+    rprint0()
+    rprint0("-" * 30)
+    rprint0(*args, **kwargs)
+    rprint0("-" * 30)
+    rprint0()
+
+
 def main():
     launch_fabric()
 
     conf = TrainConfig(
         "val",
-        total_steps=3,
+        total_steps=6,
         validation_freq=1,
-        model=CModel("16k"),
+        model=CModel("16k", 512, 128, 1, 2),
         margin=3,
         learning_rate=1e-7,
         pk_ratio=1.5,
@@ -103,14 +118,65 @@ def main():
         dex_sub_workers=0,
     )
 
-    cache = Cache(conf)
+    dist.barrier()
+    cache = Cache(Path("modelCkpts", "hparam_search.pickle"), conf)
     do = cache.do
 
     try:
+        header("density")
+        do(
+            {
+                "batch_size": 16,
+                "density": density,
+                "pk_ratio": pkr,
+                "mining_strategy": "all",
+                "margin": 0.1,
+            }
+            for pkr in [8]
+            for density in [24]
+            # for density in [32, 64]
+            # for density in [32, 64, 128, 256]
+        )
+
+        # header("")
+        # do(
+        #     {
+        #         "batch_size": 16,
+        #         "density": density,
+        #         "pk_ratio": pkr,
+        #         "mining_strategy": "all",
+        #         "margin": 0.1,
+        #     }
+        #     for pkr in [8]
+        #     for density in [32, 64, 128]
+        # )
+
+        # do(
+        #     {
+        #         "batch_size": batch_size,
+        #         "pk_ratio": pk_ratio,
+        #         "mining_strategy": "all",
+        #         "margin": 0.1,
+        #     }
+        #     for batch_size in [32, 64]
+        #     for pk_ratio in [1 / 16, 1 / 8, 1 / 2, 2, 8, 32]
+        # )
+
+        # header("batch, pkr")
+        # do(
+        #     {
+        #         "batch_size": batch_size,
+        #         "pk_ratio": pk_ratio,
+        #         "margin": 0.1,
+        #     }
+        #     for batch_size in [32, 64, 128]
+        #     for pk_ratio in [1 / 16, 1 / 8, 1 / 2, 2, 8, 32]
+        # )
+
         # rprint0("\n model shape")
         # do(
         #     {
-        #         "batch_size": 32,
+        #         "batch_size": 64,
         #         "model": CModel("16k", *args),
         #     }
         #     for args in [
@@ -158,17 +224,6 @@ def main():
         #     ]
         # )
 
-        rprint0("\n margin, batch, pkr")
-        do(
-            {
-                "batch_size": 64,
-                "margin": margin,
-                "pk_ratio": pk_ratio,
-                "model": CModel("16k", 512, 128, 1, 2),
-            }
-            for margin in [0.5, 1, 2, 3, 4]
-            for pk_ratio in [0.25, 0.5, 16, 32]
-        )
         # do(
         #     {
         #         "batch_size": batch_size,
@@ -183,6 +238,7 @@ def main():
         #     if pk_ratio < batch_size
         # )
     finally:
+        dist.barrier()
         cache.save()
 
 
