@@ -1,4 +1,5 @@
-from typing import Iterable, Iterator, overload
+from collections.abc import Iterable, Iterator
+from typing import Any, overload
 
 
 # it does nothing
@@ -9,15 +10,12 @@ class Nothing:
     def __call__(self) -> None: ...
 
     @overload
-    def __call__[T](self, arg: T) -> T: ...
+    def __call__[T](self, arg: T, *args: Any, **kwargs: Any) -> T: ...
 
     @overload
-    def __call__[T](self, arg: T, *args: object) -> T: ...
+    def __call__[T](self, arg: None = None, *args: Any, **kwargs: Any) -> None: ...
 
-    def __call__[T](self, arg: T | None = None, *args: object) -> T | None:
-        if len(args) != 0:
-            # what do you expect to do, return multiple args?
-            raise RuntimeError("Nothing can only be called with zero or one argument")
+    def __call__[T](self, arg: T | None = None, *args: Any, **kwargs: Any) -> T | None:
         return arg
 
     def __iter__(self):
