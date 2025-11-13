@@ -1,13 +1,12 @@
 from collections.abc import Sequence
-from os import PathLike
 from pathlib import Path
-from typing import Any, cast, overload
+from typing import Any, overload
 
 import pyfastx
 
 from giggleml.data_wrangling.interval_dataset import IntervalDataset
 from giggleml.data_wrangling.list_dataset import ListDataset
-from giggleml.utils.types import GenomicInterval
+from giggleml.utils.types import GenomicInterval, PathLike
 
 Fasta = dict[str, str]  # chromosome -> sequence map
 known_fa: dict[str, Fasta] = dict()
@@ -37,6 +36,10 @@ def ensure_fa(path: PathLike) -> Fasta:
     result = known_fa[normal_path]
     cache = (normal_path, result)
     return result
+
+
+def shape(path: PathLike) -> dict[str, int]:
+    return {k: len(v) for k, v in ensure_fa(path).items()}
 
 
 @overload
