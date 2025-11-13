@@ -72,11 +72,11 @@ def dist_process_group(
     if dist.is_initialized():
         return
 
-    rank = rank or int(os.environ["RANK"])
+    rank = rank if rank is not None else int(os.environ["RANK"])
     assert rank is not None, "Missing rank"
     os.environ["RANK"] = str(rank)
 
-    world_size = world_size or int(os.environ["WORLD_SIZE"])
+    world_size = world_size if world_size is not None else int(os.environ["WORLD_SIZE"])
     assert world_size is not None, "Missing world_size"
     os.environ["WORLD_SIZE"] = str(world_size)
 
@@ -90,8 +90,17 @@ def dist_process_group(
     backend = backend or _infer_backend()
 
     try:
+        accelerator = torch.accelerator.current_accelerator()
+
+        if accelerator is None:
+            device_id = None
+        elif accelerator.type == "mps":
+            device_id = None
+        else:
+            device_id = rank
+
         dist.init_process_group(
-            backend=backend, rank=rank, world_size=world_size, device_id=rank
+            backend=backend, rank=rank, world_size=world_size, device_id=device_id
         )
 
         if backend == "nccl":
@@ -115,6 +124,8 @@ def _worker_wrapper(
     kwargs: dict[str, Any],
 ) -> None:
     """Wrapper function that sets up distributed environment for each worker process."""
+
+    print("worker", rank, world_size)
 
     with dist_process_group(rank, world_size, master_addr, master_port, backend):
         fn(*args, **kwargs)

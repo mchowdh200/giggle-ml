@@ -120,12 +120,14 @@ class GenomicEmbedder:
                         output_paths, output_counts, log_ckpt
                     )
                     self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
-                    dist.barrier()
             else:
                 zarr_consumer = self._create_direct_zarr_consumer(
                     output_paths, output_counts, lambda: None
                 )
                 self._execute_pipeline(dex, set_flat_iter, zarr_consumer)
+
+            if log:
+                dist.barrier()
         finally:
             # clean up residual locks. supposed to happen naturally, but not in
             # case of interrupted job
