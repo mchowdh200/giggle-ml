@@ -2,6 +2,8 @@ from typing import cast
 
 from torch import Tensor
 
+from giggleml.utils.torch_utils import get_rank, get_world_size
+
 
 def partition_integer(n: int, k: int) -> list[int]:
     """
@@ -30,11 +32,15 @@ def partition_integer(n: int, k: int) -> list[int]:
     return parts
 
 
-def partition_list[T: list | Tensor](items: T, world_size: int, rank: int) -> T:
+def partition_list[T: list | Tensor](
+    items: T, world_size: int | None = None, rank: int | None = None
+) -> T:
     """
     Splits a list into partitions, as evenly possible, and returns the
-    parition corresponding to the rank.
+    partition corresponding to the rank.
     """
+    rank = get_rank() if rank is None else rank
+    world_size = get_world_size() if world_size is None else world_size
     splits = partition_integer(len(items), world_size)
     i = sum(splits[:rank])
     part = splits[rank]
