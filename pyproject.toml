@@ -9,6 +9,7 @@ requires-python = ">=3.13"
 dependencies = [
     "accelerate>=1.6.0",
     "blosc2>=3.11.0",
+    "dask>=2025.11.0",
     "filelock>=3.18.0",
     "geniml>=0.6.0",
     "lightning>=2.5.2",
