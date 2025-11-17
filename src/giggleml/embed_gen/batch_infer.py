@@ -25,10 +25,12 @@ from .dex import (
 )
 
 type Idx = tuple[int, int]
-type EmbedConsumer = Callable[[Sequence[tuple[Idx, Tensor]]], None]
 
 type _DexIn = tuple[Idx | None, GenomicInterval | None]
 type _DexOut = tuple[Idx | None, Tensor | None]
+
+type EmbedConsumer = Callable[[Sequence[tuple[Idx, Tensor]]], None]
+type EmbedPostprocessor = Callable[[Idx, Tensor], _DexOut]
 
 
 class _DexBatch[T](NamedTuple):
@@ -85,6 +87,7 @@ class GenomicEmbedder:
         output_paths: Sequence[PathLike],
         respect_boundaries: bool = True,
         log: bool = True,
+        postprocessor_fn: EmbedPostprocessor | None = None,
     ) -> None:
         """Process datasets and write results to zarr files with direct writing.
 
@@ -104,7 +107,9 @@ class GenomicEmbedder:
             )
 
         # Create pipeline
-        dex, set_flat_iter = self._create_dex_pipeline(datasets, respect_boundaries)
+        dex, set_flat_iter = self._create_dex_pipeline(
+            datasets, respect_boundaries, postprocessor_fn
+        )
 
         output_counts = [len(ds) for ds in datasets]
         expected_rank_output_count = round(
@@ -138,7 +143,10 @@ class GenomicEmbedder:
                     os.remove(f"{str(out)}.resize.lock")
 
     def _create_dex_pipeline(
-        self, datasets: Sequence[IntervalDataset], respect_boundaries: bool = True
+        self,
+        datasets: Sequence[IntervalDataset],
+        respect_boundaries: bool = True,
+        extra_postprocessor_fn: EmbedPostprocessor | None = None,
     ) -> tuple[_Dex, SetFlatIter[GenomicInterval]]:
         """Create and configure the Dex pipeline for processing datasets."""
         fasta_path = self._validate_fasta_paths(datasets)
@@ -153,7 +161,7 @@ class GenomicEmbedder:
         collate_fn = _Collate(fasta_path if wants_seq else None, self.model.collate)
         wrapped_model = _ModelWrap(self.model)
         decollate_fn = _Decollate()
-        postprocessor = _Postprocessor()
+        postprocessor = _Postprocessor(extra_postprocessor_fn)
         dex = Dex(
             model=wrapped_model,
             preprocessor_fn=preprocessor,
@@ -326,6 +334,16 @@ class _Decollate:
 class _Postprocessor:
     """averaging chunk embeddings."""
 
+    @staticmethod
+    def _default_extra_postproc(a, b):
+        return a, b
+
+    def __init__(self, extra_postprocessor_fn: EmbedPostprocessor | None) -> None:
+        self.extra_postprocessor_fn: EmbedPostprocessor = (
+            extra_postprocessor_fn or _Postprocessor._default_extra_postproc
+        )
+        pass
+
     def __call__(self, items: Iterable[_DexOut]) -> _DexOut:
         indices, embeddings = zip(*items)
 
@@ -339,4 +357,4 @@ class _Postprocessor:
             clean_embeds = [x for x in embeddings if x is not None]
             stacked = torch.stack(clean_embeds)
             mean = torch.mean(stacked, dim=0)
-            return idx, mean
+            return self.extra_postprocessor_fn(idx, mean)
