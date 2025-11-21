@@ -2,6 +2,7 @@ import os
 from functools import cache
 from typing import Any
 
+import numpy as np
 import torch
 import torch.distributed as dist
 from lightning_fabric.fabric import Fabric
@@ -82,3 +83,26 @@ def launch_fabric():
     fabric.seed_everything(42)
     dist.barrier()
     return fabric
+
+
+def torch2numpy_dtype(dt: torch.dtype) -> np.dtype:
+    """Convert PyTorch dtype to NumPy dtype."""
+    mapping = {
+        torch.float32: np.float32,
+        torch.float64: np.float64,
+        torch.float16: np.float16,
+        torch.bfloat16: np.dtype("V2"),  # No direct NumPy equivalent
+        torch.int32: np.int32,
+        torch.int64: np.int64,
+        torch.int16: np.int16,
+        torch.int8: np.int8,
+        torch.uint8: np.uint8,
+        torch.bool: np.bool_,
+        torch.complex64: np.complex64,
+        torch.complex128: np.complex128,
+    }
+
+    if dt not in mapping:
+        raise ValueError(f"Unsupported PyTorch dtype: {dt}")
+
+    return mapping[dt]  # pyright: ignore[reportReturnType]
