@@ -144,7 +144,7 @@ class HyenaDNA(GenomicModel):
         batch = [item.upper() for item in batch]
 
         with torch.set_grad_enabled(self.training):
-            # INFO: 1. tokenization
+            # tokenization
 
             # WARN: this was a legacy method:   tokenized = self.tokenizer.batch_encode_plus(
             inputs = self._tokenizer(
@@ -156,7 +156,7 @@ class HyenaDNA(GenomicModel):
                 return_tensors="pt",
             )
 
-            # INFO: 2. create attention mask for masked mean pooling
+            # create attention mask for masked mean pooling
             seq_lens = torch.tensor(
                 [len(item) for item in batch],
                 dtype=torch.float16,
@@ -175,10 +175,9 @@ class HyenaDNA(GenomicModel):
             inputs["attention_mask"] = mask
             return inputs
 
-    @override
-    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward_no_pool(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         with torch.set_grad_enabled(self.training):
-            # INFO: 2. inference
+            # inference
             inputs = batch["input_ids"]
 
             hidden: torch.Tensor = self._model(
@@ -191,8 +190,15 @@ class HyenaDNA(GenomicModel):
             assert batch_size == len(inputs)
             assert max_seq_len == self.max_seq_len
             assert hidden_dim == self.embed_dim
+            return hidden
 
-            # INFO: 3. masked mean pooling using precomputed mask
+    @override
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+        with torch.set_grad_enabled(self.training):
+            # 1.
+            hidden = self.forward_no_pool(batch)
+
+            # masked mean pooling using precomputed mask
             mask = batch["attention_mask"].to(self.device)
             mask = mask.expand(hidden.shape)
 
@@ -211,3 +217,12 @@ class HyenaDNA(GenomicModel):
     @override
     def __repr__(self):
         return f"HyenaDNA({self.size_type})"
+
+
+class HyenaDnaNoPooling(HyenaDNA):
+    def __init__(self, size: str = "1k"):
+        super().__init__(size)
+
+    @override
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+        return super().forward_no_pool(batch)
