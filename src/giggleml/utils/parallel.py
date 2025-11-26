@@ -10,7 +10,6 @@ Supports two modes of operation:
 """
 
 import functools
-import multiprocessing
 import os
 import socket
 from contextlib import contextmanager
@@ -58,7 +57,7 @@ def _infer_world_size() -> int:
         return 2  # Default to 2 processes for MPS
     else:
         # CPU: default to number of physical cores, capped at 4 for reasonable defaults
-        return min(multiprocessing.cpu_count(), 4)
+        return min(mp.cpu_count(), 4)
 
 
 @contextmanager
@@ -70,6 +69,7 @@ def dist_process_group(
     backend: str | None = None,
 ):
     if dist.is_initialized():
+        yield
         return
 
     rank = rank if rank is not None else int(os.environ["RANK"])
@@ -125,8 +125,6 @@ def _worker_wrapper(
 ) -> None:
     """Wrapper function that sets up distributed environment for each worker process."""
 
-    print("worker", rank, world_size)
-
     with dist_process_group(rank, world_size, master_addr, master_port, backend):
         fn(*args, **kwargs)
 
@@ -135,8 +133,7 @@ class Parallel:
     """Intelligent distributed setup for PyTorch via decorator or direct call.
 
     This class provides automatic hardware detection, parameter inference, and optimized
-    execution paths for distributed PyTorch workloads. It can run locally for simple cases
-    or spawn multiple processes when true distribution is needed.
+    execution paths for distributed PyTorch workloads.
 
     Args:
         world_size: Number of processes to spawn. If None, automatically inferred.
@@ -173,7 +170,6 @@ class Parallel:
 
     ---
     Notes:
-        - Return values are only supported in local execution mode (world_size=1).
           Multiprocess execution via `mp.spawn` does not propagate return values.
     """
 
@@ -190,39 +186,34 @@ class Parallel:
         self.master_port = master_port or str(_infer_port())
 
     def _execute[T](
-        self, fn: Callable[..., T], args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> T | None:
+        self,
+        fn: Callable[..., T],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        join: bool = True,
+    ):
         """Internal execution logic shared by decorator and .run()"""
         has_accelerators = torch.cuda.is_available() or (
             hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
         )
 
-        if self.world_size == 1 and not has_accelerators:
-            print("Running locally (world_size=1, no accelerators)")
-            with dist_process_group(
-                0, 1, self.master_addr, self.master_port, self.backend
-            ):
-                return fn(*args, **kwargs)
-        else:
-            print(
-                f"Running distributed with world_size={self.world_size}, backend={self.backend}"
-            )
-            mp.spawn(
-                _worker_wrapper,
-                args=(
-                    self.world_size,
-                    self.master_addr,
-                    self.master_port,
-                    self.backend,
-                    fn,
-                    args,
-                    kwargs,
-                ),
-                nprocs=self.world_size,
-                join=True,
-            )
-            # mp.spawn does not support return values
-            return None
+        print(
+            f"Running distributed with world_size={self.world_size}, backend={self.backend}"
+        )
+        return mp.spawn(
+            _worker_wrapper,
+            args=(
+                self.world_size,
+                self.master_addr,
+                self.master_port,
+                self.backend,
+                fn,
+                args,
+                kwargs,
+            ),
+            nprocs=self.world_size,
+            join=join,
+        )
 
     def __call__[**P, T](self, fn: Callable[P, T]) -> Callable[P, T]:
         """
@@ -245,7 +236,7 @@ class Parallel:
 
         return wrapper
 
-    def run[T](self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T | None:
+    def run[T](self, fn: Callable[..., T], *args: Any, **kwargs: Any):
         """
         Run a function in a distributed environment (direct call).
 
@@ -259,4 +250,11 @@ class Parallel:
         Returns:
             The result of `fn` if run locally, otherwise None.
         """
-        return self._execute(fn, args, kwargs)
+        return self._execute(fn, args, kwargs, True)
+
+    def run_non_blocking[T](self, fn: Callable[..., T], *args: Any, **kwargs: Any):
+        """
+        Same as run, but does not call join on spawned processes
+        """
+
+        return self._execute(fn, args, kwargs, False)
