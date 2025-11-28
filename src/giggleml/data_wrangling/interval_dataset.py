@@ -91,16 +91,15 @@ class BedDataset(LateIntervalDataset):
         path: PathLike,
         associated_fasta_path: PathLike | None = None,
         limit: int | None = None,
-        sampling_rate: float = 1,
+        shuffle: bool = False,
     ):
         """
         Bed files are parsed lazily (so this passes pickling barrier).
         @param path: can be either a .bed or .bed.gz file.
-        @param samplingRate: should be 0-1, 1 indicates guaranteed full reads. Seed is fixed.
+        @param shuffle: reads full file before shuffling even when used with a read limit
         """
         self.path: Path = as_path(path)
-        assert sampling_rate >= 0 and sampling_rate <= 1
-        self.sampling_rate: float = sampling_rate
+        self.shuffle: bool = shuffle
         self.limit: float = limit or float("inf")
 
         super().__init__(
@@ -116,18 +115,22 @@ class BedDataset(LateIntervalDataset):
             intervals = list[GenomicInterval]()
 
             for line in file:
-                if len(intervals) >= self.limit:
+                if not self.shuffle and len(intervals) >= self.limit:
                     break
 
                 if line.startswith("#"):
                     continue
 
-                if self.sampling_rate != 1:
-                    if random.random() > self.sampling_rate:
-                        continue
-
                 name, start, stop = line.split("\t")[:3]
                 intervals.append((name, int(start), int(stop)))
+
+            if self.shuffle:
+                random.shuffle(intervals)
+
+                if self.limit != float("inf"):
+                    # when shuffling, we apply the limit after a full read
+                    intervals = intervals[: self.limit]
+
             return intervals
 
         if self.path.suffixes[-2:] == [".bed", ".gz"]:
