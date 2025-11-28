@@ -31,22 +31,15 @@ def embed(
     num_workers: int,
     limit: int,
 ) -> dict[str, NDArray]:
-    # dist.init_process_group()
-
-    try:
-        with torch.no_grad():
-            rme_paths = [fix_bed_ext(beds_dir / name) for name in rme.bed_names]
-            rme_datasets = [
-                BedDataset(path, limit=limit, associated_fasta_path=fasta)
-                for path in rme_paths
-            ]
-            engine = GenomicEmbedder(model.to(guess_device()), batch_size, num_workers)
-            out_paths = [out_dir / name for name in rme.bed_names]
-            engine.to_disk(rme_datasets, out_paths, respect_boundaries=True, log=True)
-            return mean_embed_dict.build(out_paths)  # take means
-    finally:
-        pass
-        # dist.destroy_process_group()
+    with torch.inference_mode():
+        rme_paths = [fix_bed_ext(beds_dir / name) for name in rme.bed_names]
+        rme_datasets = [
+            BedDataset(path, fasta, limit=limit, shuffle=True) for path in rme_paths
+        ]
+        engine = GenomicEmbedder(model.to(guess_device()), batch_size, num_workers)
+        out_paths = [out_dir / name for name in rme.bed_names]
+        engine.to_disk(rme_datasets, out_paths, respect_boundaries=True, log=True)
+        return mean_embed_dict.build(out_paths)  # take means
 
 
 def plot_umap(
@@ -132,7 +125,7 @@ if __name__ == "__main__":
         fasta = Path("data/hg/hg38.fa")
         model = HyenaDNA("16k")
 
-        embed(beds_dir, out_dir, fasta, model, 32, 0, 50)
+        embed(beds_dir, out_dir, fasta, model, 64, 0, 64)
         umap_combo(
             out_dir, "experiments/roadmapEpigenomics/hyena_dna_umap.png", n_neighbors=50
         )
