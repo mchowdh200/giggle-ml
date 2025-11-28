@@ -1,4 +1,4 @@
-chromatin_states = {
+chromatin_states = [
     "Active_TSS",
     "Flanking_Active_TSS",
     "Strong_transcription",
@@ -14,9 +14,9 @@ chromatin_states = {
     "Weak_Repressed_PolyComb",
     "Transcr_at_gene_5_and_3",
     "Quiescent_Low",
-}
+]
 
-cell_types = {
+cell_types = [
     "Adult_Liver",
     "H1_BMP4_Derived_Trophoblast_Cultured_Cells",
     "NHEK_Epidermal_Keratinocytes",
@@ -144,7 +144,7 @@ cell_types = {
     "Penis_Foreskin_Keratinocyte_Primary_Cells_skin02",
     "Psoas_Muscle",
     "H1_BMP4_Derived_Mesendoderm_Cultured_Cells",
-}
+]
 
 cell_category = {
     "IPSC": {
@@ -303,6 +303,7 @@ cell_category = {
     },
 }
 
+# INFO: deterministic order
 bed_names = [f"{x}_{y}" for x in cell_types for y in chromatin_states]
 
 _cell_category_inverse = {
