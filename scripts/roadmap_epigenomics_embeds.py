@@ -15,12 +15,12 @@ from giggleml.utils.torch_utils import guess_device
 
 def main():
     rme_dir = Path("data/roadmap_epigenomics")
-    bed_slice = rme.bed_names[:300]
+    bed_slice = rme.bed_names[300:1000]
     bed_paths = [rme_dir / "beds" / f"{name}.bed" for name in bed_slice]
     out_paths = [rme_dir / "embeds" / f"{name}.zarr" for name in bed_slice]
     fasta = "data/hg/hg38.fa"
     beds = [BedDataset(path, fasta) for path in bed_paths]
-    batch_size = 85
+    batch_size = 256
 
     with dist_process_group(), torch.inference_mode():
         device = guess_device()

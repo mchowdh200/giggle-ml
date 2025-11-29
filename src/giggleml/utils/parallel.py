@@ -19,6 +19,8 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
+from giggleml.utils.torch_utils import guess_device
+
 
 def _infer_port() -> int:
     # Find a free port automatically
@@ -90,17 +92,10 @@ def dist_process_group(
     backend = backend or _infer_backend()
 
     try:
-        accelerator = torch.accelerator.current_accelerator()
-
-        if accelerator is None:
-            device_id = None
-        elif accelerator.type == "mps":
-            device_id = None
-        else:
-            device_id = rank
+        device = guess_device(rank)
 
         dist.init_process_group(
-            backend=backend, rank=rank, world_size=world_size, device_id=device_id
+            backend=backend, rank=rank, world_size=world_size, device_id=device
         )
 
         if backend == "nccl":

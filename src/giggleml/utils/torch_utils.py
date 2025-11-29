@@ -29,14 +29,20 @@ def get_world_size() -> int:
 
 
 def guess_device(rank: int | None = None) -> torch.device:
-    rank = rank or get_rank()
+    rank = rank if rank is not None else get_rank()
 
-    if torch.accelerator.is_available():
-        if torch.backends.mps.is_built():
-            return torch.device(f"mps:{rank}")  # for mac use
-        if torch.cuda.is_available():
-            return torch.device(f"cuda:{rank}")
-    return torch.device("cpu")
+    if hasattr(torch, "accelerator"):
+        if torch.accelerator.is_available():
+            if (dev := torch.accelerator.current_accelerator()) is not None:
+                return dev
+        return torch.device("cpu")
+
+    if torch.cuda.is_available():
+        return torch.device(f"cuda:{rank}")
+    elif torch.backends.mps.is_built():
+        return torch.device("mps")  # for mac use
+    else:
+        return torch.device("cpu")
 
 
 def freeze_model[T: torch.nn.Module](model: T, unfreeze: bool = False) -> T:

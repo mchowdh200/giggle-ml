@@ -18,9 +18,9 @@ echo Starting job.
 source ~/rc/gpu.sh
 export PYTHONUNBUFFERED=1
 
-uv sync
-uv pip install -e .
-# mamba activate gml3
+# uv sync
+# uv pip install -e .
+mamba activate gml3
 
 # data="/cache/siwa3657/data"
 data="data"
