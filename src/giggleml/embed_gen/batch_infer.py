@@ -299,6 +299,9 @@ class _Collate:
         indices, total_intervals = zip(*batch)
         clean_intervals = [x for x in total_intervals if x is not None]
 
+        if len(clean_intervals) == 0:
+            return _DexBatch([None], None)
+
         if self.fasta_path:
             processed_batch = fasta.map(clean_intervals, self.fasta_path)
         else:
@@ -315,20 +318,30 @@ class _ModelWrap(nn.Module):
     @override
     def forward(self, batch: _DexBatch[Any]):
         indices, default_batch = batch
-        return indices, self.model(default_batch)
+
+        if default_batch is not None:
+            return indices, self.model(default_batch)
+        return indices, None
 
 
 class _Decollate:
     def __call__(
-        self, batch: _DexBatch[Tensor]
+        self, batch: _DexBatch[Tensor | None]
     ) -> Iterator[tuple[Idx | None, Tensor | None]]:
-        froc_model = iter(batch[1])
+        indices, tensors = batch
 
-        for idx in batch[0]:
+        if tensors is None:
+            # skip null batches
+            yield (None, None)
+            return
+
+        results = iter(tensors)
+
+        for idx in indices:
             if idx is None:
                 yield (None, None)
             else:
-                yield (idx, next(froc_model))
+                yield (idx, next(results))
 
 
 class _Postprocessor:
