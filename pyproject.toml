@@ -4,14 +4,12 @@ description="Giggle, based on embeddings"
 authors = [{name = "Simon Walker", email = "simon@simonwalker.tech"}]
 readme = "README.md"
 version = "0.1.0"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 # TODO: geniml integration: geniml <- ncls not building on fiji
 dependencies = [
     "accelerate>=1.6.0",
-    "blosc2>=3.11.0",
     "dask>=2025.11.0",
     "filelock>=3.18.0",
-    "geniml>=0.6.0",
     "lightning>=2.5.2",
     "mamba-ssm>=2.2.6.post3; sys_platform == 'linux'",
     "matplotlib>=3.10.1",
@@ -19,14 +17,13 @@ dependencies = [
     "pandas>=2.3.1",
     "pyfastx>=2.2.0",
     "pytest>=8.3.5",
-    "rust-just>=1.43.0",
     "scikit-learn>=1.6.1",
     "scipy>=1.15.2",
     "seaborn>=0.13.2",
     "snakemake>=9.3.2",
     "statistics>=1.0.3.5",
     "tensorboard>=2.20.0",
-    "torch>=2.7.1",
+    "torch>=2.5.0",
     "transformers>=4.51.3",
     "umap-learn>=0.5.9.post2",
     "zarr>=3.1.3",
