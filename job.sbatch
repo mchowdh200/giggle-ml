@@ -20,11 +20,12 @@ export PYTHONUNBUFFERED=1
 
 uv sync
 uv pip install -e .
+# mamba activate gml3
 
 # data="/cache/siwa3657/data"
 data="data"
 # time python3 scripts/roadmapEpigenomicsEmbeds.py $data/roadmap_epigenomics $data/hg/hg19.fa
 # time snakemake --cores 1 all
-time uv run torchrun --nproc_per_node=4 scripts/hparam_search.py
+time torchrun --nproc_per_node=4 scripts/roadmap_epigenomics_embeds.py
 
 echo Complete.
