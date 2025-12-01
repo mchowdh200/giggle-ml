@@ -1,3 +1,5 @@
+from functools import cache
+
 chromatin_states = [
     "Active_TSS",
     "Flanking_Active_TSS",
@@ -309,6 +311,21 @@ bed_names = [f"{x}_{y}" for x in cell_types for y in chromatin_states]
 _cell_category_inverse = {
     value: category for (category, values) in cell_category.items() for value in values
 }
+
+
+@cache
+def chro_state_id(label: str):
+    return chromatin_states.index(label)
+
+
+@cache
+def cell_type_id(label: str):
+    return cell_types.index(label)
+
+
+@cache
+def bed_id(label: str):
+    return bed_names.index(label)
 
 
 def category_of(cell_type: str):
