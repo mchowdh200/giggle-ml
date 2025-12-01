@@ -14,8 +14,14 @@ from giggleml.utils.torch_utils import guess_device
 
 
 def main():
+    # :300  llab
+    # 300:1000  fiji
+    # 1000:1450  fiji
+    # 1450:  fiji
+    # :75  fiji
+
     rme_dir = Path("data/roadmap_epigenomics")
-    bed_slice = rme.bed_names[300:1000]
+    bed_slice = rme.bed_names[:75]
     bed_paths = [rme_dir / "beds" / f"{name}.bed" for name in bed_slice]
     out_paths = [rme_dir / "embeds" / f"{name}.zarr" for name in bed_slice]
     fasta = "data/hg/hg38.fa"
