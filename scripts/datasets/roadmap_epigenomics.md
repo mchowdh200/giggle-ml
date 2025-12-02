@@ -55,3 +55,18 @@ gunzip $rme_small/*.gz;
 cd $rme_small
 ls | xargs -I {} sh -c "head -n 1000 {} > {}_ && mv {}_ {}"
 ```
+
+# roadmap_epigenomics/seqpare_ranks
+
+Seqpare self-similarity
+
+For a directory of .bed files, `beds/`  
+And an output directory, `seqpare_ranks/`
+
+**/!\\ Make sure `seqpare` is installed. https://github.com/deepstanding/seqpare**
+
+```sh
+parallel seqpare "'beds/*.bed'" {} -m 1 -o seqpare_ranks/{/.}.tsv ::: beds/*.bed
+```
+
+This may take several minutes
