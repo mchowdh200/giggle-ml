@@ -1,6 +1,6 @@
 from collections.abc import Iterable, Sized
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -23,13 +23,13 @@ def lazy[T](cls: T) -> T:
 PathLike = Path | str
 
 
-TCo = TypeVar("T_co", covariant=True)
-
-
-class ListLike[TCo](Protocol):
-    def __getitem__(self, idx: int) -> TCo: ...
+class ListLike[T](Protocol):
+    def __getitem__(self, idx: int) -> T: ...
     def __len__(self) -> int: ...
 
 
 class SizedIterable[T](Sized, Iterable[T], Protocol):
     pass
+
+
+IntInt = tuple[int, int]

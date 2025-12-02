@@ -9,11 +9,11 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 
-from giggleml.embed_gen.batch_infer import GenomicEmbedder, Idx
+from giggleml.embed_gen.batch_infer import GenomicEmbedder
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.utils.parallel import Parallel
 from giggleml.utils.torch_utils import guess_device
-from giggleml.utils.types import lazy
+from giggleml.utils.types import IntInt, lazy
 
 from ..data_wrangling import fasta
 from ..data_wrangling.interval_dataset import IntervalDataset
@@ -149,7 +149,7 @@ class DirectPipeline(EmbedPipeline):
                 collected_embeddings = []
 
                 def embedding_collector(
-                    embeddings: Iterable[tuple[Idx, Tensor]],
+                    embeddings: Iterable[tuple[IntInt, Tensor]],
                 ) -> None:
                     for idx, embedding in embeddings:
                         collected_embeddings.append(embedding)

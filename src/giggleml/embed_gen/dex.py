@@ -1,5 +1,5 @@
 import itertools
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from logging import warning
 from typing import cast
 
@@ -26,20 +26,20 @@ from giggleml.utils.torch_utils import (
 type PreprocessorFn[T_in, U_pre] = Callable[[T_in], Iterable[U_pre]]
 """Transforms input elements, potentially creating multiple outputs per input."""
 
-type PostprocessorFn[V_post, W_out] = Callable[[list[V_post]], W_out]
-"""Aggregates multiple model outputs back into a single result."""
-
-type ConsumerFn[W_out] = Callable[[list[W_out]], None]
-"""Handles final outputs (e.g., caching, writing to files)."""
-
 type CollateFn[U_pre, Batch_in] = Callable[[list[U_pre]], Batch_in]
 """Combines preprocessed items into a batch for the model."""
 
 type DecollateFn[Batch_out, V_post] = Callable[[Batch_out], Iterable[V_post]]
 """Splits model batch outputs back into individual items."""
 
+type PostprocessorFn[V_post, W_out] = Callable[[Sequence[V_post]], W_out]
+"""Aggregates multiple model outputs back into a single result."""
 
-def DefaultPostprocessFn[T](items: list[T]) -> T:
+type ConsumerFn[W_out] = Callable[[list[W_out]], None]
+"""Handles final outputs (e.g., caching, writing to files)."""
+
+
+def DefaultPostprocessFn[T](items: Sequence[T]) -> T:
     if len(items) != 1:
         raise RuntimeError(
             "Default postprocessor_fn cannot handle combining multiple items"
@@ -135,14 +135,14 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
 
     def __init__(
         self,
-        model: torch.nn.Module,
+        module: torch.nn.Module,
         preprocessor_fn: PreprocessorFn[T_in, U_pre] = yield_through,
         postprocessor_fn: PostprocessorFn[V_post, W_out] = DefaultPostprocessFn,
         collate_fn: CollateFn[U_pre, Batch_in] = default_collate,
         decollate_fn: DecollateFn[Batch_out, V_post] = yield_from,
     ):
         """Initialize Dex with model and pipeline functions."""
-        self.model: torch.nn.Module = model
+        self.module: torch.nn.Module = module
         self.preprocessor_fn = preprocessor_fn
         self.postprocessor_fn = postprocessor_fn
         self.collate_fn = collate_fn
@@ -183,8 +183,7 @@ class Dex[T_in, U_pre, V_post, W_out, Batch_in, Batch_out]:
         @arg auto_reclaim: automatically pull results back to the cpu when possible
         """
         # Setup device and distributed model if applicable
-        model = self.model
-        current_rank = dist.get_rank() if is_distributed() else 0
+        model = self.module
         device = get_module_device(model)
 
         if is_distributed():
