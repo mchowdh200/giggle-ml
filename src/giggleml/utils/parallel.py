@@ -92,10 +92,11 @@ def dist_process_group(
     backend = backend or _infer_backend()
 
     try:
-        device = guess_device(rank)
+        device: torch.device = guess_device(rank)
+        dev_id = device.index
 
         dist.init_process_group(
-            backend=backend, rank=rank, world_size=world_size, device_id=device
+            backend=backend, rank=rank, world_size=world_size, device_id=dev_id
         )
 
         if backend == "nccl":
@@ -176,7 +177,7 @@ class Parallel:
         master_port: str | None = None,
     ) -> None:
         self.world_size = world_size or _infer_world_size()
-        self.backend = backend
+        self.backend = backend or _infer_backend()
         self.master_addr = master_addr
         self.master_port = master_port or str(_infer_port())
 
