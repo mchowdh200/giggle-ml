@@ -20,27 +20,25 @@ if giggle is a giggle, this is a chuckle
 
 """
 
-from collections.abc import Iterator, Sequence
+from bisect import bisect_right
+from collections.abc import Sequence
 from typing import Any, final
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch import Tensor
-from tqdm import tqdm
 from typing_extensions import override
 
-from giggleml.embed_gen.dex import Dex
-from giggleml.embed_gen.in_dex import InDex
 from giggleml.iter_utils.distributed_scatter_mean import (
     distributed_scatter_mean,
 )
-from giggleml.iter_utils.set_flat_iter import SetFlatIter
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
-from giggleml.utils.autograd_aware_dist_ops import all_gather_cat
 from giggleml.utils.torch_utils import (
     get_rank,
     get_world_size,
+    guess_device,
 )
 
 
@@ -82,7 +80,8 @@ class CModel(nn.Module):
         self.rho = nn.Sequential(*block(phi_latent, rho_latent, rho_depth))
 
         # align with hyena dna dtype
-        self.to(dtype=self.hyena_dna.embed_dtype)
+        self.dtype = self.hyena_dna.embed_dtype
+        self.to(dtype=self.dtype)
 
     def tokenize(self, batch: Sequence[Sequence[str]]) -> list[dict[str, torch.Tensor]]:
         return [self.hyena_dna.collate(item) for item in batch]
@@ -106,85 +105,81 @@ class CModel(nn.Module):
         """takes a batch of set means"""
         return self.rho(batch)
 
-    def distributed_embed(
-        self, data: list[Tensor], batch_size: int, sub_workers: int
-    ) -> Tensor:
-        """
-        Generate set-level embeddings using distributed processing.
+    def distributed_embed(self, input_sets: list[torch.Tensor]) -> torch.Tensor:
+        rank = get_rank()
+        world_size = get_world_size()
+        dev = guess_device()
 
-        This method should be called on all ranks in a distributed setting.
-        It processes interval datasets through the complete C Model pipeline:
-        1. Freezes HyenaDNA parameters for efficiency
-        2. Generates phi embeddings for all sequences using batch inference
-        3. Computes set-level means using distributed scatter operations
-        4. Applies rho network to produce final set embeddings
+        # 1. Calculate Global Partition Bounds
+        # We define the "Ideal Flat Buffer" dimensions without creating it yet
+        total_samples = sum(t.size(0) for t in input_sets)
+        partition_size = total_samples // world_size
 
-            data: List of IntervalDataset objects to process
-            batch_size: Batch size for inference operations
-            sub_workers: Number of sub-workers for parallel processing
+        # Calculate strict start/end indices for this rank
+        rank_start = rank * partition_size
+        rank_end = (
+            total_samples if rank == world_size - 1 else rank_start + partition_size
+        )
+        local_size = rank_end - rank_start
 
-        Returns:
-            Tensor of final set embeddings for this rank's portion of the data only
-        """
-        assert sum(map(len, data)) > batch_size * (get_world_size() - 1)
-        torch.set_float32_matmul_precision("medium")  # we're on half prec anyway
+        # 2. Allocate the Contiguous Buffer on GPU
+        # This is our ONLY allocation.
+        flat_input = torch.empty(
+            local_size, self.hyena_dna.embed_dim, device=dev, dtype=self.dtype
+        )
+        flat_set_ids = torch.empty(local_size, device=dev, dtype=torch.long)
 
-        # create element-wise embeddings
+        # 3. Scatter: Copy from Ragged CPU -> Flat GPU
+        # We iterate the CPU sets and copy ONLY the parts that fall into our rank's window.
+        # This combines "linearization" and "host-to-device transfer" into one operation.
 
-        sfi = SetFlatIter(data)
-        flat_input: Iterator[Tensor] = iter(sfi)  # pyright: ignore[reportAssignmentType]
-        true_indices = list(sfi.indices())
+        # Pre-calculate offsets to find relevant tensors quickly
+        lengths = [t.size(0) for t in input_sets]
+        offsets = torch.tensor([0] + lengths[:-1]).cumsum(0).tolist()
 
-        phi_embeds: list[Tensor] = list()
-        phi_set_indices: list[int] = list()
+        # Find first and last tensor involving this rank
+        first_tensor_idx = bisect_right(offsets, rank_start) - 1
 
-        with tqdm(
-            total=round(len(sfi) / batch_size / get_world_size()),
-            desc="phi",
-            # FIXME:
-            disable=(get_rank() != 9),
-        ) as pbar:
+        buffer_offset = 0
+        current_idx = rank_start
 
-            def collect_phi(block: Sequence[tuple[int, Tensor]]):
-                flat_indices, embeds = zip(*block)
-                phi_embeds.extend(embeds)
-                set_indices = [true_indices[i][0] for i in flat_indices]
-                phi_set_indices.extend(set_indices)
-                pbar.update()
+        # Iterate only the relevant subset of input tensors
+        idx = first_tensor_idx
+        while buffer_offset < local_size and idx < len(input_sets):
+            src_tensor = input_sets[idx]
+            src_start_global = offsets[idx]
 
-            # InDex allows stable output reordering even with num_workers != 0
-            InDex(self.phi).execute(
-                flat_input, collect_phi, batch_size, sub_workers, auto_reclaim=False
-            )
+            # Calculate overlap between [src_tensor] and [rank_window]
+            copy_start = max(0, current_idx - src_start_global)
+            copy_end = min(src_tensor.size(0), rank_end - src_start_global)
+            copy_len = copy_end - copy_start
 
-        # set-level mean
-        phi_tensor = torch.stack(phi_embeds)
-        phi_indices_tensor = torch.tensor(phi_set_indices, device=phi_tensor.device)
-        set_means = distributed_scatter_mean(phi_tensor, phi_indices_tensor)
+            if copy_len > 0:
+                # A. Copy Data (CPU Slice -> GPU Slice)
+                flat_input[buffer_offset : buffer_offset + copy_len].copy_(
+                    src_tensor[copy_start:copy_end], non_blocking=True
+                )
 
-        # rho pass
+                # B. Fill Metadata (GPU Fill)
+                # Extremely fast operation to broadcast the scalar 'idx'
+                flat_set_ids[buffer_offset : buffer_offset + copy_len].fill_(idx)
 
-        local_rho_embeds = list()
-        rho_dex = Dex(self.rho)
+                buffer_offset += copy_len
+                current_idx += copy_len
 
-        def collect_rho(block: Sequence[torch.Tensor]):
-            # block = [block.to("cpu", non_blocking=True) for block in block]
-            local_rho_embeds.extend(block)
+            idx += 1
 
-        batch_size = min(batch_size, len(data) // get_world_size())
+        # 4. Idiomatic Processing
+        local_output = self.phi(flat_input)  # Process entire partition at once?
 
-        with torch.autocast("cuda", dtype=torch.float32):
-            # Dex default collate is so fast that we can avoid sub-workers
-            #   and must, because we can't easily transfer grad tensors between workers
-            rho_dex.execute(
-                set_means, collect_rho, batch_size, num_workers=0, auto_reclaim=False
-            )
+        # 5. Scatter Mean
+        means = distributed_scatter_mean(local_output, flat_set_ids)
 
-        # 4. regroup
-        local_rho_embeds_tensor = torch.stack(local_rho_embeds)
-        total_rho_embeds = all_gather_cat(local_rho_embeds_tensor)
-        total_ordering = rho_dex.simulate_global_concat(range(len(data)), batch_size)
-        return total_rho_embeds[total_ordering]
+        # 6. rho
+        rho_outputs = self.rho(means) if get_rank() == 0 else None  # pyright: ignore[reportAssignmentType]
+        rho_outputs: Tensor = dist.broadcast(rho_outputs, src=0)  # pyright: ignore[reportAssignmentType]
+
+        return rho_outputs
 
     @override
     def train(self, mode: bool = True) -> "CModel":

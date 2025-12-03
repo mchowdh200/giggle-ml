@@ -359,11 +359,7 @@ class Finetuner:
         assert node_data is not None and adj_matrix is not None
 
         # 3. Call distributed_embed
-        batch_tensor = self.model.distributed_embed(
-            self.fm_cache.map(node_data),
-            self.config.dex_batch_size,
-            self.config.dex_sub_workers,
-        )
+        batch_tensor = self.model.distributed_embed(self.fm_cache.map(node_data))
 
         # 4. Move to device
         batch_tensor = batch_tensor.to(self.fabric.device)
