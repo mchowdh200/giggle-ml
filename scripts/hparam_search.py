@@ -105,16 +105,17 @@ def main():
 
     conf = TrainConfig(
         "val",
-        total_steps=6,
-        validation_freq=1,
-        model=CModel("16k", 512, 128, 1, 2),
+        base_model_dir=Path("modelCkpts", "cmodel_12022025"),
+        total_steps=10,
+        validation_freq=2,
+        model=CModel("16k", 512, 128, 2, 2),
         margin=3,
         learning_rate=1e-7,
         pk_ratio=1.5,
         positive_threshold=0.96,
         batch_size=128,
-        density=32,
-        dex_batch_size=85,
+        sampling_rate=0.95,
+        dex_batch_size=int(1e6),
         dex_sub_workers=0,
     )
 
@@ -123,19 +124,14 @@ def main():
     do = cache.do
 
     try:
-        header("density")
+        header("pkr")
         do(
             {
-                "batch_size": 16,
-                "density": density,
                 "pk_ratio": pkr,
                 "mining_strategy": "all",
                 "margin": 0.1,
             }
-            for pkr in [8]
-            for density in [24]
-            # for density in [32, 64]
-            # for density in [32, 64, 128, 256]
+            for pkr in [16, 8, 2, 0.5]
         )
 
         # header("")

@@ -4,24 +4,26 @@ Refactored for a clear, type-safe, two-phase initialization lifecycle.
 """
 
 import math
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
+from functools import cache
+from os import PathLike
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, cast, final
 
 import torch
+import zarr
 from lightning_fabric import Fabric
 from torch import Tensor, optim
 from torch.nn.modules.loss import TripletMarginLoss
 
-from giggleml.data_wrangling.interval_dataset import MemoryIntervalDataset
+import giggleml.utils.roadmap_epigenomics as rme
 from giggleml.models.c_model import CModel
 from giggleml.train.graph_triplet_miner import GraphTripletMiner
 from giggleml.train.rme_clusters_dataset import MiningBatch, RmeSeqpareClusters
 from giggleml.train.seqpare_db import SeqpareDB
 from giggleml.utils.cv_splits import create_cv_splits
-from giggleml.utils.torch_utils import launch_fabric, rprint0
-from giggleml.utils.types import GenomicInterval
+from giggleml.utils.torch_utils import launch_fabric
 from giggleml.utils.utils.collection_utils import as_list
 
 
@@ -38,6 +40,7 @@ class TrainConfig:
     base_model_dir: Path = Path("modelCkpts/cmodel_11072025")
     fasta_path: Path = field(init=False)
     rme_beds_path: Path = field(init=False)
+    rme_embeds_path: Path = field(init=False)
     seqpare_dir: Path = field(init=False)
     checkpoint_dir: Path = field(init=False)
     margin: float = 3.0
@@ -50,7 +53,7 @@ class TrainConfig:
     weight_decay: float = 1e-5
     batch_size: int = 128
     pk_ratio: float = 2  # p/k, clusters/(positives per cluster)
-    density: int = 32  # This is intervals_per_group
+    sampling_rate: float = 0.9  # element drop-out regularization
 
     positive_threshold: float = 0.1
     cv_ratios: dict[str, float] = field(
@@ -92,10 +95,11 @@ class TrainConfig:
         )
 
         # --- Derived Paths ---
-        self.fasta_path = self.base_data_dir / "hg/hg19.fa"
+        self.fasta_path = self.base_data_dir / "hg/hg38.fa"
         rme = self.base_data_dir / "roadmap_epigenomics"
         self.rme_beds_path = rme / "beds"
-        self.seqpare_dir = rme / "seqpareRanks"
+        self.rme_embeds_path = rme / "embeds"
+        self.seqpare_dir = rme / "seqpare_ranks"
         self.checkpoint_dir = self.base_model_dir / "checkpoints"
 
         self.corrected_batch_size, self.clusters_per_batch, self.cluster_size = (
@@ -103,10 +107,42 @@ class TrainConfig:
         )
 
 
+@final
 class StepResult(NamedTuple):
     loss: float
     active_triplets: int
     max_triplets: int
+
+
+@final
+class FoundationModelCache:
+    def __init__(self, rme_dir: PathLike, embeds_dir: PathLike) -> None:
+        self.rme_dir = Path(rme_dir)
+        self.embeds_dir = Path(embeds_dir)
+
+    @cache
+    def _get_tensor(self, bed_name: str) -> Tensor:
+        """
+        Reads the entire Zarr array into memory and converts to a CPU Tensor.
+        Cached, so this massive read only happens once per bed_name.
+        """
+        zarr_path = self.embeds_dir / f"{bed_name}.zarr"
+        z_array = zarr.open_array(zarr_path, mode="r")
+        # full in-memory cache
+        return torch.from_numpy(z_array[:])
+
+    @as_list
+    def map(self, items: Iterable[tuple[int, Tensor]]) -> Iterator[Tensor]:
+        """
+        Map (set, row) indices to embeddings using in-memory Tensors.
+        """
+        for set_idx, row_indices in items:
+            bed_name = rme.bed_names[set_idx]
+            full_embeds = self._get_tensor(bed_name)
+
+            # Direct Tensor Indexing
+            indices = row_indices.long()
+            yield full_embeds[indices]
 
 
 class Finetuner:
@@ -121,6 +157,9 @@ class Finetuner:
 
         self.train_dataset: RmeSeqpareClusters | None = None
         self.eval_dataset: RmeSeqpareClusters | None = None
+        self.fm_cache = FoundationModelCache(
+            config.rme_beds_path, config.rme_embeds_path
+        )
 
         self.start_step = 0
         self._is_setup = False
@@ -182,10 +221,10 @@ class Finetuner:
             world_size=self.fabric.world_size,
             rank=self.fabric.global_rank,
             positive_threshold=self.config.positive_threshold,
+            anchors=cluster_amnt,
             groups_per_cluster=cluster_size,
-            intervals_per_group=self.config.density,
+            sampling_rate=self.config.sampling_rate,
             allowed_rme_names=allowed_rme_names,
-            clusters_amnt=cluster_amnt,
             seed=seed,
         )
 
@@ -316,12 +355,12 @@ class Finetuner:
             data_batch = (None, None)  # Placeholder for broadcast
 
         data_batch = self.fabric.broadcast(data_batch, src=0)
-        node_intervals, adj_matrix = data_batch
-        assert node_intervals is not None and adj_matrix is not None
+        node_data, adj_matrix = data_batch
+        assert node_data is not None and adj_matrix is not None
 
         # 3. Call distributed_embed
         batch_tensor = self.model.distributed_embed(
-            self._batch_with_fasta(node_intervals),
+            self.fm_cache.map(node_data),
             self.config.dex_batch_size,
             self.config.dex_sub_workers,
         )
@@ -350,9 +389,6 @@ class Finetuner:
                     ),
                 ).item()
             )
-
-            rprint0("adj, row edges:", adj_matrix.sum(dim=1))
-            rprint0("adj, symm diffs?", (adj_matrix.T != adj_matrix).abs().sum())
 
             if self.config.mining_strategy != "all":
                 max_triplets = adj_matrix.shape[0]
@@ -435,14 +471,3 @@ class Finetuner:
             self.fabric.print(f"{eval_split_name} Loss: {loss:.4f}")
 
         return train_result
-
-    def _batch_with_fasta(
-        self, batch: Iterable[Sequence[GenomicInterval]]
-    ) -> list[MemoryIntervalDataset]:
-        results = list()
-
-        for item in batch:
-            result = MemoryIntervalDataset(item, self.config.fasta_path)
-            results.append(result)
-
-        return results

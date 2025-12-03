@@ -20,24 +20,26 @@ if giggle is a giggle, this is a chuckle
 
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any, final
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+from tqdm import tqdm
 from typing_extensions import override
 
-from giggleml.data_wrangling.interval_dataset import IntervalDataset
-from giggleml.embed_gen.batch_infer import GenomicEmbedder, Idx
 from giggleml.embed_gen.dex import Dex
+from giggleml.embed_gen.in_dex import InDex
 from giggleml.iter_utils.distributed_scatter_mean import (
     distributed_scatter_mean,
 )
+from giggleml.iter_utils.set_flat_iter import SetFlatIter
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
 from giggleml.utils.autograd_aware_dist_ops import all_gather_cat
 from giggleml.utils.torch_utils import (
-    freeze_model,
+    get_rank,
     get_world_size,
 )
 
@@ -85,37 +87,6 @@ class CModel(nn.Module):
     def tokenize(self, batch: Sequence[Sequence[str]]) -> list[dict[str, torch.Tensor]]:
         return [self.hyena_dna.collate(item) for item in batch]
 
-    @override
-    def forward(self, batch: list[dict[str, torch.Tensor]]) -> torch.Tensor:
-        # 1. phi pass
-        phi_embeds = torch.cat(
-            [self.set_contents_forward(item) for item in batch], dim=0
-        )
-
-        # 2. set-level mean
-
-        dev = phi_embeds.device
-        dtype: torch.dtype = phi_embeds.dtype
-
-        set_sizes = torch.tensor(
-            [len(item["input_ids"]) for item in batch],
-            device=dev,
-        )
-        assert torch.all(set_sizes != 0), "encountered a set with zero size"
-        set_indices = torch.arange(0, len(batch), device=dev).repeat_interleave(
-            set_sizes
-        )
-
-        set_means = torch.zeros(
-            len(batch), phi_embeds.shape[1], device=dev, dtype=dtype
-        ).scatter_add_(
-            0, set_indices.unsqueeze(1).expand_as(phi_embeds), phi_embeds
-        ) / set_sizes.unsqueeze(1)
-
-        # 3. rho pass
-        with torch.autocast("cuda", dtype=torch.float32):
-            return self.set_means_forward(set_means)
-
     def set_contents_forward(self, item: dict[str, torch.Tensor]) -> torch.Tensor:
         """
         Forward: only includes element-wise operations.
@@ -136,8 +107,8 @@ class CModel(nn.Module):
         return self.rho(batch)
 
     def distributed_embed(
-        self, data: Sequence[IntervalDataset], batch_size: int, sub_workers: int
-    ) -> torch.Tensor:
+        self, data: list[Tensor], batch_size: int, sub_workers: int
+    ) -> Tensor:
         """
         Generate set-level embeddings using distributed processing.
 
@@ -155,34 +126,43 @@ class CModel(nn.Module):
         Returns:
             Tensor of final set embeddings for this rank's portion of the data only
         """
-
         assert sum(map(len, data)) > batch_size * (get_world_size() - 1)
-
-        # 0. setup things
         torch.set_float32_matmul_precision("medium")  # we're on half prec anyway
 
-        # 1. freeze HyenaDNA parameters
-        freeze_model(self.hyena_dna)
+        # create element-wise embeddings
 
-        # 2. create element-wise embeddings
+        sfi = SetFlatIter(data)
+        flat_input: Iterator[Tensor] = iter(sfi)  # pyright: ignore[reportAssignmentType]
+        true_indices = list(sfi.indices())
 
-        phi_embeds = list()
-        phi_set_indices = list()
+        phi_embeds: list[Tensor] = list()
+        phi_set_indices: list[int] = list()
 
-        def collect_phi(block: Sequence[tuple[Idx, torch.Tensor]]):
-            indices, embeds = zip(*block)
-            phi_set_indices.extend(i for (i, _) in indices)
-            phi_embeds.extend(embeds)
+        with tqdm(
+            total=round(len(sfi) / batch_size / get_world_size()),
+            desc="phi",
+            # FIXME:
+            disable=(get_rank() != 9),
+        ) as pbar:
 
-        # The RowCModel wraps a Dex that handles genomic nuances like FASTA mapping & interval chunking.
-        GenomicEmbedder(RowCModel(self), batch_size, sub_workers).raw(data, collect_phi)
+            def collect_phi(block: Sequence[tuple[int, Tensor]]):
+                flat_indices, embeds = zip(*block)
+                phi_embeds.extend(embeds)
+                set_indices = [true_indices[i][0] for i in flat_indices]
+                phi_set_indices.extend(set_indices)
+                pbar.update()
 
-        # 3. set-level mean
+            # InDex allows stable output reordering even with num_workers != 0
+            InDex(self.phi).execute(
+                flat_input, collect_phi, batch_size, sub_workers, auto_reclaim=False
+            )
+
+        # set-level mean
         phi_tensor = torch.stack(phi_embeds)
         phi_indices_tensor = torch.tensor(phi_set_indices, device=phi_tensor.device)
         set_means = distributed_scatter_mean(phi_tensor, phi_indices_tensor)
 
-        # 3. rho pass
+        # rho pass
 
         local_rho_embeds = list()
         rho_dex = Dex(self.rho)
@@ -192,9 +172,10 @@ class CModel(nn.Module):
             local_rho_embeds.extend(block)
 
         batch_size = min(batch_size, len(data) // get_world_size())
+
         with torch.autocast("cuda", dtype=torch.float32):
             # Dex default collate is so fast that we can avoid sub-workers
-            #   and must, because we can't transfer grad tensors between workers
+            #   and must, because we can't easily transfer grad tensors between workers
             rho_dex.execute(
                 set_means, collect_rho, batch_size, num_workers=0, auto_reclaim=False
             )

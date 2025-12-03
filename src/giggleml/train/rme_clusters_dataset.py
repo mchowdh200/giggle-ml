@@ -10,16 +10,14 @@ from random import Random
 from typing import NamedTuple, override
 
 import numpy as np
-import torch  # <-- Added import
+import torch
 from numpy._typing import NDArray
 from torch.utils.data import IterableDataset
 
-from giggleml.data_wrangling.interval_dataset import BedDataset
+import giggleml.utils.roadmap_epigenomics as rme
 from giggleml.train.seqpare_db import SeqpareDB
-from giggleml.utils.path_utils import fix_bed_ext
 from giggleml.utils.types import GenomicInterval, lazy
 from giggleml.utils.utils.collection_utils import as_list
-from giggleml.utils.utils.lru_cache import lru_cache
 
 # A cluster is a list of bed files
 Cluster = list[list[GenomicInterval]]
@@ -27,8 +25,8 @@ Cluster = list[list[GenomicInterval]]
 
 # a batch, to be mined for triplets
 class MiningBatch(NamedTuple):
-    interval_groups: list[list[GenomicInterval]]
-    adjacency_matrix: torch.Tensor
+    interval_groups: list[tuple[int, torch.Tensor]]  # set idx by row indices
+    adjacency_matrix: torch.Tensor  # shape [ N, N ]
 
 
 @lazy
@@ -53,9 +51,9 @@ class RmeSeqpareClusters(IterableDataset):
         world_size: int,
         rank: int,
         positive_threshold: float = 0.96,
-        clusters_amnt: int = 10,
+        anchors: int = 10,
         groups_per_cluster: int = 10,
-        intervals_per_group: int = 30,
+        sampling_rate: float = 0.9,
         allowed_rme_names: Iterable[str] | None = None,
         seed: int = 42,
     ) -> None:
@@ -72,18 +70,17 @@ class RmeSeqpareClusters(IterableDataset):
             allowed_rme_names: Iterable of RME names for cross-validation. Defaults to all names.
             seed: Random seed for reproducibility.
         """
-        # Assign attributes first
-        self.rme_dir: PathLike = road_epig_path
+        self.rme_dir: Path = Path(road_epig_path)
         self.sdb: SeqpareDB = seqpare
         self.positive_threshold: float = positive_threshold
-        self.clusters_amnt: int = clusters_amnt
+        self.anchors: int = anchors
         self.groups_per_cluster: int = groups_per_cluster
-        self.intervals_per_group: int = intervals_per_group
+        self.sampling_rate: float = sampling_rate
         self.seed: int = seed
 
         # Validate parameters
-        if clusters_amnt <= 0:
-            raise ValueError(f"clusters_amnt must be positive, got {clusters_amnt}")
+        if anchors <= 0:
+            raise ValueError(f"clusters_amnt must be positive, got {anchors}")
         if not (0.0 < positive_threshold <= 1.0):
             raise ValueError(
                 f"positive_threshold must be in (0, 1], got {positive_threshold}"
@@ -92,24 +89,13 @@ class RmeSeqpareClusters(IterableDataset):
             raise ValueError(
                 f"groups_per_cluster must be positive, got {groups_per_cluster}"
             )
-        if intervals_per_group <= 0:
+        if not (0 < sampling_rate <= 1):
             raise ValueError(
-                f"intervals_per_group must be positive, got {intervals_per_group}"
+                f"sampling_rate must be within (0, 1], got: {sampling_rate}"
             )
 
-        def total_possible_rme_names() -> Iterator[str]:
-            for entry in Path(self.rme_dir).iterdir():
-                if entry.is_file():
-                    name = entry.name
-                    if name.endswith(".bed.gz"):
-                        yield name[:-7]  # Remove .bed.gz
-                    elif name.endswith(".bed"):
-                        yield name[:-4]  # Remove .bed
-
         self.allowed_rme_names: set[str] = set(
-            total_possible_rme_names()
-            if allowed_rme_names is None
-            else allowed_rme_names
+            rme.bed_names if allowed_rme_names is None else allowed_rme_names
         )
 
         self._allowed_mask: NDArray[np.bool_] = self.sdb.labels_to_mask(
@@ -127,7 +113,7 @@ class RmeSeqpareClusters(IterableDataset):
                     [self._sample_cluster(anchor) for anchor in anchors]
                 )
             )
-            node_labels = [self.sdb.idx_to_label(idx) for idx in nodes]
+            node_labels = [rme.bed_names[idx] for idx in nodes]
             # only with indices contained in the subgraph
             adjacency_matrix_list = [
                 self.sdb.fetch_mask(label, self.positive_threshold)[nodes]
@@ -157,29 +143,27 @@ class RmeSeqpareClusters(IterableDataset):
 
         # in case all neighbors are mutually dissimilar, this guarantees
         # they have at least one similar item
-        yield self.sdb.label_to_idx(anchor)
+        yield rme.bed_id(anchor)
 
         for _ in range(self.groups_per_cluster - 1):
             yield self._rng.choice(positive_indices)
 
-    def _sample_group(self, anchor: str) -> list[GenomicInterval]:
-        bed = self._fetch_bed(fix_bed_ext(Path(self.rme_dir, anchor)))
+    def _sample_group(self, anchor: str) -> tuple[int, torch.Tensor]:
+        anchor_id = rme.bed_id(anchor)
+        size = rme.bed_sizes[anchor_id]
 
-        if len(bed) == 0:
+        if size == 0:
             raise RuntimeError(
                 f"Bed file for label '{anchor}' is empty. Check data integrity."
             )
 
-        k = min(len(bed), self.intervals_per_group)
-        return self._rng.choices(bed, k=k)
-
-    @lru_cache(max_size=128)
-    def _fetch_bed(self, path: Path) -> list[GenomicInterval]:
-        return list(iter(BedDataset(path)))
+        k = max(1, round(self.sampling_rate * size))
+        samples = torch.randperm(size)[:k]
+        return anchor_id, samples.cpu()
 
     def _sample_anchors(self) -> list[str]:
         """same across ranks"""
-        return self._rng.choices(list(self.allowed_rme_names), k=self.clusters_amnt)
+        return self._rng.choices(list(self.allowed_rme_names), k=self.anchors)
 
     def save_state(self) -> dict:
         """

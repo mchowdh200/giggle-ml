@@ -1,60 +1,21 @@
-from giggleml.train.train_orchestrator import Finetuner, TrainConfig
-from giggleml.utils.time_this import time_this
-from giggleml.utils.torch_utils import get_rank, rprint
+from pathlib import Path
+
+import giggleml.utils.roadmap_epigenomics as rme
+from giggleml.data_wrangling.interval_dataset import BedDataset
+from giggleml.utils.print_utils import progress_logger
 
 
 def main():
-    conf = TrainConfig(
-        "val",
-        total_steps=3,
-        validation_freq=3,
-        model_size="16k",
-        margin=3,
-        learning_rate=1e-7,
-        pk_ratio=1.5,
-        positive_threshold=0.96,
-        target_batch_size=128,
-        density=32,
-        dex_batch_size=85,
-        dex_sub_workers=0,
-    )
+    with progress_logger(len(rme.bed_names), "reading") as ckpt:
+        with open("tmp", "w") as f:
+            lines = []
 
-    with time_this("training"):
-        ft = Finetuner(conf)
-        ft.setup()
-        loss = ft.run()
+            for x in rme.bed_names:
+                path = Path("data", "roadmap_epigenomics", "beds", x + ".bed.gz")
+                lines.append(str(len(BedDataset(path))))
+                ckpt()
 
-    if get_rank() == 0:
-        rprint()
-        rprint("final validation loss:", loss)
-
-    # 2 gpus, 5m
-    # conf = TrainConfig(
-    #     "val",
-    #     total_steps=6,
-    #     validation_freq=3,
-    #     model_size="16k",
-    #     margin=3,
-    #     learning_rate=1e-7,
-    #     pk_ratio=1.5,
-    #     positive_threshold=0.96,
-    #     batch_size=128,
-    #     density=30,
-    #     dex_batch_size=85,
-    #     dex_sub_workers=8,
-    # )
-
-    # 2 gpus, 3m
-    # conf = TrainConfig(
-    #     ...
-    #     dex_sub_workers=2,
-    # )
-
-    # 2 gpus, 116s
-    # conf = TrainConfig(
-    #     ...
-    #     dex_sub_workers=0,
-    # )
+            f.writelines(", \n".join(lines))
 
 
 if __name__ == "__main__":
