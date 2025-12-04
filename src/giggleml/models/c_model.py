@@ -25,9 +25,7 @@ from collections.abc import Sequence
 from typing import Any, final
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
-from torch import Tensor
 from typing_extensions import override
 
 from giggleml.iter_utils.distributed_scatter_mean import (
@@ -176,10 +174,8 @@ class CModel(nn.Module):
         means = distributed_scatter_mean(local_output, flat_set_ids)
 
         # 6. rho
-        rho_outputs = self.rho(means) if get_rank() == 0 else None  # pyright: ignore[reportAssignmentType]
-        rho_outputs: Tensor = dist.broadcast(rho_outputs, src=0)  # pyright: ignore[reportAssignmentType]
-
-        return rho_outputs
+        rho_output: torch.Tensor = self.rho(means)  # cheap
+        return rho_output / rho_output.norm()  # normalization helps prevent cheating
 
     @override
     def train(self, mode: bool = True) -> "CModel":
