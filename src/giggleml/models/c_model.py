@@ -28,11 +28,9 @@ import torch
 import torch.nn as nn
 from typing_extensions import override
 
-from giggleml.iter_utils.distributed_scatter_mean import (
-    distributed_scatter_mean,
-)
 from giggleml.models.genomic_model import GenomicModel
 from giggleml.models.hyena_dna import HyenaDNA
+from giggleml.utils.autograd_aware_dist_ops import all_reduce_sum
 from giggleml.utils.torch_utils import (
     get_rank,
     get_world_size,
@@ -78,7 +76,7 @@ class CModel(nn.Module):
         self.rho = nn.Sequential(*block(phi_latent, rho_latent, rho_depth))
 
         # align with hyena dna dtype
-        self.dtype = self.hyena_dna.embed_dtype
+        self.dtype = torch.bfloat16
         self.to(dtype=self.dtype)
 
     def tokenize(self, batch: Sequence[Sequence[str]]) -> list[dict[str, torch.Tensor]]:
@@ -103,14 +101,19 @@ class CModel(nn.Module):
         """takes a batch of set means"""
         return self.rho(batch)
 
-    def distributed_embed(self, input_sets: list[torch.Tensor]) -> torch.Tensor:
+    def distributed_embed(self, batch: list[torch.Tensor]) -> torch.Tensor:
         rank = get_rank()
         world_size = get_world_size()
         dev = guess_device()
+        dtype = self.dtype
+        edim = self.hyena_dna.embed_dim
+
+        # 0. Get on the common dtype
+        batch = [x.to(dtype=dtype) for x in batch]
 
         # 1. Calculate Global Partition Bounds
         # We define the "Ideal Flat Buffer" dimensions without creating it yet
-        total_samples = sum(t.size(0) for t in input_sets)
+        total_samples = sum(t.size(0) for t in batch)
         partition_size = total_samples // world_size
 
         # Calculate strict start/end indices for this rank
@@ -122,9 +125,7 @@ class CModel(nn.Module):
 
         # 2. Allocate the Contiguous Buffer on GPU
         # This is our ONLY allocation.
-        flat_input = torch.empty(
-            local_size, self.hyena_dna.embed_dim, device=dev, dtype=self.dtype
-        )
+        flat_input = torch.empty(local_size, edim, device=dev, dtype=dtype)
         flat_set_ids = torch.empty(local_size, device=dev, dtype=torch.long)
 
         # 3. Scatter: Copy from Ragged CPU -> Flat GPU
@@ -132,8 +133,8 @@ class CModel(nn.Module):
         # This combines "linearization" and "host-to-device transfer" into one operation.
 
         # Pre-calculate offsets to find relevant tensors quickly
-        lengths = [t.size(0) for t in input_sets]
-        offsets = torch.tensor([0] + lengths[:-1]).cumsum(0).tolist()
+        lengths_list = [t.size(0) for t in batch]
+        offsets = torch.tensor([0] + lengths_list[:-1]).cumsum(0).tolist()
 
         # Find first and last tensor involving this rank
         first_tensor_idx = bisect_right(offsets, rank_start) - 1
@@ -143,8 +144,8 @@ class CModel(nn.Module):
 
         # Iterate only the relevant subset of input tensors
         idx = first_tensor_idx
-        while buffer_offset < local_size and idx < len(input_sets):
-            src_tensor = input_sets[idx]
+        while buffer_offset < local_size and idx < len(batch):
+            src_tensor = batch[idx]
             src_start_global = offsets[idx]
 
             # Calculate overlap between [src_tensor] and [rank_window]
@@ -168,10 +169,13 @@ class CModel(nn.Module):
             idx += 1
 
         # 4. Idiomatic Processing
-        local_output = self.phi(flat_input)  # Process entire partition at once?
+        local_output: torch.Tensor = self.phi(flat_input)  # Entire partition at once?
 
         # 5. Scatter Mean
-        means = distributed_scatter_mean(local_output, flat_set_ids)
+        means = torch.zeros(len(batch), self.phi_latent, device=dev, dtype=dtype)
+        means.index_add_(0, flat_set_ids, local_output)
+        means = all_reduce_sum(means)
+        means /= torch.tensor(lengths_list, device=dev, dtype=dtype).unsqueeze(-1)
 
         # 6. rho
         rho_output: torch.Tensor = self.rho(means)  # cheap
