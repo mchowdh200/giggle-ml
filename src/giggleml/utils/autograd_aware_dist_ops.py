@@ -141,7 +141,7 @@ class DifferentiableAllReduceSum(torch.autograd.Function):
         return output_tensor
 
     @staticmethod
-    def backward(ctx: FunctionCtx, *grad_outputs: torch.Tensor) -> torch.Tensor:
+    def backward(ctx: FunctionCtx, *grad_outputs: torch.Tensor):
         """
         Backward pass:
         As derived above, the backward pass is also an all_reduce(sum)
@@ -159,7 +159,7 @@ class DifferentiableAllReduceSum(torch.autograd.Function):
 
         # The function returns one gradient, corresponding to the
         # one input (input_tensor) of the forward pass.
-        return grad_input
+        return grad_input, None
 
 
 def all_reduce_sum(
