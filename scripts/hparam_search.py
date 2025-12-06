@@ -72,8 +72,6 @@ class Cache:
                     active_triplets / max_triplets.round(decimals=3).tolist()
                 )
 
-                print("max trips", max_triplets)
-
                 print(diff)
                 print("eval")
                 with indent_prints(indent=2):
@@ -106,17 +104,15 @@ def main():
     conf = TrainConfig(
         "val",
         base_model_dir=Path("modelCkpts", "cmodel_12022025"),
-        total_steps=10,
+        sprint_steps=10,
         validation_freq=2,
         model=CModel("16k", 512, 128, 2, 2),
         margin=3,
         learning_rate=1e-7,
         pk_ratio=1.5,
         positive_threshold=0.96,
-        batch_size=128,
-        sampling_rate=0.95,
-        dex_batch_size=int(1e6),
-        dex_sub_workers=0,
+        batch_size=64,
+        sampling_rate=1,
     )
 
     dist.barrier()
@@ -124,115 +120,57 @@ def main():
     do = cache.do
 
     try:
+        header("easy")
+        do(
+            {
+                "margin": 0.1,
+                "pk_ratio": pkr,
+                "sampling_rate": 1,
+                "learning_rate": lr,
+                "batch_size": 128,
+                "sprint_steps": 10,
+                "mining_strategy": "semi-hard",
+            }
+            for lr in [1e-3, 1e-2]
+            for pkr in [0.5, 0.25]
+        )
+        do(
+            [
+                {
+                    "margin": 0.1,
+                    "pk_ratio": 0.5,
+                    "sampling_rate": 1,
+                    "learning_rate": 1e-4,
+                    "batch_size": 128,
+                    "sprint_steps": 20,
+                    "mining_strategy": "semi-hard",
+                },
+                {
+                    "margin": 0.01,
+                    "pk_ratio": 0.5,
+                    "sampling_rate": 1,
+                    "learning_rate": 1e-4,
+                    "batch_size": 128,
+                    "sprint_steps": 20,
+                    "mining_strategy": "semi-hard",
+                },
+            ]
+        )
+
         header("pkr")
         do(
             {
+                "margin": 0.01,
                 "pk_ratio": pkr,
-                "mining_strategy": "all",
-                "margin": 0.1,
+                "sampling_rate": 1,
+                "learning_rate": 1e-4,
+                "batch_size": 128,
+                "sprint_steps": 10,
+                "mining_strategy": "semi-hard",
             }
-            for pkr in [16, 8, 2, 0.5]
+            for pkr in [16, 8, 2, 0.5, 0.25]
         )
 
-        # header("")
-        # do(
-        #     {
-        #         "batch_size": 16,
-        #         "density": density,
-        #         "pk_ratio": pkr,
-        #         "mining_strategy": "all",
-        #         "margin": 0.1,
-        #     }
-        #     for pkr in [8]
-        #     for density in [32, 64, 128]
-        # )
-
-        # do(
-        #     {
-        #         "batch_size": batch_size,
-        #         "pk_ratio": pk_ratio,
-        #         "mining_strategy": "all",
-        #         "margin": 0.1,
-        #     }
-        #     for batch_size in [32, 64]
-        #     for pk_ratio in [1 / 16, 1 / 8, 1 / 2, 2, 8, 32]
-        # )
-
-        # header("batch, pkr")
-        # do(
-        #     {
-        #         "batch_size": batch_size,
-        #         "pk_ratio": pk_ratio,
-        #         "margin": 0.1,
-        #     }
-        #     for batch_size in [32, 64, 128]
-        #     for pk_ratio in [1 / 16, 1 / 8, 1 / 2, 2, 8, 32]
-        # )
-
-        # rprint0("\n model shape")
-        # do(
-        #     {
-        #         "batch_size": 64,
-        #         "model": CModel("16k", *args),
-        #     }
-        #     for args in [
-        #         # quite large
-        #         (1024, 128, 2, 2),
-        #         (1024, 128, 1, 2),
-        #         (1024, 128, 2, 1),
-        #         (1024, 128, 1, 1),
-        #         # large
-        #         (512, 128, 2, 2),
-        #         (512, 128, 1, 2),
-        #         (512, 128, 2, 1),
-        #         (512, 128, 1, 1),
-        #         # medium
-        #         (256, 128, 2, 2),
-        #         (256, 128, 1, 2),
-        #         (256, 128, 2, 1),
-        #         (256, 128, 1, 1),
-        #         # small
-        #         (128, 128, 2, 2),
-        #         (128, 128, 1, 2),
-        #         (128, 128, 2, 1),
-        #         (128, 128, 1, 1),
-        #     ]
-        # )
-
-        # rprint0("\n LR + model shape")
-        # do(
-        #     {
-        #         "batch_size": 64,
-        #         "total_steps": 4,
-        #         "learning_rate": lr,
-        #         "model": CModel("16k", *args),
-        #     }
-        #     for lr in [1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3]
-        #     for args in [
-        #         # quite large
-        #         (1024, 128, 2, 2),
-        #         (1024, 128, 1, 2),
-        #         (1024, 128, 2, 1),
-        #         # large
-        #         (512, 128, 2, 2),
-        #         (512, 128, 1, 2),
-        #         (512, 128, 2, 1),
-        #     ]
-        # )
-
-        # do(
-        #     {
-        #         "batch_size": batch_size,
-        #         "margin": margin,
-        #         "pk_ratio": pk_ratio,
-        #         "total_steps": 3,
-        #         "model": CModel("16k", 512, 128, 1, 2),
-        #     }
-        #     for batch_size in [32, 64, 128, 256]
-        #     for margin in [0.5, 1, 2, 3, 4]
-        #     for pk_ratio in [0.25, 0.5, 16, 32, 64, 128, 256]
-        #     if pk_ratio < batch_size
-        # )
     finally:
         dist.barrier()
         cache.save()

@@ -7,6 +7,7 @@ import math
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from functools import cache
+from logging import warning
 from os import PathLike
 from pathlib import Path
 from typing import Any, NamedTuple, cast, final
@@ -16,6 +17,7 @@ import zarr
 from lightning_fabric import Fabric
 from torch import Tensor, optim
 from torch.nn.modules.loss import TripletMarginLoss
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 import giggleml.utils.roadmap_epigenomics as rme
 from giggleml.models.c_model import CModel
@@ -32,7 +34,8 @@ class TrainConfig:
     """Consolidated configuration for the training script."""
 
     mode: str = "train"  # train, val, or test
-    total_steps: int = 200
+    sprint_steps: int = 200  # amount of training steps to perform at run
+    max_batches: int = 1000  # total amount of training steps for LR scheduler
     validation_freq: int = 10
     seed: int = 42
     model: CModel = CModel("16k")
@@ -89,7 +92,7 @@ class TrainConfig:
         assert self.mode in ["train", "val", "test"], f"Invalid mode: {self.mode}"
         assert self.batch_size > 0, "batch_size must be positive"
         assert self.pk_ratio > 0, "pk_ratio must be positive"
-        assert self.total_steps > 0, "total_steps must be positive"
+        assert self.sprint_steps > 0, "total_steps must be positive"
         assert math.isclose(sum(self.cv_ratios.values()), 1.0), (
             "cv_ratios must sum to 1.0"
         )
@@ -151,6 +154,7 @@ class Finetuner:
         self.fabric: Fabric | None = None
         self.model: CModel | None = None
         self.optimizer: optim.AdamW | None = None
+        self.lr_scheduler: CosineAnnealingLR | None = None
 
         self.triplet_miner: GraphTripletMiner | None = None
         self.loss_fn: TripletMarginLoss | None = None
@@ -190,10 +194,10 @@ class Finetuner:
 
         assert self.train_dataset, "Training dataset not initialized for train mode"
 
-        self.fabric.print(f"Starting training for {self.config.total_steps} steps.")
+        self.fabric.print(f"Starting training for {self.config.sprint_steps} steps.")
         train_data_iter = iter(self.train_dataset)
 
-        for step in range(self.start_step, self.config.total_steps):
+        for step in range(self.start_step, self.config.sprint_steps):
             train_result = self._train_step(train_data_iter, step)
 
             if (step + 1) % self.config.validation_freq == 0:
@@ -275,7 +279,7 @@ class Finetuner:
             betas=(self.config.beta1, self.config.beta2),
             weight_decay=self.config.weight_decay,
         )
-
+        self.lr_scheduler = CosineAnnealingLR(optimizer, self.config.max_batches)
         self.model, self.optimizer = self.fabric.setup(model, optimizer)
         self.model.mark_forward_method("distributed_embed")  # pyright: ignore[reportOptionalMemberAccess, reportCallIssue]
         assert self.model
@@ -322,6 +326,7 @@ class Finetuner:
         state = {
             "model": self.model,
             "optimizer": self.optimizer,
+            "lr_scheduler": self.lr_scheduler,
             "step": step,
             "train_dataset": self.train_dataset,
         }
@@ -360,6 +365,11 @@ class Finetuner:
 
         # 3. Call distributed_embed
         batch_tensor = self.model.distributed_embed(self.fm_cache.map(node_data))
+
+        if torch.isnan(batch_tensor).any():
+            warning(
+                "CRITICAL: NaNs detected in embeddings! High LR explosion occurred?"
+            )
 
         # 4. Move to device
         batch_tensor = batch_tensor.to(self.fabric.device)
@@ -418,8 +428,10 @@ class Finetuner:
         # 6. Backward pass / Reduction
         if is_training:
             assert self.optimizer
+            assert self.lr_scheduler
             self.fabric.backward(loss)
             self.optimizer.step()
+            self.lr_scheduler.step()
 
         # average the loss across all ranks
         avg_loss_tensor = cast(Tensor, self.fabric.all_reduce(loss, reduce_op="mean"))
