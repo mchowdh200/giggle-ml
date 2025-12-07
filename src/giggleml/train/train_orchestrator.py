@@ -6,6 +6,7 @@ Refactored for a clear, type-safe, two-phase initialization lifecycle.
 import math
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
+from datetime import datetime
 from functools import cache
 from logging import warning
 from os import PathLike
@@ -204,7 +205,7 @@ class Finetuner:
                 eval_result = self._evaluate(step)
                 yield train_result, eval_result
                 # Save checkpoint at the same frequency as validation
-                self._save_checkpoint(step)
+                self._save_checkpoint(step, train_result, eval_result)
 
         self.fabric.print("Training finished!")
 
@@ -293,10 +294,19 @@ class Finetuner:
 
     def _load_checkpoint(self):
         assert self.fabric and self.model
-        checkpoint_path = self.config.checkpoint_dir / "latest-checkpoint.pt"
-        if not checkpoint_path.is_file():
+
+        ckpt_files = self.config.checkpoint_dir.iterdir()
+        ckpt_names = [x.stem for x in ckpt_files]
+        ckpt_time = lambda path: datetime.strptime(
+            path, "%Y-%m-%d_%H-%M-%S"
+        ).timestamp()
+
+        if not ckpt_names:
             self.fabric.print("No checkpoint found, starting from scratch.")
             return
+
+        latest_ckpt = max(ckpt_names, key=ckpt_time)
+        checkpoint_path = self.config.checkpoint_dir / f"{latest_ckpt}.pt"
 
         self.fabric.print(f"Loading checkpoint: {checkpoint_path}")
 
@@ -316,12 +326,18 @@ class Finetuner:
             self.start_step = remaining_state["step"] + 1
             self.fabric.print(f"Resuming from step {self.start_step}")
 
-    def _save_checkpoint(self, step: int):
+        # WARN: overriding some checkpoint parameters with passed parameters
+        # this let's us implement an an-hoc curriculum
+
+        assert self.lr_scheduler
+        self.lr_scheduler.T_max = self.config.max_batches
+
+    def _save_checkpoint(
+        self, step: int, train_stat: StepResult, eval_stat: StepResult
+    ):
         assert self.fabric and self.model and self.optimizer
         if self.config.mode != "train":
             return
-
-        checkpoint_path = self.config.checkpoint_dir / "latest-checkpoint.pt"
 
         state = {
             "model": self.model,
@@ -329,7 +345,11 @@ class Finetuner:
             "lr_scheduler": self.lr_scheduler,
             "step": step,
             "train_dataset": self.train_dataset,
+            "step_stats": (train_stat, eval_stat),
         }
+
+        ckpt_name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        checkpoint_path = self.config.checkpoint_dir / f"{ckpt_name}.pt"
 
         self.fabric.save(checkpoint_path, state)
         self.fabric.print(f"Checkpoint saved at step {step} to {checkpoint_path}")

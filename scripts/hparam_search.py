@@ -103,7 +103,7 @@ def main():
 
     conf = TrainConfig(
         "val",
-        base_model_dir=Path("modelCkpts", "cmodel_12022025"),
+        base_model_dir=Path("modelCkpts", "cmodel_2025-12-05"),
         sprint_steps=10,
         validation_freq=2,
         model=CModel("16k", 512, 128, 2, 2),
