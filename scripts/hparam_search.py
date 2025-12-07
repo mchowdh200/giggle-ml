@@ -103,15 +103,16 @@ def main():
 
     conf = TrainConfig(
         "val",
-        base_model_dir=Path("modelCkpts", "cmodel_2025-12-05"),
+        base_model_dir=Path("modelCkpts", "cmodel_2025-12-07"),
         sprint_steps=10,
         validation_freq=2,
         model=CModel("16k", 512, 128, 2, 2),
-        margin=3,
-        learning_rate=1e-7,
-        pk_ratio=1.5,
+        mining_strategy="semi-hard",
+        margin=0.01,
+        learning_rate=1e-4,
+        pk_ratio=0.5,
         positive_threshold=0.96,
-        batch_size=64,
+        batch_size=128,
         sampling_rate=1,
     )
 
@@ -122,53 +123,34 @@ def main():
     try:
         header("easy")
         do(
-            {
-                "margin": 0.1,
-                "pk_ratio": pkr,
-                "sampling_rate": 1,
-                "learning_rate": lr,
-                "batch_size": 128,
-                "sprint_steps": 10,
-                "mining_strategy": "semi-hard",
-            }
-            for lr in [1e-3, 1e-2]
-            for pkr in [0.5, 0.25]
-        )
-        do(
-            [
-                {
-                    "margin": 0.1,
-                    "pk_ratio": 0.5,
-                    "sampling_rate": 1,
-                    "learning_rate": 1e-4,
-                    "batch_size": 128,
-                    "sprint_steps": 20,
-                    "mining_strategy": "semi-hard",
-                },
-                {
-                    "margin": 0.01,
-                    "pk_ratio": 0.5,
-                    "sampling_rate": 1,
-                    "learning_rate": 1e-4,
-                    "batch_size": 128,
-                    "sprint_steps": 20,
-                    "mining_strategy": "semi-hard",
-                },
-            ]
+            {"learning_rate": lr, "mining_strategy": "all", "sprint_steps": 20}
+            for lr in [1e-2, 1e-3, 1e-4]
         )
 
         header("pkr")
         do(
             {
-                "margin": 0.01,
                 "pk_ratio": pkr,
-                "sampling_rate": 1,
-                "learning_rate": 1e-4,
-                "batch_size": 128,
-                "sprint_steps": 10,
-                "mining_strategy": "semi-hard",
+                "learning_rate": 1e-2,
+                "sprint_steps": 15,
+                "mining_strategy": "all",
             }
             for pkr in [16, 8, 2, 0.5, 0.25]
+        )
+
+        header("model types")
+        do(
+            {
+                "model": model,
+                "learning_rate": 1e-2,
+                "mining_strategy": "all",
+                "sprint_steps": 15,
+            }
+            for model in [
+                CModel("16k", 512, 128, 2, 2),
+                CModel("16k", 1024, 128, 2, 2),
+                CModel("16k", 1024, 128, 3, 2),
+            ]
         )
 
     finally:
