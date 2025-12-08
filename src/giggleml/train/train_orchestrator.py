@@ -4,30 +4,25 @@ Refactored for a clear, type-safe, two-phase initialization lifecycle.
 """
 
 import math
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import cache
 from logging import warning
-from os import PathLike
 from pathlib import Path
 from typing import Any, NamedTuple, cast, final
 
 import torch
-import zarr
 from lightning_fabric import Fabric
 from torch import Tensor, optim
 from torch.nn.modules.loss import TripletMarginLoss
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-import giggleml.utils.roadmap_epigenomics as rme
-from giggleml.data_wrangling.interval_dataset import BedDataset
 from giggleml.models.c_model import CModel
 from giggleml.train.graph_triplet_miner import GraphTripletMiner
+from giggleml.train.rme_caches import RmeBedCache, RmeFMCache
 from giggleml.train.rme_clusters_dataset import MiningBatch, RmeSeqpareClusters
 from giggleml.train.seqpare_db import SeqpareDB
 from giggleml.utils.cv_splits import create_cv_splits
-from giggleml.utils.path_utils import fix_bed_ext
 from giggleml.utils.torch_utils import launch_fabric
 from giggleml.utils.utils.collection_utils import as_list
 
@@ -121,88 +116,6 @@ class StepResult(NamedTuple):
 
 
 @final
-class FoundationModelCache:
-    def __init__(self, embeds_dir: PathLike) -> None:
-        self.embeds_dir = Path(embeds_dir)
-
-    @cache
-    def _get_tensor(self, bed_name: str) -> Tensor:
-        """
-        Reads the entire Zarr array into memory and converts to a CPU Tensor.
-        Cached, so this massive read only happens once per bed_name.
-        """
-        zarr_path = self.embeds_dir / f"{bed_name}.zarr"
-        z_array = zarr.open_array(zarr_path, mode="r")
-        # full in-memory cache
-        return torch.from_numpy(z_array[:])
-
-    @as_list
-    def map(self, items: Iterable[tuple[int, Tensor]]) -> Iterator[Tensor]:
-        """
-        Map (set, row) indices to embeddings using in-memory Tensors.
-        """
-        for set_idx, row_indices in items:
-            bed_name = rme.bed_names[set_idx]
-            full_embeds = self._get_tensor(bed_name)
-
-            # Direct Tensor Indexing
-            indices = row_indices.long()
-            yield full_embeds[indices]
-
-
-@final
-class BedCache:
-    def __init__(self, rme_dir: PathLike) -> None:
-        self.rme_dir = Path(rme_dir)
-
-    @cache
-    def _get_tensor(self, bed_name: str) -> Tensor:
-        """
-        Reads the entire Zarr array into memory and converts to a CPU Tensor.
-        Cached, so this massive read only happens once per bed_name.
-        """
-
-        def _chrm_id(chrm):
-            if not chrm.startswith("chr"):
-                raise ValueError(f"Unknown chromosome {chrm}")
-
-            # FIXME: this is basically tokenization and should be moved into the model's tokenizer
-
-            id = chrm[3:].lower()
-
-            mapping = {
-                "x": 23,
-                "y": 24,
-                "xy": 25,  # PAR
-                "par": 25,
-                "m": 26,
-                "mt": 26,
-            }
-
-            if id in mapping:
-                return mapping[id] - 1
-            return int(id) - 1
-
-        path = fix_bed_ext(self.rme_dir / bed_name)
-        bed = list(iter(BedDataset(path)))
-        clean_intervals = [(_chrm_id(chrm), start, end) for (chrm, start, end) in bed]
-        return torch.tensor(clean_intervals, dtype=torch.long, pin_memory=True)
-
-    @as_list
-    def map(self, items: Iterable[tuple[int, Tensor]]) -> Iterator[Tensor]:
-        """
-        Map (set, row) indices to embeddings using in-memory Tensors.
-        """
-        for set_idx, row_indices in items:
-            bed_name = rme.bed_names[set_idx]
-            full_embeds = self._get_tensor(bed_name)
-
-            # Direct Tensor Indexing
-            indices = row_indices.long()
-            yield full_embeds[indices]
-
-
-@final
 class Finetuner:
     def __init__(self, config: TrainConfig):
         self.config = config
@@ -216,8 +129,8 @@ class Finetuner:
 
         self.train_dataset: RmeSeqpareClusters | None = None
         self.eval_dataset: RmeSeqpareClusters | None = None
-        self.fm_cache = FoundationModelCache(config.rme_embeds_path)
-        self.bed_cache = BedCache(config.rme_beds_path)
+        self.fm_cache = RmeFMCache(config.rme_embeds_path)
+        self.bed_cache = RmeBedCache(config.rme_beds_path)
 
         self.start_step = 0
         self._is_setup = False
