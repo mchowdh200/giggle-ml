@@ -20,7 +20,7 @@ class RmeFMCache:
         self.embeds_dir = Path(embeds_dir)
 
     @cache
-    def _get_tensor(self, bed_name: str) -> Tensor:
+    def get_tensor(self, bed_name: str) -> Tensor:
         """
         Reads the entire Zarr array into memory and converts to a CPU Tensor.
         Cached, so this massive read only happens once per bed_name.
@@ -37,7 +37,7 @@ class RmeFMCache:
         """
         for set_idx, row_indices in items:
             bed_name = rme.bed_names[set_idx]
-            full_embeds = self._get_tensor(bed_name)
+            full_embeds = self.get_tensor(bed_name)
 
             # Direct Tensor Indexing
             indices = row_indices.long()
@@ -49,13 +49,8 @@ class RmeBedCache:
     def __init__(self, rme_dir: PathLike) -> None:
         self.rme_dir = Path(rme_dir)
 
-    @cache
-    def _get_tensor(self, bed_name: str) -> Tensor:
-        """
-        Reads the entire Zarr array into memory and converts to a CPU Tensor.
-        Cached, so this massive read only happens once per bed_name.
-        """
-
+    @staticmethod
+    def clean_intervals(intervals: list[tuple[str, int, int]]) -> Tensor:
         def _chrm_id(chrm):
             if not chrm.startswith("chr"):
                 raise ValueError(f"Unknown chromosome {chrm}")
@@ -77,10 +72,20 @@ class RmeBedCache:
                 return mapping[id] - 1
             return int(id) - 1
 
+        clean_intervals = [
+            (_chrm_id(chrm), start, end) for (chrm, start, end) in intervals
+        ]
+        return torch.tensor(clean_intervals, dtype=torch.long, pin_memory=True)
+
+    @cache
+    def get_tensor(self, bed_name: str) -> Tensor:
+        """
+        Reads the entire Zarr array into memory and converts to a CPU Tensor.
+        Cached, so this massive read only happens once per bed_name.
+        """
         path = fix_bed_ext(self.rme_dir / bed_name)
         bed = list(iter(BedDataset(path)))
-        clean_intervals = [(_chrm_id(chrm), start, end) for (chrm, start, end) in bed]
-        return torch.tensor(clean_intervals, dtype=torch.long, pin_memory=True)
+        return RmeBedCache.clean_intervals(bed)
 
     @as_list
     def map(self, items: Iterable[tuple[int, Tensor]]) -> Iterator[Tensor]:
@@ -89,7 +94,7 @@ class RmeBedCache:
         """
         for set_idx, row_indices in items:
             bed_name = rme.bed_names[set_idx]
-            full_embeds = self._get_tensor(bed_name)
+            full_embeds = self.get_tensor(bed_name)
 
             # Direct Tensor Indexing
             indices = row_indices.long()

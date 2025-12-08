@@ -115,7 +115,7 @@ class CModel(nn.Module):
 
         rank = get_rank()
         world_size = get_world_size()
-        dev = guess_device()
+        dev = guess_device()  # FIXME: this is brittle
         dtype = self.dtype
         pe_dim = self.pe.output_dim
         fm_dim = self.hyena_dna.embed_dim
