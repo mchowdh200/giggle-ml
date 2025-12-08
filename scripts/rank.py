@@ -109,6 +109,11 @@ def keyword_score(base: str, others: Sequence[str]):
 def kendall_sig(
     reference: Sequence[str], observed: Sequence[str], resamples: int = 9999
 ) -> float:
+    # WARN: this will almost always be zero if the observed tau is slightly greater
+    # than zero. This is due to the large amount (2k) ranks we're comparing.
+    # At sufficiently high N and resample count, the null-hypothesis tau values will
+    # cluster very tightly around zero. Anything higher is interpreted as extremely significant.
+
     """
     Performs a permutation test for Kendall's Tau between two string lists.
     `reference` is considered the ideal order.
@@ -197,7 +202,9 @@ def main():
         with print_to(f"{exp}/fileRanks/{name}.tsv"):
             print("Embedding-based", "Giggle-legacy", sep="\t")
 
-            for modern_value, legacy_value in zip(modern_ranks[name], legacy_ranks[name]):
+            for modern_value, legacy_value in zip(
+                modern_ranks[name], legacy_ranks[name]
+            ):
                 print(modern_value[0], legacy_value[0], sep="\t")
 
         # top keyword ranks

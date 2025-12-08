@@ -2,19 +2,22 @@ import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 
 
 def _get_text_color_for_background(bg_color_rgb):
-    luminance = 0.299 * bg_color_rgb[0] + 0.587 * bg_color_rgb[1] + 0.114 * bg_color_rgb[2]
+    luminance = (
+        0.299 * bg_color_rgb[0] + 0.587 * bg_color_rgb[1] + 0.114 * bg_color_rgb[2]
+    )
     return "white" if luminance < 0.5 else "black"
 
 
 def plot_heatmap_with_averages(
-    x_labels,
-    y_label_groups,
-    data_matrix,
+    x_labels: list[str],
+    y_label_groups: list[tuple[str, int]],
+    data_matrix: NDArray,
     figsize=None,  # Ignored if desired_tile_in is set and creating a new figure
-    desired_tile_in=None,  # Tuple (width_inches, height_inches) for heatmap cells
+    desired_tile_in=(0.3, 0.1),  # Tuple (width_inches, height_inches) for heatmap cells
     cmap_name="viridis",
     title="Heatmap with Averages",
     fig_creation_margins=None,
@@ -49,7 +52,9 @@ def plot_heatmap_with_averages(
     """
     data = np.asarray(data_matrix, dtype=float)
 
-    num_rows_from_groups = sum(count for _, count in y_label_groups) if y_label_groups else 0
+    num_rows_from_groups = (
+        sum(count for _, count in y_label_groups) if y_label_groups else 0
+    )
     if num_rows_from_groups != data.shape[0]:
         raise ValueError(
             f"Sum of counts in y_label_groups ({num_rows_from_groups}) "
@@ -59,7 +64,9 @@ def plot_heatmap_with_averages(
     num_rows, num_cols = data.shape
 
     if len(x_labels) != num_cols:
-        raise ValueError(f"x_labels length ({len(x_labels)}) != data columns ({num_cols}).")
+        raise ValueError(
+            f"x_labels length ({len(x_labels)}) != data columns ({num_cols})."
+        )
 
     # --- Calculate Averages & Normalization (as before) ---
     with np.errstate(invalid="ignore"):
@@ -127,7 +134,10 @@ def plot_heatmap_with_averages(
             if tile_w_in <= 0 or tile_h_in <= 0:
                 raise ValueError("desired_tile_in dimensions must be positive.")
 
-            height_ratios_to_use = [num_rows * tile_h_in, tile_h_in]  # Physical heights for ratios
+            height_ratios_to_use = [
+                num_rows * tile_h_in,
+                tile_h_in,
+            ]  # Physical heights for ratios
             width_ratios_to_use = [
                 tile_w_in,
                 num_cols * tile_w_in,
@@ -150,7 +160,11 @@ def plot_heatmap_with_averages(
             actual_figsize = (actual_figsize_w, actual_figsize_h)
         else:  # desired_tile_in is None, use relative ratios and figsize argument or estimation
             height_ratios_to_use = [float(max(1, num_rows)), 1.0]
-            width_ratios_to_use = [1.0, float(max(1, num_cols)), cbar_fraction_of_tile_width]
+            width_ratios_to_use = [
+                1.0,
+                float(max(1, num_cols)),
+                cbar_fraction_of_tile_width,
+            ]
 
             actual_figsize = figsize  # Use provided figsize
             if actual_figsize is None:  # Estimate figsize if not provided
@@ -175,7 +189,9 @@ def plot_heatmap_with_averages(
         base_spec_for_plot = current_fig.add_gridspec(1, 1)[0, 0]
     else:  # Using provided fig and subplot_spec
         if subplot_spec is None:
-            raise ValueError("If 'fig' is provided, 'subplot_spec' must also be provided.")
+            raise ValueError(
+                "If 'fig' is provided, 'subplot_spec' must also be provided."
+            )
         base_spec_for_plot = subplot_spec
         if (
             desired_tile_in is not None
@@ -191,7 +207,11 @@ def plot_heatmap_with_averages(
             ]
         else:  # desired_tile_in is None, use relative ratios
             height_ratios_to_use = [float(max(1, num_rows)), 1.0]
-            width_ratios_to_use = [1.0, float(max(1, num_cols)), cbar_fraction_of_tile_width]
+            width_ratios_to_use = [
+                1.0,
+                float(max(1, num_cols)),
+                cbar_fraction_of_tile_width,
+            ]
 
     gs_params_for_inner_layout = {
         "height_ratios": height_ratios_to_use,
@@ -220,8 +240,13 @@ def plot_heatmap_with_averages(
     if y_label_groups:
         for group_name, count in y_label_groups:
             if count <= 0:
-                raise ValueError(f"Group count must be positive: {count} for '{group_name}'.")
-            start_row, end_row = current_row_idx_counter, current_row_idx_counter + count - 1
+                raise ValueError(
+                    f"Group count must be positive: {count} for '{group_name}'."
+                )
+            start_row, end_row = (
+                current_row_idx_counter,
+                current_row_idx_counter + count - 1,
+            )
             group_y_tick_positions.append((start_row + end_row) / 2.0)
             group_y_tick_labels.append(str(group_name))
             current_row_idx_counter += count
@@ -229,7 +254,9 @@ def plot_heatmap_with_averages(
                 y_coords_for_separator_lines.append(end_row + 0.5)
 
     # --- Row Average Strip (Left) with Grouped Y-Labels ---
-    ax_row_avg.imshow(row_means, cmap=cmap_obj, norm=norm, aspect="auto", interpolation="nearest")
+    ax_row_avg.imshow(
+        row_means, cmap=cmap_obj, norm=norm, aspect="auto", interpolation="nearest"
+    )
     if y_label_groups:
         ax_row_avg.set_yticks(group_y_tick_positions)
         ax_row_avg.set_yticklabels(group_y_tick_labels)
@@ -237,8 +264,12 @@ def plot_heatmap_with_averages(
         ax_row_avg.set_yticks([])
         ax_row_avg.set_yticklabels([])
     plt.setp(ax_row_avg.get_yticklabels(), va="center")
-    ax_row_avg.tick_params(axis="x", which="both", bottom=False, top=False, labelbottom=False)
-    ax_row_avg.tick_params(axis="y", which="major", length=0, pad=5, right=False, direction="out")
+    ax_row_avg.tick_params(
+        axis="x", which="both", bottom=False, top=False, labelbottom=False
+    )
+    ax_row_avg.tick_params(
+        axis="y", which="major", length=0, pad=5, right=False, direction="out"
+    )
 
     # --- Main Heatmap (Center) ---
     im_heatmap = ax_heatmap.imshow(
@@ -254,11 +285,17 @@ def plot_heatmap_with_averages(
         ax_heatmap.axhline(y_coord, color="black", linestyle=":", linewidth=2)
 
     # --- Column Average Strip (Bottom) ---
-    ax_col_avg.imshow(col_means, cmap=cmap_obj, norm=norm, aspect="auto", interpolation="nearest")
+    ax_col_avg.imshow(
+        col_means, cmap=cmap_obj, norm=norm, aspect="auto", interpolation="nearest"
+    )
     ax_col_avg.set_xticks(np.arange(num_cols))
     ax_col_avg.set_xticklabels([str(lbl) for lbl in x_labels])
-    plt.setp(ax_col_avg.get_xticklabels(), rotation=90, ha="right", rotation_mode="anchor")
-    ax_col_avg.tick_params(axis="y", which="both", left=False, right=False, labelleft=False)
+    plt.setp(
+        ax_col_avg.get_xticklabels(), rotation=90, ha="right", rotation_mode="anchor"
+    )
+    ax_col_avg.tick_params(
+        axis="y", which="both", left=False, right=False, labelleft=False
+    )
     ax_col_avg.tick_params(axis="x", which="both", top=False, direction="out")
 
     # --- Grand Average Cell (Bottom-Left corner) ---
