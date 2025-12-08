@@ -13,7 +13,7 @@ def main():
     conf = TrainConfig(
         "train",
         base_model_dir=Path("modelCkpts", "cmodel_2025-12-07"),
-        sprint_steps=3500,
+        sprint_steps=7000,
         max_batches=7000,
         validation_freq=100,
         model=CModel("16k", 512, 128, 2, 2),

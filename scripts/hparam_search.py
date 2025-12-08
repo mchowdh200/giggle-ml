@@ -121,6 +121,9 @@ def main():
     do = cache.do
 
     try:
+        # do([{"learning_rate": 2e-4, "mining_strategy": "all", "sprint_steps": 3520}])
+        # return
+
         header("easy")
         do(
             {"learning_rate": lr, "mining_strategy": "all", "sprint_steps": 20}
